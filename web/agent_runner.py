@@ -5,9 +5,17 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
-async def run_agent(agent, num_steps, run_log_dir, send_game_updates, claude_logger):
+async def run_agent(agent, num_steps, run_log_dir, send_game_updates, grok_logger):
     try:
         logger.info(f"Starting agent for {num_steps} steps")
+        # Auto-press Start to exit title screen
+        try:
+            agent.emulator.press_buttons(["start"], True)
+            frame = agent.get_frame()
+            await send_game_updates(frame, "Auto-pressed Start to begin the game")
+            grok_logger.info("Auto-pressed Start to begin the game")
+        except Exception as e:
+            logger.error(f"Error auto-pressing start: {e}")
         steps_completed = 0
         
         while steps_completed < num_steps:
@@ -25,12 +33,12 @@ async def run_agent(agent, num_steps, run_log_dir, send_game_updates, claude_log
             with open(frame_path, "wb") as f:
                 f.write(frame)
             
-            # Get Claude's message
+            # Get Grok's message
             message = agent.get_last_message()
             
-            # Log Claude's message
+            # Log Grok's message
             if message:
-                claude_logger.info(message)
+                grok_logger.info(message)
             
             # Send updates to web clients
             await send_game_updates(frame, message)

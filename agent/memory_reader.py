@@ -980,14 +980,43 @@ class PokemonRedReader:
         map_id = self.memory[0xD35E]
         return MapLocation(map_id).name.replace("_", " ")
 
+    def read_current_map_id(self) -> int:
+        """Read the current raw map ID from memory (wCurMapID at 0xD35E)"""
+        return self.memory[0xD35E]
+
     def read_tileset(self) -> str:
         """Read current map's tileset name"""
         tileset_id = self.memory[0xD367]
-        return Tileset(tileset_id).name.replace("_", " ")
+        try:
+            return Tileset(tileset_id).name.replace("_", " ")
+        except ValueError:
+            return f"UNKNOWN_TILESET_{tileset_id:02X}"
+
+    def read_raw_tileset_id(self) -> int | None:
+        """Read current map's raw tileset ID"""
+        try:
+            return self.memory[0xD367]
+        except IndexError:
+            return None
+
+    def read_map_tile_id(self, x: int, y: int) -> int:
+        """Read the visual tile ID at the given map coordinates (not screen coordinates)."""
+        # Based on https://github.com/pret/pokered/blob/master/ram/wram.asm#L1431
+        # wTileMap = $CC26 (pointer to current map tile data)
+        # Need map width to calculate offset
+        map_width = self.memory[0xD35E] # wCurMapWidth
+        tile_map_ptr = (self.memory[0xCC27] << 8) | self.memory[0xCC26]
+        offset = y * map_width + x
+        tile_id = self.memory[tile_map_ptr + offset]
+        return tile_id
 
     def read_coordinates(self) -> tuple[int, int]:
         """Read player's current X,Y coordinates"""
         return (self.memory[0xD362], self.memory[0xD361])
+
+    def read_player_direction(self) -> int:
+        """Read the player's facing direction from memory (wSpritePlayerStateData1FacingDirection at 0xC109)"""
+        return self.memory[0xC109]
 
     def read_coins(self) -> int:
         """Read game corner coins"""
@@ -1021,7 +1050,6 @@ class PokemonRedReader:
             0x12: "HYPER POTION",
             0x13: "SUPER POTION",
             0x14: "POTION",
-            # Badges 0x15-0x1C
             0x1D: "ESCAPE ROPE",
             0x1E: "REPEL",
             0x1F: "OLD AMBER",

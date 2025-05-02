@@ -4,13 +4,46 @@ import pickle
 from collections import deque
 import heapq
 import os
+from pathlib import Path
+from datetime import datetime
 
-from agent.memory_reader import PokemonRedReader, StatusCondition
-from PIL import Image
+from agent.memory_reader import PokemonRedReader, StatusCondition, Tileset
+from PIL import Image, ImageDraw, ImageFont
 from pyboy import PyBoy
+
+# Import WARP_DICT for door detection
+from game_data.constants import WARP_DICT, MAP_ID_REF
 
 logger = logging.getLogger(__name__)
 
+# Door Tile IDs mapped from tileset_constants.asm and door_tile_ids.asm
+DOOR_TILE_IDS_BY_TILESET = {
+    Tileset.OVERWORLD: {0x1B, 0x58},
+    Tileset.FOREST: {0x3A},
+    Tileset.MART: {0x5E},
+    Tileset.POKECENTER: {0x5E}, # Assuming PokeCenter uses Mart tileset doors
+    Tileset.GYM: {0x54}, # Assuming Gym uses House tileset doors
+    Tileset.HOUSE: {0x54},
+    Tileset.REDS_HOUSE_1: {0x54}, # Assuming Red's house uses House tileset doors
+    Tileset.REDS_HOUSE_2: {0x54}, # Assuming Red's house uses House tileset doors
+    Tileset.FOREST_GATE: {0x3B},
+    Tileset.MUSEUM: {0x3B},
+    Tileset.GATE: {0x3B},
+    Tileset.SHIP: {0x1E},
+    Tileset.LOBBY: {0x1C, 0x38, 0x1A},
+    Tileset.MANSION: {0x1A, 0x1C, 0x53},
+    Tileset.LAB: {0x34},
+    Tileset.FACILITY: {0x43, 0x58, 0x1B},
+    Tileset.PLATEAU: {0x3B, 0x1B},
+    # Add other tilesets if needed, mapping them or defaulting
+}
+
+# Placeholder Stair Tile IDs - Adjust as needed!
+STAIR_TILE_IDS_BY_TILESET = {
+    Tileset.REDS_HOUSE_2: {0x55}, # GUESSING!
+    Tileset.REDS_HOUSE_1: {0x55}, # Placeholder for 1F - GUESSING!
+    # Add other tilesets/stairs IDs if known
+}
 
 class Emulator:
     def __init__(self, rom_path, headless=True, sound=False):
@@ -88,6 +121,24 @@ class Emulator:
             except Exception as e2:
                 logger.error(f"Failed to load save state: {e2}")
                 raise
+
+    def save_state(self, filename_prefix="auto_save"):
+        """Saves the current emulator state to a timestamped file."""
+        saves_dir = Path("saves")
+        saves_dir.mkdir(exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{filename_prefix}_{timestamp}.state"
+        filepath = saves_dir / filename
+        
+        try:
+            with open(filepath, "wb") as f:
+                self.pyboy.save_state(f)
+            logger.info(f"Saved state to {filepath}")
+            return str(filepath)
+        except Exception as e:
+            logger.error(f"Failed to save state to {filepath}: {e}")
+            return None
 
     def press_buttons(self, buttons, wait=True):
         """Press a sequence of buttons on the Game Boy.
@@ -182,89 +233,162 @@ class Emulator:
 
     def get_collision_map(self):
         """
-        Creates a simple ASCII map showing player position, direction, terrain and sprites.
-        Takes into account tile pair collisions for more accurate walkability.
-        Returns:
-            str: A string representation of the ASCII map with legend
+        Generate a 2D array representing the collision map around the player.
+        █ - Wall/Obstacle/Unwalkable
+        · - Path/Walkable
+        D - Door/Warp
+        T - Stairs
+        X - Blocked Path (Collision Pair)
+        S - Sprite (NPC or Item)
+        ↑/↓/←/→ - Player (facing direction)
         """
-        # Get the terrain and movement data
-        full_map = self.pyboy.game_area()
-        collision_map = self.pyboy.game_area_collision()
-        downsampled_terrain = self._downsample_array(collision_map)
+        scale = 4  # Scale factor for drawing
+        font_size = 9
+        font = ImageFont.truetype("arial.ttf", font_size) if "arial.ttf" in os.listdir() else ImageFont.load_default()
 
-        # Get sprite locations
-        sprite_locations = self.get_sprites()
-
-        # Get character direction from the full map
-        direction = self._get_direction(full_map)
-        if direction == "no direction found":
-            return None
-
-        # Get tileset for tile pair collision checks
         reader = PokemonRedReader(self.pyboy.memory)
-        tileset = reader.read_tileset()
-        full_tilemap = self.pyboy.game_wrapper._get_screen_background_tilemap()
+        player_x, player_y = reader.read_coordinates()
+        player_direction = reader.read_player_direction()
+        map_id = reader.read_current_map_id()
+        map_name = MAP_ID_REF.get(map_id, f"UNKNOWN_MAP_{map_id}")
 
-        # Direction symbols
-        direction_chars = {"up": "↑", "down": "↓", "left": "←", "right": "→"}
-        player_char = direction_chars.get(direction, "P")
+        # Get tileset for staircase identification
+        tileset_id = reader.read_raw_tileset_id()
+        tileset_enum = Tileset(tileset_id) if tileset_id is not None else None
+        current_stair_ids = STAIR_TILE_IDS_BY_TILESET.get(tileset_enum, set())
+        
+        # Get warps for the current map
+        current_map_warps = WARP_DICT.get(map_name, [])
+        warp_coords = {(warp['x'], warp['y']) for warp in current_map_warps}
 
-        # Create the ASCII map
-        horizontal_border = "+" + "-" * 10 + "+"
-        lines = [horizontal_border]
+        # Dimensions for the visible part of the map
+        visible_width = 20  # Tiles
+        visible_height = 18 # Tiles
+        
+        # Determine the top-left corner of the visible map in world coordinates
+        # Based on screen scroll registers and player position adjustments
+        # wXCoord = 0xD362, wYCoord = 0xD361 (Player's map coords)
+        # wCurMapWidth = 0xD35E
+        # wPlayerBGMapOffsetY = 0xCC3E, wPlayerBGMapOffsetX = 0xCC3F
+        # These offsets seem complex, let's approximate using player position for now
+        # Assuming the player is roughly centered, offset by half the visible size
+        
+        # Use memory addresses for precise screen-to-map calculation
+        # wBGMapPalPtr = 0xCFCF (Tile attributes pointer)
+        # wBGMapDest = 0xCFCB (VRAM destination pointer for map tiles)
+        # VRAM areas: 0x9800-0x9BFF (BG Map 1), 0x9C00-0x9FFF (BG Map 2)
+        
+        # Read screen scroll coordinates (relative to top-left of the map)
+        scx = self.pyboy.memory[0xFF43] # SCX - Scroll X
+        scy = self.pyboy.memory[0xFF42] # SCY - Scroll Y
 
-        # Create each row
-        for i in range(9):
-            row = "|"
-            for j in range(10):
-                if i == 4 and j == 4:
-                    # Player position with direction
-                    row += player_char
-                elif (j, i) in sprite_locations:
-                    # Sprite position
-                    row += "S"
-                else:
-                    # Check if this tile is actually walkable by checking tile pair collisions
-                    # with adjacent tiles from player position (4,4)
-                    is_walkable = True
-                    
-                    # Only check if base terrain is walkable
-                    if downsampled_terrain[i][j] != 0:
-                        # Get the bottom-left tiles for collision check
-                        current_tile = full_tilemap[i * 2 + 1][j * 2]
-                        player_tile = full_tilemap[9][8]  # Player position (4,4) in 9x10 grid
-                        
-                        # If we can't move between these tiles, mark as wall
-                        if not self._can_move_between_tiles(player_tile, current_tile, tileset):
-                            is_walkable = False
-                    else:
-                        is_walkable = False
+        # Calculate the top-left tile coordinates shown on screen
+        # Each screen tile is 8x8 pixels, scroll is in pixels
+        top_left_map_x = (player_x - (visible_width // 2)) + (scx // 8) 
+        top_left_map_y = (player_y - (visible_height // 2)) + (scy // 8)
 
-                    # Terrain representation
-                    if not is_walkable:
-                        row += "█"  # Wall/unwalkable
-                    else:
-                        row += "·"  # Path/walkable
-            row += "|"
-            lines.append(row)
+        collision_matrix = [[' ' for _ in range(visible_width)] for _ in range(visible_height)]
+        
+        # Get the full tilemap (might be slow)
+        # This part seems problematic and might not be giving the right coordinates or tiles
+        # Let's rely on reading individual tiles around the player instead
+        
+        # Iterate through the visible grid
+        for screen_y in range(visible_height):
+            for screen_x in range(visible_width):
+                # Calculate the corresponding world map coordinates
+                map_x = top_left_map_x + screen_x
+                map_y = top_left_map_y + screen_y
+                
+                try:
+                    # Check if this coordinate is a warp point
+                    if (map_x, map_y) in warp_coords:
+                        collision_matrix[screen_y][screen_x] = 'D'
+                        continue # Warps take precedence
 
-        # Add bottom border
-        lines.append(horizontal_border)
+                    # Check for stairs using visual tile ID
+                    visual_tile_id = reader.read_map_tile_id(map_x, map_y)
+                    if visual_tile_id in current_stair_ids:
+                         collision_matrix[screen_y][screen_x] = 'T'
+                         continue # Stairs take precedence over walkability check
 
-        # Add legend
-        lines.extend(
-            [
-                "",
-                "Legend:",
-                "█ - Wall/Obstacle/Unwalkable",
-                "· - Path/Walkable",
-                "S - Sprite",
-                f"{direction_chars['up']}/{direction_chars['down']}/{direction_chars['left']}/{direction_chars['right']} - Player (facing direction)",
-            ]
-        )
+                    # Check collision for the tile the player would move *into*
+                    # Need to simulate a step? No, check tile properties directly
+                    # This requires understanding tile collision data structure
+                    # Placeholder: Assume non-warp/stair tiles are walkable for now
+                    # Real collision check needed here
+                    # collision_byte = self.get_tile_collision(map_x, map_y) # Needs implementation
+                    # if collision_byte == 0xFF: # Example: 0xFF means unwalkable
+                    #     collision_matrix[screen_y][screen_x] = '█'
+                    # else:
+                    collision_matrix[screen_y][screen_x] = '·' # Default to walkable if not warp/stair
 
-        # Join all lines with newlines
-        return "\n".join(lines)
+                except IndexError:
+                    # Coordinates are outside the map boundaries
+                    collision_matrix[screen_y][screen_x] = ' ' # Treat as empty space
+                except Exception as e:
+                     logger.error(f"Error processing tile at ({map_x},{map_y}): {e}")
+                     collision_matrix[screen_y][screen_x] = '?' # Error state
+
+
+        # Add sprites (NPCs, items) - Read from wObjectStructs (starting at 0xC100)
+        # Each struct is 16 bytes. Need to determine which objects are on screen.
+        num_objects = self.pyboy.memory[0xD367] # wCurMapObjectCount (Incorrect addr? Needs verification)
+        # Correct address seems to be wCurrentMapObjectCount = $D48D
+        num_objects = self.pyboy.memory[0xD48D]
+        object_base = 0xC100
+        sprite_radius = 2 # How close a sprite needs to be to player coords
+
+        for i in range(num_objects):
+            obj_addr = object_base + i * 16
+            # Object struct: yCoord, xCoord, yPixel, xPixel, objectID, ...
+            obj_y = self.pyboy.memory[obj_addr + 0]  # yCoord (tile position)
+            obj_x = self.pyboy.memory[obj_addr + 1]  # xCoord (tile position)
+            
+            # Calculate screen position relative to top-left
+            screen_obj_x = obj_x - top_left_map_x
+            screen_obj_y = obj_y - top_left_map_y
+            
+            # Check if sprite is within the visible collision map bounds
+            if 0 <= screen_obj_y < visible_height and 0 <= screen_obj_x < visible_width:
+                 # Don't overwrite player or existing Door/Stair
+                 if collision_matrix[screen_obj_y][screen_obj_x] not in ['↑','↓','←','→', 'D', 'T']:
+                     collision_matrix[screen_obj_y][screen_obj_x] = 'S'
+
+
+        # Add player position and direction
+        player_screen_x = player_x - top_left_map_x
+        player_screen_y = player_y - top_left_map_y
+
+        if 0 <= player_screen_y < visible_height and 0 <= player_screen_x < visible_width:
+            if player_direction == 0:  # Down
+                collision_matrix[player_screen_y][player_screen_x] = '↓'
+            elif player_direction == 4:  # Up
+                collision_matrix[player_screen_y][player_screen_x] = '↑'
+            elif player_direction == 8:  # Left
+                collision_matrix[player_screen_y][player_screen_x] = '←'
+            elif player_direction == 12: # Right
+                collision_matrix[player_screen_y][player_screen_x] = '→'
+        
+        # TODO: Add collision pair detection ('X') - Requires knowing tile pair collision data
+
+        # Convert the matrix to a formatted string with borders for readability and overlay compatibility
+        border = "+" + "-" * visible_width + "+"
+        rows = ["|" + "".join(row) + "|" for row in collision_matrix]
+        map_str = "\n".join([border] + rows + [border])
+        # Append warp information for quick reference
+        if current_map_warps:
+            warp_lines = []
+            for warp in current_map_warps:
+                warp_lines.append(
+                    f"({warp['x']},{warp['y']}) -> {warp['target_map_name']} (id={warp['target_map_id']}, warp_id={warp['warp_id']})"
+                )
+            map_str += "\nWarps:" + "\n" + "\n".join(warp_lines)
+        
+        # Log the generated map for debugging
+        logger.debug(f"Collision Map (Player: {player_x},{player_y} Dir: {player_direction} Map: {map_name}):\n{map_str}")
+
+        return map_str
 
     def get_valid_moves(self):
         """

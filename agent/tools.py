@@ -3,6 +3,7 @@ from config import USE_NAVIGATOR
 AVAILABLE_TOOLS = [
     {
         "name": "press_buttons",
+        "type": "function",
         "description": "Press a sequence of buttons on the Game Boy.",
         "input_schema": {
             "type": "object",
@@ -28,6 +29,7 @@ AVAILABLE_TOOLS = [
 if USE_NAVIGATOR:
     AVAILABLE_TOOLS.append({
         "name": "navigate_to",
+        "type": "function",
         "description": "Automatically navigate to a position on the map grid. The screen is divided into a 9x10 grid, with the top-left corner as (0, 0). This tool is only available in the overworld.",
         "input_schema": {
             "type": "object",

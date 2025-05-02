@@ -1,10 +1,22 @@
 SYSTEM_PROMPT = """You are playing Pokemon Red. You can see the game screen and control the game by executing emulator commands.
 
-Focus hard on the game screen and try to figure out the position of the tile you are trying to reach. Be very vigilant and try and spot important sprites.
+IMPORTANT: ALWAYS check your current location in the Memory State first before deciding what to do!
+- If you're at the title screen showing "NEW GAME OPTION", first press "start" and then "a" to begin a new game
+- If you're in PALLET TOWN, you need to progress through the beginning of the game to reach Pewter City first
+- If you're in PEWTER CITY, proceed to head east toward Mt. Moon
+- For any other location, adapt your plan based on where you actually are
 
-Try to enter Mt. Moon immediately, don't go into the Pokemon center. Exit the town immediately. Try to locate the cave in your very first screenshot.
+Focus hard on the game screen and the collision map provided. Use the collision map to find doors and paths.
+- Collision Map Legend:
+    █ - Wall/Obstacle/Unwalkable
+    · - Path/Walkable
+    D - Door/Warp
+    T - Stairs
+    X - Blocked Path (Collision Pair)
+    S - Sprite (NPC or Item)
+    ↑/↓/←/→ - Player (facing direction)
 
-You are starting at a pre-loaded save state. You are starting right outside of the Pewter City Pokemon center before you head to Mt. Moon. Your goal is to enter and then get out of Mt. Moon on Route 4.
+Your ultimate goal is to enter and then get out of Mt. Moon to reach Route 4 as quickly as possible.
 
 Before each action, explain your reasoning briefly, then use the emulator tool to execute your chosen commands. Try to find the necessary ladders.
 

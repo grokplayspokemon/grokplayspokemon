@@ -84,9 +84,25 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             try:
-                data = await websocket.receive_text()
-                # Echo back the received data for testing
-                await websocket.send_text(f"Server received: {data}")
+                raw = await websocket.receive_text()
+                # Handle incoming JSON messages (e.g., input events)
+                try:
+                    msg = json.loads(raw)
+                    mtype = msg.get("type")
+                    if mtype == "input":
+                        button = msg.get("button")
+                        if hasattr(app.state, 'agent'):
+                            app.state.agent.emulator.press_buttons([button], True)
+                            # Broadcast updated frame so Dev Mode shows the result immediately
+                            frame = app.state.agent.get_frame()
+                            await send_game_updates(frame, f"Dev pressed {button}")
+                            logger.info(f"Dev input broadcasted: {button}")
+                            # Log and ack the dev input
+                            logger.info(f"Dev input received: {button}")
+                            await websocket.send_text(json.dumps({"type": "ack", "button": button}))
+                    # ignore 'ping' and other types
+                except json.JSONDecodeError:
+                    logger.warning(f"Received non-JSON message: {raw}")
             except WebSocketDisconnect:
                 await manager.disconnect(websocket)
                 break
@@ -97,12 +113,20 @@ async def websocket_endpoint(websocket: WebSocket):
         await manager.disconnect(websocket)
 
 # Function to send game state updates
-async def send_game_updates(frame_data: bytes, claude_message: str):
+async def send_game_updates(frame_data: bytes, grok_message: str):
     try:
+        # Fetch emulator memory state for debugging
+        memory_info = None
+        if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
+            try:
+                memory_info = app.state.agent.emulator.get_state_from_memory()
+            except Exception as e:
+                logger.error(f"Error getting memory info: {e}")
         message = {
             "type": "update",
             "frame": frame_data.hex(),  # Convert bytes to hex string
-            "message": claude_message
+            "message": grok_message,
+            "memory": memory_info
         }
         await manager.broadcast(json.dumps(message))
     except Exception as e:
@@ -117,23 +141,30 @@ async def start_agent():
         # Reset the pause flag when starting
         app.state.is_paused = False
         
-        # If we don't have an agent yet, create one
+        # Agent should have been created during lifespan startup
         if not hasattr(app.state, 'agent'):
+            # If we don't have an agent yet, create one (This block should ideally not be hit)
+            logger.error("Agent not found in app state during start request. Re-creating (check lifespan). ")
+            # We need cfg here, but it should already be in app.state from lifespan
+            if not hasattr(app.state, 'cfg'):
+                 return {"status": "error", "message": "Config not found in app state."}
             app.state.agent = SimpleAgent(
-                rom_path=app.state.args.rom_path,
-                headless=True,
-                sound=False,
-                max_history=app.state.args.max_history,
+                cfg=app.state.cfg, # Use config object
                 app=app
             )
         
+        # Ensure cfg is available before creating the task
+        if not hasattr(app.state, 'cfg'):
+            logger.error("Config not found in app state before creating agent task.")
+            return {"status": "error", "message": "Config not found in app state."}
+            
         app.state.agent_task = asyncio.create_task(
             run_agent(
                 agent=app.state.agent,
-                num_steps=app.state.args.steps,
+                num_steps=app.state.cfg.num_steps, # Use cfg object instead
                 run_log_dir=app.state.run_log_dir,
                 send_game_updates=send_game_updates,
-                claude_logger=app.state.claude_logger
+                grok_logger=app.state.grok_logger
             )
         )
         return {"status": "success", "message": "Agent started successfully"}
@@ -148,8 +179,32 @@ async def pause_agent():
     
     try:
         # Toggle pause state
-        app.state.is_paused = not getattr(app.state, 'is_paused', False)
-        return {"status": "success", "message": "Agent pause state toggled"}
+        was_paused = getattr(app.state, 'is_paused', False)
+        app.state.is_paused = not was_paused
+        
+        # Save state if pausing
+        if app.state.is_paused:
+            logger.info("Agent is being paused. Attempting to save state...")
+            if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
+                try:
+                    save_path = app.state.agent.emulator.save_state(filename_prefix="paused_save")
+                    if save_path:
+                        logger.info(f"State saved successfully to {save_path} on pause.")
+                        return {"status": "success", "message": "Agent paused and state saved.", "save_path": save_path}
+                    else:
+                        logger.warning("save_state returned None, state not saved.")
+                        return {"status": "success", "message": "Agent paused, but state save failed."}
+                except Exception as e:
+                     logger.error(f"Error saving state during pause: {e}", exc_info=True)
+                     return {"status": "error", "message": f"Agent paused, but failed to save state: {e}"}
+            else:
+                logger.warning("Could not find agent or emulator to save state.")
+                return {"status": "success", "message": "Agent paused, but could not access emulator to save state."}
+        else:
+            # Resuming
+            logger.info("Agent is being resumed.")
+            return {"status": "success", "message": "Agent resumed."}
+
     except Exception as e:
         logger.error(f"Error toggling pause state: {e}")
         return {"status": "error", "message": str(e)}

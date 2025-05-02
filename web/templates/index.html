@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Plays Pokemon</title>
+    <title>Grok Plays Pokemon</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -28,9 +29,9 @@
             font-family: 'Press Start 2P', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             background-color: #000000;
             background-image: linear-gradient(45deg, #0a0a0a 25%, transparent 25%),
-                            linear-gradient(-45deg, #0a0a0a 25%, transparent 25%),
-                            linear-gradient(45deg, transparent 75%, #0a0a0a 75%),
-                            linear-gradient(-45deg, transparent 75%, #0a0a0a 75%);
+                linear-gradient(-45deg, #0a0a0a 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #0a0a0a 75%),
+                linear-gradient(-45deg, transparent 75%, #0a0a0a 75%);
             background-size: 20px 20px;
             color: var(--chat-text);
             height: 100vh;
@@ -43,7 +44,7 @@
             background: var(--header-gradient);
             padding: 1rem;
             border-bottom: 4px solid var(--pokemon-yellow);
-            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
         }
 
         .header h1 {
@@ -68,7 +69,7 @@
             border-radius: 8px;
             overflow: hidden;
             position: relative;
-            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
         }
 
         #game-screen {
@@ -79,13 +80,13 @@
         }
 
         .chat-window {
-            width: 340px;
+            width: 680px;
             background-color: var(--chat-bg);
             border: 4px solid var(--border-color);
             border-radius: 8px;
             display: flex;
             flex-direction: column;
-            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
         }
 
         .chat-header {
@@ -170,6 +171,16 @@
             cursor: not-allowed;
         }
 
+        .dev-toggle-button.red {
+            background-color: #ff4444;
+            color: white;
+        }
+
+        .dev-toggle-button.green {
+            background-color: #00ff00;
+            color: white;
+        }
+
         /* Scrollbar styling */
         ::-webkit-scrollbar {
             width: 8px;
@@ -190,27 +201,34 @@
         }
     </style>
 </head>
+
 <body>
     <header class="header">
-        <h1>Claude Plays Pokemon</h1>
+        <h1>Grok Plays Pokemon</h1>
     </header>
-    
+
     <main class="container">
         <div class="game-window">
             <canvas id="game-screen"></canvas>
             <div class="status">
                 <span class="status-text">Stopped</span>
+                <button class="dev-toggle-button red" id="dev-toggle" onclick="toggleDevControl()">Dev Control:
+                    OFF</button>
+
                 <button class="run-button" id="run-button" onclick="toggleAgent()">Run</button>
-                <button class="run-button purple" id="pause-button" onclick="pauseAgent()" style="display: none;">Pause</button>
-                <button class="run-button red" id="stop-button" onclick="stopAgent()" style="display: none;">Stop</button>
+                <button class="run-button purple" id="pause-button" onclick="pauseAgent()"
+                    style="display: none;">Pause</button>
+                <button class="run-button red" id="stop-button" onclick="stopAgent()"
+                    style="display: none;">Stop</button>
                 <input type="file" id="save-state-input" style="display: none" accept=".state">
-                <button class="run-button" id="load-state-button" onclick="document.getElementById('save-state-input').click()">Load Save</button>
+                <button class="run-button" id="load-state-button"
+                    onclick="document.getElementById('save-state-input').click()">Load Save</button>
             </div>
         </div>
-        
+
         <div class="chat-window">
             <div class="chat-header">
-                <h2>Claude's Thoughts</h2>
+                <h2>Grok's Thoughts</h2>
             </div>
             <div class="chat-messages" id="chat-messages">
                 <!-- Messages will be inserted here -->
@@ -219,6 +237,19 @@
     </main>
 
     <script>
+        console.log('Index.html script loaded');
+        let devMode = false;
+        function toggleDevControl() {
+            devMode = !devMode;
+            const btn = document.getElementById("dev-toggle");
+            btn.textContent = `Dev Control: ${devMode ? "ON" : "OFF"}`;
+            btn.classList.toggle("green", devMode);
+            btn.classList.toggle("red", !devMode);
+            fetch("/pause", { method: "POST" })
+                .then((res) => res.json())
+                .then((data) => console.log("Dev control pause toggled:", data))
+                .catch((err) => console.error("Error toggling pause:", err));
+        }
         let ws = null;
         let reconnectAttempts = 0;
         const maxReconnectAttempts = 5;
@@ -227,20 +258,20 @@
         let isAgentPaused = false;
 
         // Add save state upload handler
-        document.getElementById('save-state-input').addEventListener('change', async function(e) {
+        document.getElementById('save-state-input').addEventListener('change', async function (e) {
             if (!e.target.files.length) return;
-            
+
             const file = e.target.files[0];
             const formData = new FormData();
             formData.append('file', file);
-            
+
             const statusText = document.querySelector('.status-text');
             try {
                 const response = await fetch('/upload-save-state', {
                     method: 'POST',
                     body: formData
                 });
-                
+
                 const data = await response.json();
                 if (data.status === 'success') {
                     statusText.textContent = 'Save state loaded';
@@ -251,24 +282,25 @@
                 console.error('Error uploading save state:', error);
                 statusText.textContent = 'Error uploading save state';
             }
-            
+
             // Clear the input
             e.target.value = '';
         });
 
         async function toggleAgent() {
+            const devToggle = document.getElementById('dev-toggle');
             const runButton = document.getElementById('run-button');
             const pauseButton = document.getElementById('pause-button');
             const stopButton = document.getElementById('stop-button');
             const loadStateButton = document.getElementById('load-state-button');
             const statusText = document.querySelector('.status-text');
-            
+
             if (!isAgentRunning) {
                 runButton.disabled = true;
                 try {
                     const response = await fetch('/start', { method: 'POST' });
                     const data = await response.json();
-                    
+
                     if (data.status === 'success') {
                         isAgentRunning = true;
                         isAgentPaused = false;
@@ -292,11 +324,11 @@
         async function pauseAgent() {
             const pauseButton = document.getElementById('pause-button');
             const statusText = document.querySelector('.status-text');
-            
+
             try {
                 const response = await fetch('/pause', { method: 'POST' });
                 const data = await response.json();
-                
+
                 if (data.status === 'success') {
                     isAgentPaused = !isAgentPaused;
                     statusText.textContent = isAgentPaused ? 'Paused' : 'Running';
@@ -311,19 +343,21 @@
         }
 
         async function stopAgent() {
+            const devToggle = document.getElementById('dev-toggle');
             const runButton = document.getElementById('run-button');
             const pauseButton = document.getElementById('pause-button');
             const stopButton = document.getElementById('stop-button');
             const loadStateButton = document.getElementById('load-state-button');
             const statusText = document.querySelector('.status-text');
-            
+
             try {
                 const response = await fetch('/stop', { method: 'POST' });
                 const data = await response.json();
-                
+
                 if (data.status === 'success') {
                     isAgentRunning = false;
                     isAgentPaused = false;
+                    devToggle.textContent = 'Dev Control: OFF';
                     statusText.textContent = 'Stopped';
                     runButton.disabled = false;
                     runButton.style.display = 'inline';
@@ -344,16 +378,17 @@
             try {
                 const response = await fetch('/status');
                 const data = await response.json();
-                
+
                 const statusText = document.querySelector('.status-text');
+                const devToggle = document.getElementById('dev-toggle');
                 const runButton = document.getElementById('run-button');
                 const pauseButton = document.getElementById('pause-button');
                 const stopButton = document.getElementById('stop-button');
                 const loadStateButton = document.getElementById('load-state-button');
-                
+
                 isAgentRunning = data.status === 'running';
                 isAgentPaused = data.status === 'paused';
-                
+
                 if (isAgentRunning || isAgentPaused) {
                     statusText.textContent = isAgentPaused ? 'Paused' : 'Running';
                     runButton.style.display = 'none';
@@ -376,23 +411,24 @@
         }
 
         function connectWebSocket() {
+            console.log(`connectWebSocket() called, attempting ws://${window.location.host}/ws`);
             if (ws !== null) {
                 ws.close();
             }
 
             ws = new WebSocket(`ws://${window.location.host}/ws`);
-            
-            ws.onopen = function() {
+
+            ws.onopen = function () {
                 console.log('WebSocket connected');
                 reconnectAttempts = 0;
                 checkAgentStatus(); // Check status when connection is established
             };
 
-            ws.onclose = function() {
+            ws.onclose = function () {
                 console.log('WebSocket disconnected');
                 document.querySelector('.status').textContent = 'Reconnecting...';
                 document.querySelector('.status').style.backgroundColor = 'rgba(255, 165, 0, 0.8)';
-                
+
                 // Try to reconnect with exponential backoff
                 if (reconnectAttempts < maxReconnectAttempts) {
                     const delay = reconnectDelay * Math.pow(2, reconnectAttempts);
@@ -405,14 +441,14 @@
                 }
             };
 
-            ws.onerror = function(error) {
+            ws.onerror = function (error) {
                 console.error('WebSocket error:', error);
             };
 
-            ws.onmessage = function(event) {
+            ws.onmessage = function (event) {
                 try {
                     const data = JSON.parse(event.data);
-                    
+
                     if (data.type === 'update') {
                         // Update game frame
                         if (data.frame) {
@@ -436,6 +472,19 @@
                                 <span class="content">${data.message}</span>
                             `;
                             chatMessages.appendChild(messageDiv);
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+
+                        // Display memory state for debugging
+                        if (data.memory !== undefined && data.memory !== null) {
+                            console.log('Memory state:', data.memory);
+                            const memDiv = document.createElement('div');
+                            memDiv.className = 'message';
+                            memDiv.innerHTML = `
+                                <span class="timestamp">${new Date().toLocaleTimeString()}</span>
+                                <span class="content"><strong>Memory State:</strong><pre>${data.memory}</pre></span>
+                            `;
+                            chatMessages.appendChild(memDiv);
                             chatMessages.scrollTop = chatMessages.scrollHeight;
                         }
                     }
@@ -471,6 +520,28 @@
 
         // Check agent status periodically
         setInterval(checkAgentStatus, 5000);
+
+        // Capture keyboard events in Dev Mode
+        document.addEventListener("keydown", (e) => {
+            if (!devMode) return;
+            let btn = null;
+            switch (e.code) {
+                case "KeyA": btn = "a"; break;
+                case "KeyS": btn = "b"; break;
+                case "Enter": btn = "start"; break;
+                case "ArrowUp": btn = "up"; break;
+                case "ArrowDown": btn = "down"; break;
+                case "ArrowLeft": btn = "left"; break;
+                case "ArrowRight": btn = "right"; break;
+            }
+            if (btn) {
+                console.log("Dev Key pressed:", btn);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "input", button: btn }));
+                }
+            }
+        });
     </script>
 </body>
-</html> 
+
+</html>

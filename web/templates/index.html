@@ -17,6 +17,8 @@
             --border-color: #2a2a2a;
             --header-gradient: linear-gradient(45deg, #1a1a1a, #2a2a2a);
             --status-border: #3a3a3a;
+            --grid-color: rgba(255, 255, 255, 0.2);
+            /* Grid line color */
         }
 
         * {
@@ -60,6 +62,7 @@
             padding: 1rem;
             gap: 1rem;
             height: calc(100vh - 4rem);
+            /* Adjusted height calculation */
         }
 
         .game-window {
@@ -70,13 +73,21 @@
             overflow: hidden;
             position: relative;
             box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+            display: flex;
+            /* Ensure canvas can be sized properly */
+            align-items: center;
+            /* Center canvas vertically */
+            justify-content: center;
+            /* Center canvas horizontally */
         }
 
         #game-screen {
-            width: 100%;
-            height: 100%;
+            /* width/height set by JS */
             object-fit: contain;
             image-rendering: pixelated;
+            max-width: 100%;
+            /* Ensure canvas doesn't overflow container */
+            max-height: 100%;
         }
 
         .chat-window {
@@ -129,6 +140,25 @@
             line-height: 1.8;
         }
 
+        /* Make preformatted text readable */
+        .message pre {
+            white-space: pre-wrap;
+            /* Since CSS 2.1 */
+            white-space: -moz-pre-wrap;
+            /* Mozilla, since 1999 */
+            white-space: -pre-wrap;
+            /* Opera 4-6 */
+            white-space: -o-pre-wrap;
+            /* Opera 7 */
+            word-wrap: break-word;
+            /* Internet Explorer 5.5+ */
+            background-color: rgba(0, 0, 0, 0.2);
+            padding: 5px;
+            border-radius: 3px;
+            font-size: 0.65rem;
+            /* Slightly smaller */
+        }
+
         .status {
             position: absolute;
             top: 1rem;
@@ -142,6 +172,8 @@
             display: flex;
             gap: 1rem;
             align-items: center;
+            z-index: 10;
+            /* Ensure status is above canvas */
         }
 
         .run-button {
@@ -171,14 +203,27 @@
             cursor: not-allowed;
         }
 
+        /* Share styling for dev toggle */
+        .dev-toggle-button {
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
         .dev-toggle-button.red {
             background-color: #ff4444;
             color: white;
         }
 
         .dev-toggle-button.green {
-            background-color: #00ff00;
-            color: white;
+            background-color: #00cc00;
+            /* Brighter green */
+            color: black;
+            /* Better contrast */
         }
 
         /* Scrollbar styling */
@@ -214,7 +259,6 @@
                 <span class="status-text">Stopped</span>
                 <button class="dev-toggle-button red" id="dev-toggle" onclick="toggleDevControl()">Dev Control:
                     OFF</button>
-
                 <button class="run-button" id="run-button" onclick="toggleAgent()">Run</button>
                 <button class="run-button purple" id="pause-button" onclick="pauseAgent()"
                     style="display: none;">Pause</button>
@@ -231,7 +275,6 @@
                 <h2>Grok's Thoughts</h2>
             </div>
             <div class="chat-messages" id="chat-messages">
-                <!-- Messages will be inserted here -->
             </div>
         </div>
     </main>
@@ -239,25 +282,200 @@
     <script>
         console.log('Index.html script loaded');
         let devMode = false;
-        function toggleDevControl() {
-            devMode = !devMode;
-            const btn = document.getElementById("dev-toggle");
-            btn.textContent = `Dev Control: ${devMode ? "ON" : "OFF"}`;
-            btn.classList.toggle("green", devMode);
-            btn.classList.toggle("red", !devMode);
-            fetch("/pause", { method: "POST" })
-                .then((res) => res.json())
-                .then((data) => console.log("Dev control pause toggled:", data))
-                .catch((err) => console.error("Error toggling pause:", err));
-        }
         let ws = null;
         let reconnectAttempts = 0;
         const maxReconnectAttempts = 5;
         const reconnectDelay = 1000;
         let isAgentRunning = false;
         let isAgentPaused = false;
+        let lastFrameUrl = null; // Store the last frame for redraws
 
-        // Add save state upload handler
+        const chatMessages = document.getElementById('chat-messages');
+        const gameScreen = document.getElementById('game-screen');
+        const ctx = gameScreen.getContext('2d');
+
+        // --- Grid Drawing Function ---
+        function drawGrid() {
+            if (!devMode || !gameScreen.width || !gameScreen.height) return; // Only draw if dev mode is ON and canvas has dimensions
+
+            const numRows = 9;
+            const numCols = 10;
+            const cellWidth = gameScreen.width / numCols;
+            const cellHeight = gameScreen.height / numRows;
+
+            ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid-color').trim() || 'rgba(255, 255, 255, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+
+            // Draw vertical lines
+            for (let i = 1; i < numCols; i++) {
+                ctx.moveTo(i * cellWidth, 0);
+                ctx.lineTo(i * cellWidth, gameScreen.height);
+            }
+
+            // Draw horizontal lines
+            for (let i = 1; i < numRows; i++) {
+                ctx.moveTo(0, i * cellHeight);
+                ctx.lineTo(gameScreen.width, i * cellHeight);
+            }
+
+            ctx.stroke();
+        }
+
+        // --- Redraw Canvas Helper ---
+        function redrawCanvas() {
+            ctx.clearRect(0, 0, gameScreen.width, gameScreen.height); // Clear canvas first
+            if (lastFrameUrl) {
+                const img = new Image();
+                img.onload = () => {
+                    ctx.drawImage(img, 0, 0, gameScreen.width, gameScreen.height);
+                    drawGrid(); // Draw grid if devMode is ON
+                };
+                img.src = lastFrameUrl;
+            } else {
+                // If no frame yet, just draw grid if needed
+                drawGrid();
+            }
+        }
+
+        // --- Dev Control Toggle ---
+        function toggleDevControl() {
+            devMode = !devMode;
+            const btn = document.getElementById('dev-toggle');
+            if (devMode) {
+                btn.textContent = 'Dev Control: ON';
+                btn.classList.remove('red'); btn.classList.add('green');
+                // Optionally send pause command when entering dev mode?
+                // fetch("/pause", { method: "POST" }) // Example: pausing agent when dev control ON
+                //    .then(res => res.json())
+                //    .then(data => console.log("Agent pause toggled for Dev control:", data))
+                //    .catch(err => console.error("Error toggling pause:", err));
+            } else {
+                btn.textContent = 'Dev Control: OFF';
+                btn.classList.remove('green'); btn.classList.add('red');
+            }
+            redrawCanvas(); // Redraw immediately with/without grid
+        }
+
+        // --- WebSocket Handling ---
+        function connectWebSocket() {
+            console.log(`connectWebSocket() called, attempting ws://${window.location.host}/ws`);
+            if (ws !== null) {
+                ws.close();
+            }
+
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+            ws.onopen = function () {
+                console.log('WebSocket connected');
+                reconnectAttempts = 0;
+                checkAgentStatus(); // Check status when connection is established
+            };
+
+            ws.onclose = function () {
+                console.log('WebSocket disconnected');
+                const statusElement = document.querySelector('.status'); // Get the whole status div
+                const statusText = statusElement ? statusElement.querySelector('.status-text') : null;
+
+                if (statusText) {
+                    statusText.textContent = 'Reconnecting...';
+                    statusElement.style.backgroundColor = 'rgba(255, 165, 0, 0.8)'; // Orange for reconnecting
+                }
+
+                // Try to reconnect with exponential backoff
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    const delay = reconnectDelay * Math.pow(2, reconnectAttempts);
+                    console.log(`Attempting to reconnect in ${delay}ms...`);
+                    setTimeout(connectWebSocket, delay);
+                    reconnectAttempts++;
+                } else {
+                    if (statusText) {
+                        statusText.textContent = 'Offline';
+                        statusElement.style.backgroundColor = 'rgba(255, 0, 0, 0.8)'; // Red for offline
+                    }
+                }
+            };
+
+            ws.onerror = function (error) {
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onmessage = function (event) {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'update') {
+                        // Update game frame
+                        if (data.frame) {
+                            // Assuming hex string frame data
+                            const frameData = new Uint8Array(data.frame.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                            const blob = new Blob([frameData], { type: 'image/png' });
+                            const url = URL.createObjectURL(blob);
+
+                            // Clean up old URL if it exists
+                            if (lastFrameUrl) {
+                                URL.revokeObjectURL(lastFrameUrl);
+                            }
+                            lastFrameUrl = url; // Store the new URL
+
+                            const img = new Image();
+                            img.onload = () => {
+                                ctx.clearRect(0, 0, gameScreen.width, gameScreen.height); // Clear before drawing new frame
+                                ctx.drawImage(img, 0, 0, gameScreen.width, gameScreen.height);
+                                // Draw grid overlay if dev mode is on
+                                drawGrid();
+                                // URL.revokeObjectURL(url) is now done when the next frame arrives or on disconnect
+                            };
+                            img.onerror = () => {
+                                console.error("Error loading image frame.");
+                                // Optionally revoke URL here if image fails to load
+                                // URL.revokeObjectURL(url);
+                                // lastFrameUrl = null;
+                            };
+                            img.src = url;
+                        } else {
+                            // If no frame in update, still potentially redraw grid if needed
+                            redrawCanvas();
+                        }
+
+
+                        // Update chat
+                        if (data.message) {
+                            const messageDiv = document.createElement('div');
+                            messageDiv.className = 'message';
+                            messageDiv.innerHTML = `
+                                <span class="timestamp">${new Date().toLocaleTimeString()}</span>
+                                <span class="content">${data.message}</span>
+                            `;
+                            chatMessages.appendChild(messageDiv);
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+
+                        // Display memory state for debugging (removed collision/warp display as they are in memory now)
+                        if (data.memory !== undefined && data.memory !== null) {
+                            console.log('Memory state:', data.memory);
+                            const memDiv = document.createElement('div');
+                            memDiv.className = 'message';
+                            memDiv.innerHTML = `
+                                <span class="timestamp">${new Date().toLocaleTimeString()}</span>
+                                <span class="content"><strong>Memory State:</strong><pre>${data.memory}</pre></span>
+                            `;
+                            chatMessages.appendChild(memDiv);
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+
+                    } else if (data.type === 'pong') {
+                        // Handle pong if needed, e.g., calculate latency
+                    }
+
+                } catch (error) {
+                    console.error('Error processing message:', error, "Data:", event.data);
+                }
+            };
+        }
+
+
+        // --- Agent Control Functions ---
         document.getElementById('save-state-input').addEventListener('change', async function (e) {
             if (!e.target.files.length) return;
 
@@ -275,6 +493,10 @@
                 const data = await response.json();
                 if (data.status === 'success') {
                     statusText.textContent = 'Save state loaded';
+                    // Request a fresh frame after loading state
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'refresh_frame' }));
+                    }
                 } else {
                     statusText.textContent = 'Error: ' + data.message;
                 }
@@ -282,13 +504,10 @@
                 console.error('Error uploading save state:', error);
                 statusText.textContent = 'Error uploading save state';
             }
-
-            // Clear the input
-            e.target.value = '';
+            e.target.value = ''; // Clear the input
         });
 
         async function toggleAgent() {
-            const devToggle = document.getElementById('dev-toggle');
             const runButton = document.getElementById('run-button');
             const pauseButton = document.getElementById('pause-button');
             const stopButton = document.getElementById('stop-button');
@@ -309,6 +528,7 @@
                         pauseButton.style.display = 'inline';
                         stopButton.style.display = 'inline';
                         loadStateButton.style.display = 'none';
+                        pauseButton.textContent = 'Pause';
                     } else {
                         statusText.textContent = 'Error: ' + data.message;
                         runButton.disabled = false;
@@ -330,9 +550,8 @@
                 const data = await response.json();
 
                 if (data.status === 'success') {
-                    isAgentPaused = !isAgentPaused;
-                    statusText.textContent = isAgentPaused ? 'Paused' : 'Running';
-                    pauseButton.textContent = isAgentPaused ? 'Resume' : 'Pause';
+                    // The backend now dictates the state, update based on /status check
+                    await checkAgentStatus(); // Check status immediately after toggle
                 } else {
                     statusText.textContent = 'Error: ' + data.message;
                 }
@@ -343,7 +562,6 @@
         }
 
         async function stopAgent() {
-            const devToggle = document.getElementById('dev-toggle');
             const runButton = document.getElementById('run-button');
             const pauseButton = document.getElementById('pause-button');
             const stopButton = document.getElementById('stop-button');
@@ -357,14 +575,13 @@
                 if (data.status === 'success') {
                     isAgentRunning = false;
                     isAgentPaused = false;
-                    devToggle.textContent = 'Dev Control: OFF';
                     statusText.textContent = 'Stopped';
                     runButton.disabled = false;
                     runButton.style.display = 'inline';
                     pauseButton.style.display = 'none';
                     stopButton.style.display = 'none';
                     loadStateButton.style.display = 'inline';
-                    pauseButton.textContent = 'Pause';
+                    pauseButton.textContent = 'Pause'; // Reset pause button text
                 } else {
                     statusText.textContent = 'Error: ' + data.message;
                 }
@@ -377,6 +594,9 @@
         async function checkAgentStatus() {
             try {
                 const response = await fetch('/status');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
 
                 const statusText = document.querySelector('.status-text');
@@ -386,130 +606,65 @@
                 const stopButton = document.getElementById('stop-button');
                 const loadStateButton = document.getElementById('load-state-button');
 
-                isAgentRunning = data.status === 'running';
+                // Determine running state based on status string
+                isAgentRunning = data.status === 'running' || data.status === 'paused';
                 isAgentPaused = data.status === 'paused';
 
-                if (isAgentRunning || isAgentPaused) {
+                // Update UI based on fetched status
+                if (isAgentRunning) {
                     statusText.textContent = isAgentPaused ? 'Paused' : 'Running';
                     runButton.style.display = 'none';
                     pauseButton.style.display = 'inline';
                     stopButton.style.display = 'inline';
                     loadStateButton.style.display = 'none';
                     pauseButton.textContent = isAgentPaused ? 'Resume' : 'Pause';
-                } else {
-                    statusText.textContent = 'Stopped';
+                    runButton.disabled = true; // Disable run button when agent is running/paused
+                } else { // Status is 'stopped' or potentially an error state
+                    statusText.textContent = data.status === 'stopped' ? 'Stopped' : `Status: ${data.status}`; // Show other statuses if any
                     runButton.disabled = false;
                     runButton.style.display = 'inline';
                     pauseButton.style.display = 'none';
                     stopButton.style.display = 'none';
                     loadStateButton.style.display = 'inline';
-                    pauseButton.textContent = 'Pause';
+                    pauseButton.textContent = 'Pause'; // Reset pause button text
                 }
+
             } catch (error) {
                 console.error('Error checking agent status:', error);
+                // Optionally update status text to indicate an error fetching status
+                const statusText = document.querySelector('.status-text');
+                if (statusText) statusText.textContent = 'Status Error';
             }
         }
 
-        function connectWebSocket() {
-            console.log(`connectWebSocket() called, attempting ws://${window.location.host}/ws`);
-            if (ws !== null) {
-                ws.close();
-            }
-
-            ws = new WebSocket(`ws://${window.location.host}/ws`);
-
-            ws.onopen = function () {
-                console.log('WebSocket connected');
-                reconnectAttempts = 0;
-                checkAgentStatus(); // Check status when connection is established
-            };
-
-            ws.onclose = function () {
-                console.log('WebSocket disconnected');
-                document.querySelector('.status').textContent = 'Reconnecting...';
-                document.querySelector('.status').style.backgroundColor = 'rgba(255, 165, 0, 0.8)';
-
-                // Try to reconnect with exponential backoff
-                if (reconnectAttempts < maxReconnectAttempts) {
-                    const delay = reconnectDelay * Math.pow(2, reconnectAttempts);
-                    console.log(`Attempting to reconnect in ${delay}ms...`);
-                    setTimeout(connectWebSocket, delay);
-                    reconnectAttempts++;
-                } else {
-                    document.querySelector('.status').textContent = 'Offline';
-                    document.querySelector('.status').style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
-                }
-            };
-
-            ws.onerror = function (error) {
-                console.error('WebSocket error:', error);
-            };
-
-            ws.onmessage = function (event) {
-                try {
-                    const data = JSON.parse(event.data);
-
-                    if (data.type === 'update') {
-                        // Update game frame
-                        if (data.frame) {
-                            const frameData = new Uint8Array(data.frame.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-                            const blob = new Blob([frameData], { type: 'image/png' });
-                            const url = URL.createObjectURL(blob);
-                            const img = new Image();
-                            img.onload = () => {
-                                ctx.drawImage(img, 0, 0, gameScreen.width, gameScreen.height);
-                                URL.revokeObjectURL(url);
-                            };
-                            img.src = url;
-                        }
-
-                        // Update chat
-                        if (data.message) {
-                            const messageDiv = document.createElement('div');
-                            messageDiv.className = 'message';
-                            messageDiv.innerHTML = `
-                                <span class="timestamp">${new Date().toLocaleTimeString()}</span>
-                                <span class="content">${data.message}</span>
-                            `;
-                            chatMessages.appendChild(messageDiv);
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
-                        }
-
-                        // Display memory state for debugging
-                        if (data.memory !== undefined && data.memory !== null) {
-                            console.log('Memory state:', data.memory);
-                            const memDiv = document.createElement('div');
-                            memDiv.className = 'message';
-                            memDiv.innerHTML = `
-                                <span class="timestamp">${new Date().toLocaleTimeString()}</span>
-                                <span class="content"><strong>Memory State:</strong><pre>${data.memory}</pre></span>
-                            `;
-                            chatMessages.appendChild(memDiv);
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
-                        }
-                    }
-                } catch (error) {
-                    console.error('Error processing message:', error);
-                }
-            };
-        }
-
-        const chatMessages = document.getElementById('chat-messages');
-        const gameScreen = document.getElementById('game-screen');
-        const ctx = gameScreen.getContext('2d');
-
-        // Set up the canvas size
+        // --- Canvas Setup & Resize ---
         function resizeCanvas() {
             const container = gameScreen.parentElement;
-            gameScreen.width = container.clientWidth;
-            gameScreen.height = container.clientHeight;
+            // Maintain aspect ratio (e.g., GBA 240x160 -> 3:2)
+            const aspectRatio = 10 / 9; // Game screen is 160x144 pixels which is 10x9 tiles
+            let newWidth = container.clientWidth;
+            let newHeight = container.clientHeight;
+
+            if (newWidth / newHeight > aspectRatio) {
+                // Container is wider than aspect ratio, height dictates size
+                newWidth = newHeight * aspectRatio;
+            } else {
+                // Container is taller, width dictates size
+                newHeight = newWidth / aspectRatio;
+            }
+
+            gameScreen.width = Math.floor(newWidth); // Use integers for canvas dimensions
+            gameScreen.height = Math.floor(newHeight);
+
+            redrawCanvas(); // Redraw canvas content after resize
         }
 
         window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
 
-        // Initial WebSocket connection
-        connectWebSocket();
+
+        // --- Initial Setup ---
+        resizeCanvas(); // Initial canvas sizing
+        connectWebSocket(); // Initial WebSocket connection
 
         // Send periodic ping to keep connection alive
         setInterval(() => {
@@ -521,26 +676,57 @@
         // Check agent status periodically
         setInterval(checkAgentStatus, 5000);
 
+        // --- Input Handlers ---
         // Capture keyboard events in Dev Mode
         document.addEventListener("keydown", (e) => {
-            if (!devMode) return;
+            if (!devMode || !isAgentPaused) return; // Only allow dev input if dev mode ON AND agent is PAUSED
             let btn = null;
             switch (e.code) {
                 case "KeyA": btn = "a"; break;
                 case "KeyS": btn = "b"; break;
                 case "Enter": btn = "start"; break;
+                case "Backspace": btn = "select"; break; // Often Backspace for Select
                 case "ArrowUp": btn = "up"; break;
                 case "ArrowDown": btn = "down"; break;
                 case "ArrowLeft": btn = "left"; break;
                 case "ArrowRight": btn = "right"; break;
             }
             if (btn) {
+                e.preventDefault(); // Prevent default browser action (e.g., scrolling)
                 console.log("Dev Key pressed:", btn);
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: "input", button: btn }));
                 }
             }
         });
+
+        // Listen for clicks in Dev mode for navigation
+        gameScreen.addEventListener('click', e => {
+            // Only allow navigation clicks if dev mode ON AND agent is PAUSED
+            if (!devMode || !isAgentPaused || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            const rect = gameScreen.getBoundingClientRect();
+            // Calculate click position relative to the canvas rendering area
+            const scaleX = gameScreen.width / rect.width;
+            const scaleY = gameScreen.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            // Calculate grid cell based on 9 rows, 10 columns
+            const numRows = 9;
+            const numCols = 10;
+            const col = Math.floor(x / gameScreen.width * numCols);
+            const row = Math.floor(y / gameScreen.height * numRows);
+
+            // Ensure row/col are within bounds
+            if (row >= 0 && row < numRows && col >= 0 && col < numCols) {
+                console.log(`Requesting navigation to grid cell (${row}, ${col})`);
+                ws.send(JSON.stringify({ type: 'navigate', row, col }));
+            } else {
+                console.warn(`Calculated click outside grid bounds: (${row}, ${col})`);
+            }
+        });
+
     </script>
 </body>
 

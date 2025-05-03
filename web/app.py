@@ -1,14 +1,19 @@
+import logging
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, status, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
+import uuid
 import asyncio
 import logging
 import json
 from web.agent_runner import run_agent
 from agent.simple_agent import SimpleAgent
+import os
 
 app = FastAPI()
 
@@ -26,10 +31,6 @@ app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
 # Setup templates
 templates = Jinja2Templates(directory="web/templates")
-
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -70,6 +71,9 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Enable dev control mode via environment variable DEV_CONTROL
+app.state.dev_control = os.getenv("DEV_CONTROL", "false").lower() in ("1","true")
+
 # Routes
 @app.get("/", response_class=HTMLResponse)
 async def get_home(request: Request):
@@ -101,6 +105,28 @@ async def websocket_endpoint(websocket: WebSocket):
                             logger.info(f"Dev input received: {button}")
                             await websocket.send_text(json.dumps({"type": "ack", "button": button}))
                     # ignore 'ping' and other types
+                    elif mtype == "navigate":
+                        row = msg.get("row")
+                        col = msg.get("col")
+                        if hasattr(app.state, 'agent'):
+                            # make a fake tool call to navigate_to
+                            class NavCall:
+                                name = "navigate_to"
+                                input = {"row": row, "col": col}
+                                id = str(uuid.uuid4())
+                                type = "function"
+                            result = app.state.agent.process_tool_call(NavCall)
+                            # immediately broadcast updated frame + the navigation status
+                            frame = app.state.agent.get_frame()
+                            text = ""
+                            # extract a summary from the tool result text blocks
+                            for block in result.get("content", []):
+                                if block.get("type") == "text":
+                                    text += block["text"]
+                            await send_game_updates(frame, text)
+                            logger.info(f"Navigation to ({row},{col}) => {text}")
+                        else:
+                            await websocket.send_text(json.dumps({"type":"error","message":"agent not ready"}))
                 except json.JSONDecodeError:
                     logger.warning(f"Received non-JSON message: {raw}")
             except WebSocketDisconnect:
@@ -128,6 +154,18 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
             "message": grok_message,
             "memory": memory_info
         }
+        # Always include full collision map and warp entries so Dev Mode can display them
+        if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
+            try:
+                collision_map = app.state.agent.emulator.get_collision_map()
+                from game_data.constants import WARP_DICT, MAP_ID_REF
+                raw_map_id = app.state.agent.emulator.pyboy.memory[0xD35E]
+                map_key = MAP_ID_REF.get(raw_map_id)
+                warps = WARP_DICT.get(map_key, [])
+                message['collision_map'] = collision_map
+                message['warps'] = warps
+            except Exception as e:
+                logger.error(f"Error preparing collision/warp data: {e}")
         await manager.broadcast(json.dumps(message))
     except Exception as e:
         logger.error(f"Error sending game updates: {e}")
@@ -187,7 +225,7 @@ async def pause_agent():
             logger.info("Agent is being paused. Attempting to save state...")
             if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
                 try:
-                    save_path = app.state.agent.emulator.save_state(filename_prefix="paused_save")
+                    save_path = app.state.agent.emulator.save_state(filename_prefix="autosave")
                     if save_path:
                         logger.info(f"State saved successfully to {save_path} on pause.")
                         return {"status": "success", "message": "Agent paused and state saved.", "save_path": save_path}
@@ -229,6 +267,14 @@ async def stop_agent():
         # Save logs if needed
         logger.info("Agent stopped, logs saved")
         
+        # Auto-save state on stop
+        if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
+            try:
+                save_path = app.state.agent.emulator.save_state(filename_prefix="autosave")
+                logger.info(f"State saved successfully to {save_path} on stop.")
+                return {"status": "success", "message": "Agent stopped successfully", "save_path": save_path}
+            except Exception as e:
+                logger.error(f"Error saving state on stop: {e}")
         return {"status": "success", "message": "Agent stopped successfully"}
     except Exception as e:
         logger.error(f"Error stopping agent: {e}")

@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 from dataclasses import dataclass
 from enum import IntEnum, IntFlag
 
@@ -998,6 +1001,20 @@ class PokemonRedReader:
             return self.memory[0xD367]
         except IndexError:
             return None
+        
+    def read_tileset_enum(self) -> Tileset:
+        """Reads the current tileset ID and returns the corresponding Tileset enum member."""
+        # Ensure Tileset enum is imported: from enum import Enum (if not already)
+        # Ensure logger is available: import logging; logger = logging.getLogger(__name__)
+        tileset_id = self.memory[0xD367]
+        # Find the Tileset enum member matching the value
+        for member in Tileset:
+            if member.value == tileset_id:
+                return member
+        logger.warning(f"Unknown tileset ID: {tileset_id}")
+        # Return a default or handle the error appropriately
+        # Returning OVERWORLD as a fallback, but ideally, all tilesets should be in the enum.
+        return Tileset.OVERWORLD
 
     def read_map_tile_id(self, x: int, y: int) -> int:
         """Read the visual tile ID at the given map coordinates (not screen coordinates)."""

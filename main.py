@@ -8,6 +8,9 @@ from agent.simple_agent import SimpleAgent
 from contextlib import asynccontextmanager
 from datetime import datetime
 import config
+import glob
+from pathlib import Path
+from config import SAVE_STATE_DIR
 
 # Use paths from config
 logs_dir = config.LOG_DIR
@@ -57,16 +60,19 @@ async def lifespan(app):
     app.state.agent = agent
     app.state.agent_task = None
 
-    # Load initial save state if specified in config or command line
-    if cfg.initial_save_state:
-        try:
+    # Load autosave if present, otherwise fallback to initial save state
+    try:
+        autosaves = sorted(Path(SAVE_STATE_DIR).glob('autosave_*.state'), key=lambda p: p.stat().st_mtime)
+        if autosaves:
+            latest_auto = autosaves[-1]
+            agent.emulator.load_state(str(latest_auto))
+            logger.info(f"Loaded autosave state from {latest_auto}")
+        elif cfg.initial_save_state:
             agent.emulator.load_state(cfg.initial_save_state)
             logger.info(f"Loaded initial save state from {cfg.initial_save_state}")
-        except Exception as e:
-            logger.error(f"Failed to load initial save state: {e}")
-            # Decide if we should exit or continue without save state
-            # For now, let's continue
-            logger.warning("Continuing without loading save state.")
+    except Exception as e:
+        logger.error(f"Failed to load save state: {e}")
+        logger.warning("Continuing without loading save state.")
     
     yield
     # Shutdown: cleanup

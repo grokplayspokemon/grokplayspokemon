@@ -1,11 +1,16 @@
+import logging
+logger = logging.getLogger(__name__)
+
 import base64
 import copy
 import io
 import json
-import logging
 import os
 import requests
 import time
+import glob
+from pathlib import Path
+import uuid
 
 # Make Google imports optional
 try:
@@ -22,11 +27,10 @@ from agent.tools import AVAILABLE_TOOLS
 
 from agent.emulator import Emulator
 from anthropic import Anthropic
+from agent.memory_reader import PokemonRedReader
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s') # Level might be set higher up now
-logger = logging.getLogger(__name__)
-
+# Auto-save directory constant
+from config import SAVE_STATE_DIR
 
 def get_screenshot_base64(screenshot, upscale=1):
     """Convert PIL image to base64 string."""
@@ -51,6 +55,8 @@ class SimpleAgent:
         """
         self.emulator = Emulator(cfg.rom_path, cfg.emulator_headless, cfg.emulator_sound)
         self.emulator.initialize()  # Initialize the emulator
+        
+        # Save-state loading is managed by the application startup logic
         
         # Set provider and model from config
         self.provider = cfg.llm_provider
@@ -112,6 +118,16 @@ class SimpleAgent:
         else:
             self.system_prompt = SYSTEM_PROMPT
 
+        # Initialize dialog tracking to prevent menu loops
+        self.prev_dialog_text = None
+        self.dialog_advance_count = 0
+        # Track completed tool calls (steps) for walkthrough progress
+        self.completed_steps = []
+        # Track map transitions and movement logs
+        self.map_stack = []  # stack of (map_name, actions) for backtracking
+        self.move_log = []   # record movement buttons pressed since last map change
+        self.current_map = None  # name of the current map
+
     def get_frame(self) -> bytes:
         """Get the current game frame as PNG bytes.
         
@@ -136,14 +152,29 @@ class SimpleAgent:
         """Process a single tool call."""
         tool_name = tool_call.name
         tool_input = tool_call.input
+        # Record this tool use for walkthrough tracking
+        self.completed_steps.append(tool_name)
         logger.info(f"Processing tool call: {tool_name}")
 
         if tool_name == "press_buttons":
+            # Track movement actions for possible map transitions
+            for btn in tool_input.get("buttons", []):
+                if btn in ["up", "down", "left", "right"]:
+                    self.move_log.append(btn)
             buttons = tool_input["buttons"]
             wait = tool_input.get("wait", True)
             logger.info(f"[Buttons] Pressing: {buttons} (wait={wait})")
             
             result = self.emulator.press_buttons(buttons, wait)
+            # Detect map change and record movement log
+            new_map = self.emulator.get_location()
+            if self.current_map is None:
+                self.current_map = new_map
+            elif new_map != self.current_map:
+                # Save the sequence of movements and clear log
+                self.map_stack.append((self.current_map, self.move_log.copy()))
+                self.move_log.clear()
+                self.current_map = new_map
             
             # Get a fresh screenshot after executing the buttons with tile overlay
             screenshot = self.emulator.get_screenshot_with_overlay() if self.use_overlay else self.emulator.get_screenshot()
@@ -188,6 +219,21 @@ class SimpleAgent:
                 for direction in path:
                     self.emulator.press_buttons([direction], True)
                 result = f"Navigation successful: followed path with {len(path)} steps"
+                # Improved warp traversal: if warp tile, press direction until warp triggers (max 3 attempts)
+                if self.emulator.is_warp_tile(row, col):
+                    last_dir = path[-1]
+                    previous_map = self.emulator.get_location()
+                    warp_attempts = 0
+                    result += f", stepping onto warp and pressing '{last_dir}' to travel"
+                    while warp_attempts < 3:
+                        self.emulator.press_buttons([last_dir], True)
+                        warp_attempts += 1
+                        current_map = self.emulator.get_location()
+                        if current_map != previous_map:
+                            result += f", warp succeeded to {current_map}"
+                            break
+                    else:
+                        result += ", but warp did not trigger after multiple attempts"
             else:
                 result = f"Navigation failed: {status}"
             
@@ -224,6 +270,68 @@ class SimpleAgent:
                     {"type": "text", "text": f"\nGame state information from memory after your action:\n{memory_info}"},
                 ],
             }
+        elif tool_name == "talk_to_npcs":
+            logger.info("[Talk to NPCs] Initiating NPC interactions")
+            sprite_positions = self.emulator.get_sprites()
+            interactions = []
+            for col, row in sprite_positions:
+                # Navigate to NPC position
+                status, path = self.emulator.find_path(row, col)
+                if path:
+                    for direction in path:
+                        self.emulator.press_buttons([direction], True)
+                    interactions.append(f"Navigated to NPC at ({row}, {col})")
+                    # Talk to NPC
+                    self.emulator.press_buttons(["a"], True)
+                    interactions.append(f"Talked to NPC at ({row}, {col})")
+                else:
+                    interactions.append(f"Failed to navigate to NPC at ({row}, {col}): {status}")
+            # Capture screenshot and memory state after interactions
+            screenshot = self.emulator.get_screenshot_with_overlay() if self.use_overlay else self.emulator.get_screenshot()
+            screenshot_b64 = get_screenshot_base64(screenshot, upscale=self.screenshot_upscale)
+            memory_info = self.emulator.get_state_from_memory()
+            collision_map = self.emulator.get_collision_map()
+            content = [{"type": "text", "text": "\n".join(interactions)}]
+            content.append({"type": "text", "text": "\nHere is a screenshot after talking to NPCs:"})
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": screenshot_b64,
+                },
+            })
+            content.append({"type": "text", "text": f"\nGame state information:\n{memory_info}"})
+            if collision_map and self.provider != 'grok':
+                content.append({"type": "text", "text": f"\nCollision Map:\n{collision_map}"})
+            return {
+                "type": "tool_result",
+                "tool_use_id": tool_call.id,
+                "content": content,
+            }
+        elif tool_name == "exit_to_last_map":
+            # Reverse recorded movements to return to previous map
+            if not self.map_stack:
+                return {"type":"tool_result","tool_use_id":tool_call.id,"content":[{"type":"text","text":"No previous map to exit to"}]}
+            last_map, actions = self.map_stack.pop()
+            inverse = {"up":"down","down":"up","left":"right","right":"left"}
+            reverse_actions = [inverse[a] for a in reversed(actions) if a in inverse]
+            for direction in reverse_actions:
+                self.emulator.press_buttons([direction], True)
+            self.current_map = last_map
+            return {"type":"tool_result","tool_use_id":tool_call.id,"content":[{"type":"text","text":f"Exited to {last_map} via actions: {reverse_actions}"}]}
+        elif tool_name == "fetch_url":
+            url = tool_input.get("url")
+            try:
+                resp = requests.get(url)
+                content_text = resp.text
+            except Exception as e:
+                content_text = f"Error fetching URL: {e}"
+            return {
+                "type": "tool_result",
+                "tool_use_id": tool_call.id,
+                "content": [{"type": "text", "text": content_text}]
+            }
         else:
             logger.error(f"Unknown tool called: {tool_name}")
             return {
@@ -236,63 +344,148 @@ class SimpleAgent:
 
     def step(self):
         """Execute a single step of the agent's decision-making process."""
+        # Auto-exit from any interior (non-overworld) map by reversing moves
+        try:
+            reader = PokemonRedReader(self.emulator.pyboy.memory)
+            tileset = reader.read_tileset().upper()
+            if tileset != "OVERWORLD" and (not self.completed_steps or self.completed_steps[-1] != "exit_to_last_map"):
+                # Create and process a fake exit_to_last_map call
+                class FakeToolCallExit:
+                    def __init__(self, id):
+                        self.name = "exit_to_last_map"
+                        self.input = {}
+                        self.id = id
+                        self.type = "function"
+                fake_call = FakeToolCallExit(str(uuid.uuid4()))
+                result = self.process_tool_call(fake_call)
+                # Append tool result properly to message history with a role to avoid missing 'role'
+                self.message_history.append({"role": "user", "content": [result]})
+                self.last_message = "Auto-exited interior map via exit_to_last_map"
+                return
+        except Exception as e:
+            logger.warning(f"Failed to auto-exit interior map: {e}")
+        # Handle active dialogs: detect menus and exit, otherwise advance lines with A
+        try:
+            dialog_text = self.emulator.get_active_dialog()
+            if dialog_text:
+                # Track repeated dialog lines
+                if dialog_text == self.prev_dialog_text:
+                    self.dialog_advance_count += 1
+                else:
+                    self.prev_dialog_text = dialog_text
+                    self.dialog_advance_count = 0
+                # If dialog persists too long, exit menu
+                if self.dialog_advance_count >= 20:
+                    logger.info("Detected prolonged dialog, exiting menu via B")
+                    self.emulator.press_buttons(["b"], True)
+                    self.last_message = "Exited menu after too many dialog advances"
+                    self.message_history.append({"role": "assistant", "content": self.last_message})
+                    # Reset tracking
+                    self.prev_dialog_text = None
+                    self.dialog_advance_count = 0
+                    return
+                # Detect common menu prompts (e.g., Pokémon menu) and fully exit via B
+                lower = dialog_text.upper()
+                menu_keys = ["CHOOSE A POK", "STATS", "CANCEL", "PKM", "POKÉMON", "BAG", "ITEM"]
+                if any(k in lower for k in menu_keys):
+                    logger.info("Detected menu context, clearing dialogs via repeated B presses")
+                    # Press B until no dialog or menu remains
+                    while self.emulator.get_active_dialog():
+                        self.emulator.press_buttons(["b"], True)
+                    self.last_message = "Exited menu via repeated B presses"
+                    self.message_history.append({"role": "assistant", "content": self.last_message})
+                    # Reset tracking
+                    self.prev_dialog_text = None
+                    self.dialog_advance_count = 0
+                    return
+                # Normal dialog advancement
+                logger.info(f"[Dialog] Detected active dialog: '{dialog_text}'. Advancing via A.")
+                # Record dialog text for context
+                self.message_history.append({"role": "assistant", "content": f"NPC says: {dialog_text}"})
+                # Press A to advance dialog
+                self.emulator.press_buttons(["a"], True)
+                # If A did not change dialog, try B then A
+                new_dialog = self.emulator.get_active_dialog()
+                if new_dialog == dialog_text:
+                    logger.info("A did not advance dialog, trying B then A")
+                    self.emulator.press_buttons(["b"], True)
+                    self.emulator.press_buttons(["a"], True)
+                # Record action and skip LLM for this step
+                self.last_message = "Advanced dialog with A"
+                self.message_history.append({"role": "assistant", "content": self.last_message})
+                return
+        except Exception as e:
+            logger.warning(f"Failed to handle dialog: {e}")
         try:
             # Prepare message history and include latest memory state for context
             messages = copy.deepcopy(self.message_history)
+            # Provide map context (map ID, name, size, warp info) to LLM
             try:
-                memory_info = self.emulator.get_state_from_memory()
-                # Append current memory state as a user message
-                messages.append({"role": "user", "content": f"Memory State:\n{memory_info}"})
+                from game_data.constants import MAP_DICT, WARP_DICT
+                map_name = self.emulator.get_location()
+                map_info = MAP_DICT.get(map_name, {})
+                map_id = map_info.get('map_id', 'unknown')
+                width = map_info.get('width', '?')
+                height = map_info.get('height', '?')
+                warps = WARP_DICT.get(map_name, [])
+                warp_descs = []
+                for w in warps:
+                    grid_row = w['y'] // 2
+                    grid_col = w['x'] // 2
+                    if w['y'] == height - 1:
+                        direction = 'down'
+                    elif w['y'] == 0:
+                        direction = 'up'
+                    elif w['x'] == 0:
+                        direction = 'left'
+                    elif w['x'] == width - 1:
+                        direction = 'right'
+                    else:
+                        direction = 'unknown'
+                    warp_descs.append(f"({grid_row},{grid_col}) to {w['target_map_name']} via {direction}")
+                warp_info = ', '.join(warp_descs) if warp_descs else 'none'
+                messages.insert(1, {
+                    'role': 'system',
+                    'content': f"MAP INFO: id={map_id}, name={map_name}, size={width}x{height}, warps: {warp_info}" 
+                })
             except Exception as e:
-                logger.warning(f"Failed to read memory for context: {e}")
+                logger.warning(f"Failed to fetch map context: {e}")
+            # Inject NPC context: visible NPCs this map and those already interacted with
+            try:
+                self.emulator.update_seen_npcs()
+                visible_npcs = self.emulator.get_npcs_in_range()
+                interacted = sorted(self.emulator.get_seen_npcs())
+                messages.insert(2, {
+                    'role': 'system',
+                    'content': f"NPCs on map: {visible_npcs}. NPCs already interacted: {interacted}."
+                })
+                # Inject completed steps history for walkthrough planning
+                messages.insert(3, {
+                    'role': 'system',
+                    'content': f"Completed steps: {self.completed_steps}"
+                })
+            except Exception as e:
+                logger.warning(f"Failed to inject NPC context: {e}")
 
-            if len(messages) >= 3:
-                if messages[-1]["role"] == "user" and isinstance(messages[-1]["content"], list) and messages[-1]["content"]:
-                    if messages[-1]["content"][-1].get("type") == "tool_result":
-                        screenshot = self.emulator.get_screenshot_with_overlay() if self.use_overlay else self.emulator.get_screenshot()
-                        screenshot_b64 = get_screenshot_base64(screenshot, upscale=self.screenshot_upscale) # Use config upscale
-                        collision_map = self.emulator.get_collision_map()
-                        messages[-1]["content"].append(
-                            {"type": "text", "text": "\nHere is a screenshot of the current screen:"}
-                        )
-                        messages[-1]["content"].append(
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": screenshot_b64,
-                                },
-                            }
-                        )
-                        if collision_map:
-                            messages[-1]["content"].append(
-                                {"type": "text", "text": f"\nCollision Map:\n{collision_map}"}
-                            )
-            else:
-                screenshot = self.emulator.get_screenshot_with_overlay() if self.use_overlay else self.emulator.get_screenshot()
-                screenshot_b64 = get_screenshot_base64(screenshot, upscale=self.screenshot_upscale) # Use config upscale
-                collision_map = self.emulator.get_collision_map()
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Here is a screenshot of the current screen:"},
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": screenshot_b64,
-                                },
-                            },
-                        ],
-                    }
-                )
-                if collision_map:
-                    messages[-1]["content"].append(
-                        {"type": "text", "text": f"\nCollision Map:\n{collision_map}"}
-                    )
+            # Inject screenshot/collision only for non-Grok providers
+            if self.provider != 'grok':
+                if len(messages) >= 3:
+                    if messages[-1]["role"] == "user" and isinstance(messages[-1]["content"], list) and messages[-1]["content"]:
+                        if messages[-1]["content"][-1].get("type") == "tool_result":
+                            screenshot = self.emulator.get_screenshot_with_overlay() if self.use_overlay else self.emulator.get_screenshot()
+                            screenshot_b64 = get_screenshot_base64(screenshot, upscale=self.screenshot_upscale)
+                            collision_map = self.emulator.get_collision_map()
+                            messages[-1]["content"].append({"type": "text", "text": "\nHere is a screenshot of the current screen:"})
+                            messages[-1]["content"].append({"type": "image", "source": {"type": "base64","media_type": "image/png","data": screenshot_b64}})
+                            if collision_map:
+                                messages[-1]["content"].append({"type": "text", "text": f"\nCollision Map:\n{collision_map}"})
+                else:
+                    screenshot = self.emulator.get_screenshot_with_overlay() if self.use_overlay else self.emulator.get_screenshot()
+                    screenshot_b64 = get_screenshot_base64(screenshot, upscale=self.screenshot_upscale)
+                    collision_map = self.emulator.get_collision_map()
+                    messages.append({"role": "user","content": [{"type": "text","text": "Here is a screenshot of the current screen:"},{"type": "image","source": {"type": "base64","media_type": "image/png","data": screenshot_b64}}]})
+                    if collision_map:
+                        messages[-1]["content"].append({"type": "text","text": f"\nCollision Map:\n{collision_map}"})
             
             # Check for summarization
             if len(messages) > self.max_history:
@@ -323,114 +516,114 @@ class SimpleAgent:
                         {"type": "text", "text": f"\nCollision Map:\n{collision_map}"}
                     )
 
-            # --- Call LLM based on provider ---
-            if self.provider == 'anthropic':
-                # Anthropic API call
-                response = self.anthropic_client.messages.create(
-                    model=self.model_name,
-                    max_tokens=self.max_tokens, # Use config value
-                    temperature=self.temperature, # Use config value
-                    system=self.system_prompt,
-                    messages=messages,
-                    tools=AVAILABLE_TOOLS,
-                    tool_choice={"type": "auto"},
-                )
-                # ... (rest of Anthropic response handling)
-            elif self.provider == 'openai':
-                 # OpenAI API call
-                 try:
-                     # Map tools to OpenAI format if necessary
-                     openai_tools = []
-                     for tool in AVAILABLE_TOOLS:
-                         openai_tools.append({"type": "function", "function": tool})
+            # # --- Call LLM based on provider ---
+            # if self.provider == 'anthropic':
+            #     # Anthropic API call
+            #     response = self.anthropic_client.messages.create(
+            #         model=self.model_name,
+            #         max_tokens=self.max_tokens, # Use config value
+            #         temperature=self.temperature, # Use config value
+            #         system=self.system_prompt,
+            #         messages=messages,
+            #         tools=AVAILABLE_TOOLS,
+            #         tool_choice={"type": "auto"},
+            #     )
+            #     # ... (rest of Anthropic response handling)
+            # elif self.provider == 'openai':
+            #      # OpenAI API call
+            #      try:
+            #          # Map tools to OpenAI format if necessary
+            #          openai_tools = []
+            #          for tool in AVAILABLE_TOOLS:
+            #              openai_tools.append({"type": "function", "function": tool})
 
-                     # Map message format
-                     openai_messages = []
-                     for msg in messages:
-                         if msg["role"] == "user":
-                             # Handle complex content (text + image)
-                             if isinstance(msg["content"], list):
-                                 new_content = []
-                                 for item in msg["content"]:
-                                     if isinstance(item, dict):
-                                         if item.get("type") == "text":
-                                             new_content.append({"type": "text", "text": item["text"]})
-                                         elif item.get("type") == "image":
-                                             # Convert base64 image source for OpenAI
-                                             img_data = item["source"]["data"]
-                                             media_type = item["source"]["media_type"]
-                                             new_content.append({"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{img_data}"}})
-                                 openai_messages.append({"role": "user", "content": new_content})
-                             else:
-                                # Simple text content
-                                openai_messages.append({"role": "user", "content": msg["content"]})
-                         elif msg["role"] == "assistant":
-                             # Check for tool calls in assistant message
-                             tool_calls = []
-                             content = msg.get("content", "")
-                             if msg.get("tool_calls"): 
-                                 for tc in msg["tool_calls"]:
-                                     tool_calls.append({"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": json.dumps(tc["input"])}})
-                             openai_messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls if tool_calls else None})
-                         elif msg["role"] == "tool": # Role used by Anthropic for tool results
-                             # Map tool result back for OpenAI
-                             openai_messages.append({"role": "tool", "tool_call_id": msg["tool_use_id"], "content": json.dumps(msg["content"])})
+            #          # Map message format
+            #          openai_messages = []
+            #          for msg in messages:
+            #              if msg["role"] == "user":
+            #                  # Handle complex content (text + image)
+            #                  if isinstance(msg["content"], list):
+            #                      new_content = []
+            #                      for item in msg["content"]:
+            #                          if isinstance(item, dict):
+            #                              if item.get("type") == "text":
+            #                                  new_content.append({"type": "text", "text": item["text"]})
+            #                              elif item.get("type") == "image":
+            #                                  # Convert base64 image source for OpenAI
+            #                                  img_data = item["source"]["data"]
+            #                                  media_type = item["source"]["media_type"]
+            #                                  new_content.append({"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{img_data}"}})
+            #                      openai_messages.append({"role": "user", "content": new_content})
+            #                  else:
+            #                     # Simple text content
+            #                     openai_messages.append({"role": "user", "content": msg["content"]})
+            #              elif msg["role"] == "assistant":
+            #                  # Check for tool calls in assistant message
+            #                  tool_calls = []
+            #                  content = msg.get("content", "")
+            #                  if msg.get("tool_calls"): 
+            #                      for tc in msg["tool_calls"]:
+            #                          tool_calls.append({"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": json.dumps(tc["input"])}})
+            #                  openai_messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls if tool_calls else None})
+            #              elif msg["role"] == "tool": # Role used by Anthropic for tool results
+            #                  # Map tool result back for OpenAI
+            #                  openai_messages.append({"role": "tool", "tool_call_id": msg["tool_use_id"], "content": json.dumps(msg["content"])})
                              
-                     response = self.openai_client.chat.completions.create(
-                         model=self.model_name,
-                         messages=openai_messages,
-                         tools=openai_tools,
-                         tool_choice="auto",
-                         max_tokens=self.max_tokens, # Use config value
-                         temperature=self.temperature # Use config value
-                     )
+            #          response = self.openai_client.chat.completions.create(
+            #              model=self.model_name,
+            #              messages=openai_messages,
+            #              tools=openai_tools,
+            #              tool_choice="auto",
+            #              max_tokens=self.max_tokens, # Use config value
+            #              temperature=self.temperature # Use config value
+            #          )
                      
-                     # Process OpenAI response
-                     response_message = response.choices[0].message
-                     text_content = response_message.content or ""
-                     tool_calls = []
+            #          # Process OpenAI response
+            #          response_message = response.choices[0].message
+            #          text_content = response_message.content or ""
+            #          tool_calls = []
                      
-                     if response_message.tool_calls:
-                         logger.info(f"OpenAI response has tool calls: {response_message.tool_calls}")
-                         for tc in response_message.tool_calls:
-                             # Convert back to Anthropic-like format for processing
-                             tool_calls.append(
-                                 {
-                                     "id": tc.id,
-                                     "type": "function", # Match Anthropic type key
-                                     "name": tc.function.name,
-                                     "input": json.loads(tc.function.arguments),
-                                 }
-                             )
+            #          if response_message.tool_calls:
+            #              logger.info(f"OpenAI response has tool calls: {response_message.tool_calls}")
+            #              for tc in response_message.tool_calls:
+            #                  # Convert back to Anthropic-like format for processing
+            #                  tool_calls.append(
+            #                      {
+            #                          "id": tc.id,
+            #                          "type": "function", # Match Anthropic type key
+            #                          "name": tc.function.name,
+            #                          "input": json.loads(tc.function.arguments),
+            #                      }
+            #                  )
                      
-                     # Update last message and history
-                     self.last_message = text_content or "No text response"
-                     logger.info(f"[Text] {self.last_message}")
-                     assistant_message = {"role": "assistant", "content": text_content, "tool_calls": tool_calls if tool_calls else []}
-                     self.message_history.append(assistant_message)
+            #          # Update last message and history
+            #          self.last_message = text_content or "No text response"
+            #          logger.info(f"[Text] {self.last_message}")
+            #          assistant_message = {"role": "assistant", "content": text_content, "tool_calls": tool_calls if tool_calls else []}
+            #          self.message_history.append(assistant_message)
                      
-                     # Process tool calls if any
-                     if tool_calls:
-                         tool_results = []
-                         for tool_call in tool_calls:
-                             # Re-wrap tool_call to match expected structure for process_tool_call
-                             class FakeToolCall:
-                                 def __init__(self, data):
-                                     self.name = data["name"]
-                                     self.input = data["input"]
-                                     self.id = data["id"]
-                                     self.type = data["type"]
+            #          # Process tool calls if any
+            #          if tool_calls:
+            #              tool_results = []
+            #              for tool_call in tool_calls:
+            #                  # Re-wrap tool_call to match expected structure for process_tool_call
+            #                  class FakeToolCall:
+            #                      def __init__(self, data):
+            #                          self.name = data["name"]
+            #                          self.input = data["input"]
+            #                          self.id = data["id"]
+            #                          self.type = data["type"]
                                      
-                             result = self.process_tool_call(FakeToolCall(tool_call))
-                             tool_results.append(result)
+            #                  result = self.process_tool_call(FakeToolCall(tool_call))
+            #                  tool_results.append(result)
                              
-                         self.message_history.append({"role": "user", "content": tool_results})
+            #              self.message_history.append({"role": "user", "content": tool_results})
                      
-                 except Exception as e:
-                     logger.error(f"Error calling OpenAI API: {e}")
-                     self.last_message = f"Error: Could not get response from OpenAI: {e}"
+            #      except Exception as e:
+            #          logger.error(f"Error calling OpenAI API: {e}")
+            #          self.last_message = f"Error: Could not get response from OpenAI: {e}"
                  
-            elif self.provider == 'grok':
+            if self.provider == 'grok':
                  # Grok API Call (using requests)
                  headers = {
                      "Authorization": f"Bearer {self.xai_api_key}",

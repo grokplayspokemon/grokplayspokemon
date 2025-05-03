@@ -1,9 +1,9 @@
 import logging
+logger = logging.getLogger(__name__)
+
 import os
 from PIL import Image
 import asyncio
-
-logger = logging.getLogger(__name__)
 
 async def run_agent(agent, num_steps, run_log_dir, send_game_updates, grok_logger):
     try:

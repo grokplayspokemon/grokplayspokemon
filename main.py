@@ -115,12 +115,12 @@ def main():
         default=config.INITIAL_SAVE_STATE,
         help=f"Path to an initial save state file to load (default: {config.INITIAL_SAVE_STATE})"
     )
-    parser.add_argument(
-        "--overlay",
-        action=argparse.BooleanOptionalAction,
-        default=config.USE_OVERLAY,
-        help=f"Enable tile overlay on screenshots sent to LLM (default: {config.USE_OVERLAY})"
-    )
+    # parser.add_argument(
+    #     "--overlay",
+    #     action=argparse.BooleanOptionalAction,
+    #     default=config.USE_OVERLAY,
+    #     help=f"Enable tile overlay on screenshots sent to LLM (default: {config.USE_OVERLAY})"
+    # )
     parser.add_argument(
         "--provider",
         type=str,
@@ -171,6 +171,30 @@ def main():
         help="Anthropic API key (can also set via ANTHROPIC_API_KEY env var)"
     )
 
+    parser.add_argument(
+        "--use-collision-map",
+        action=argparse.BooleanOptionalAction,
+        default=config.USE_COLLISION_MAP,
+        help=f"Enable collision map (default: {config.USE_COLLISION_MAP})"
+    )
+    
+    parser.add_argument(
+        "--use-screenshots",
+        action=argparse.BooleanOptionalAction,
+        default=config.USE_SCREENSHOTS,
+        help=f"Enable screenshots (default: {config.USE_SCREENSHOTS})"
+    )
+    
+    parser.add_argument(
+        "--use-navigator",
+        action=argparse.BooleanOptionalAction,
+        default=config.USE_NAVIGATOR,
+        help=f"Enable navigator (default: {config.USE_NAVIGATOR})"
+    )
+    
+    
+    
+    
     args = parser.parse_args()
 
     # Set API keys from CLI if provided
@@ -221,9 +245,14 @@ def main():
 
     # Agent & Game Settings
     cfg.max_history = args.max_history
-    cfg.use_overlay = args.overlay
+    # cfg.use_overlay = args.overlay
     cfg.num_steps = args.steps # Add steps to config
-
+    cfg.use_collision_map = args.use_collision_map
+    cfg.use_screenshots = args.use_screenshots
+    cfg.use_navigator = args.use_navigator
+    # Delay in seconds between each agent step for viewers (from config)
+    cfg.step_delay = config.STEP_DELAY
+    
     # Logging
     cfg.log_level = config.LOG_LEVEL
 

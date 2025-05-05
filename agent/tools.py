@@ -1,4 +1,4 @@
-from config import USE_NAVIGATOR
+from config import USE_NAVIGATOR, USE_OVERLAY
 
 AVAILABLE_TOOLS = [
     {
@@ -30,7 +30,7 @@ if USE_NAVIGATOR:
     AVAILABLE_TOOLS.append({
         "name": "navigate_to",
         "type": "function",
-        "description": "Automatically navigate to a position on the map grid. The screen is divided into a 9x10 grid, with the top-left corner as (0, 0). This tool is only available in the overworld.",
+        "description": "Automatically navigate to a position on the map grid. The screen is divided into a (10, 9) (x, y) grid, with the top-left corner as (0, 0).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -44,6 +44,18 @@ if USE_NAVIGATOR:
                 }
             },
             "required": ["row", "col"],
+        },
+    })
+
+if USE_OVERLAY:
+    AVAILABLE_TOOLS.append({
+        "name": "get_collision_map",
+        "type": "function",
+        "description": "Retrieve the ASCII collision map overlay showing walkable (0), walls/unwalkable (1), sprites (2), warps (D/W), and player direction codes (3-6).",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
         },
     })
 

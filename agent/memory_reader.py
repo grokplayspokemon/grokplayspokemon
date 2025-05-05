@@ -900,7 +900,10 @@ class PokemonRedReader:
         if badge_byte & Badge.EARTH:
             badges.append("EARTH")
 
-        return badges
+        if badges:
+            return badges
+        else:
+            return ["none"]
 
     def read_party_size(self) -> int:
         """Read number of Pokemon in party"""
@@ -1228,13 +1231,23 @@ class PokemonRedReader:
             if text.strip():
                 text_lines.append(text)
 
+        # Join into a single string
         text = "\n".join(text_lines)
-
-        # Post-process for name entry context
-        if "lower case" in text.lower() or "UPPER CASE" in text:
-            # We're in name entry, replace ♭ with ED
+        import re  # for filtering gibberish
+        # Filter out numeric-gibberish and overly long lines
+        filtered = []
+        for line in text_lines:
+            # Drop lines longer than 100 chars
+            if len(line) > 100:
+                continue
+            # Drop lines consisting of 5 or more digits (e.g., memory dumps)
+            if re.fullmatch(r"\d{5,}", line.strip()):
+                continue
+            filtered.append(line)
+        text = "\n".join(filtered)
+        # Post-process for name entry context if any valid text remains
+        if text and ("lower case" in text.lower() or "UPPER CASE" in text):
             text = text.replace("♭", "ED\n")
-
         return text
 
     def read_pokedex_caught_count(self) -> int:

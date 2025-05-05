@@ -140,32 +140,42 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # Function to send game state updates
 async def send_game_updates(frame_data: bytes, grok_message: str):
+    # Fetch emulator memory state for debugging
+    memory_info = None
+    if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
+        try:
+            memory_info = app.state.agent.emulator.get_state_from_memory()
+        except Exception as e:
+            logger.error(f"Error getting memory info: {e}")
+
+    # Fetch collision map safely
+    collision_map = {}
+    if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
+        try:
+            collision_map = app.state.agent.emulator.get_collision_map() or {}
+        except Exception as e:
+            logger.error(f"Error getting collision map: {e}")
+
+    # Extract warps list safely
+    warps = []
     try:
-        # Fetch emulator memory state for debugging
-        memory_info = None
-        if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
-            try:
-                memory_info = app.state.agent.emulator.get_state_from_memory()
-            except Exception as e:
-                logger.error(f"Error getting memory info: {e}")
-        message = {
-            "type": "update",
-            "frame": frame_data.hex(),  # Convert bytes to hex string
-            "message": grok_message,
-            "memory": memory_info
-        }
-        # Always include full collision map and warp entries so Dev Mode can display them
-        if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
-            try:
-                collision_map = app.state.agent.emulator.get_collision_map()
-                from game_data.constants import WARP_DICT, MAP_ID_REF
-                raw_map_id = app.state.agent.emulator.pyboy.memory[0xD35E]
-                map_key = MAP_ID_REF.get(raw_map_id)
-                warps = WARP_DICT.get(map_key, [])
-                message['collision_map'] = collision_map
-                message['warps'] = warps
-            except Exception as e:
-                logger.error(f"Error preparing collision/warp data: {e}")
+        if isinstance(collision_map, dict):
+            warps = collision_map.get('warps', []) or []
+    except Exception as e:
+        logger.error(f"Error extracting warps from collision map: {e}")
+
+    # Build update message
+    message = {
+        "type": "update",
+        "frame": frame_data.hex(),
+        "message": grok_message,
+        "memory": memory_info,
+        "collision_map": collision_map,
+        "warps": warps,
+    }
+
+    # Broadcast message, catching unexpected errors
+    try:
         await manager.broadcast(json.dumps(message))
     except Exception as e:
         logger.error(f"Error sending game updates: {e}")

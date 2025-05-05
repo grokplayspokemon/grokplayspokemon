@@ -26,8 +26,8 @@ SCREENSHOT_UPSCALE = 2 # Factor to upscale screenshots for the LLM
 # - ANTHROPIC_API_KEY (for Anthropic)
 
 LLM_PROVIDER = "grok" # Options: "grok", "openai", "anthropic"
-LLM_TEMPERATURE = 1.3
-LLM_MAX_TOKENS = 4000
+LLM_TEMPERATURE = 0.85
+LLM_MAX_TOKENS = 15000
 
 # Provider-specific models
 LLM_MODEL_ANTHROPIC = "claude-3-5-sonnet-20240620" # Or "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"
@@ -36,8 +36,12 @@ LLM_MODEL_GROK = "grok-3-latest"
 
 # --- Agent & Game Settings ---
 MAX_HISTORY = 30 # Max messages before summarization
-USE_OVERLAY = False # Show tile overlay on screenshots sent to LLM (costs more tokens)
-USE_NAVIGATOR = True # Deprecated/Unused
+USE_OVERLAY = False # Overlays the screenshot w/ the visible screen tiles
+USE_COLLISION_MAP = True # ASCII overlay provided to LLM
+USE_SCREENSHOTS = False # Screenshots sent to LLM
+USE_NAVIGATOR = True # Deprecated/Unused?
+# Delay in seconds between each agent step for viewers to see updates
+STEP_DELAY = 7.0
 
 # --- Logging ---
 LOG_LEVEL = logging.INFO # e.g., logging.DEBUG, logging.INFO, logging.WARNING

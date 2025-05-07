@@ -1,5 +1,7 @@
+# main.py
 import argparse
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import asyncio
 import uvicorn
@@ -24,24 +26,48 @@ os.makedirs(os.path.join(run_log_dir, "frames"), exist_ok=True)
 run_save_state_dir = os.path.join(config.SAVE_STATE_DIR, f"run_{current_time}") # Use config save dir
 os.makedirs(run_save_state_dir, exist_ok=True)
 
-# Set up logging using config level
-logging.basicConfig(
-    level=config.LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(os.path.join(run_log_dir, "game.log"))
-    ],
-)
+# # Set up logging using config level
+# logging.basicConfig(
+#     level=config.LOG_LEVEL,
+#     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+#     handlers=[
+#         logging.StreamHandler(),
+#         logging.FileHandler(os.path.join(run_log_dir, "game.log"))
+#     ],
+# )
+
+# logger = logging.getLogger(__name__)
+
+# Define log file path
+log_file_path = 'game.log'
+
+# Configure logging
+logging.basicConfig(level=config.LOG_LEVEL,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        RotatingFileHandler(log_file_path, maxBytes=1024*1024*5, backupCount=5), # 5MB file size, 5 backup files
+                        logging.StreamHandler() # Also log to console
+                    ])
 
 logger = logging.getLogger(__name__)
 
-# Create a separate logger for Grok's messages
-grok_logger = logging.getLogger("grok")
-grok_logger.setLevel(config.LOG_LEVEL) # Use config level
-grok_handler = logging.FileHandler(os.path.join(run_log_dir, "grok_messages.log"))
-grok_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
-grok_logger.addHandler(grok_handler)
+# Get the game logger
+game_logger = logging.getLogger("game")
+
+# Create a main game logger that all components will use
+game_logger = logging.getLogger("game")
+game_logger.setLevel(config.LOG_LEVEL)
+game_handler = logging.FileHandler(os.path.join(run_log_dir, "game.log"))
+game_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+game_logger.addHandler(game_handler)
+
+# Create a handler for stdout
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+game_logger.addHandler(console_handler)
+
+# Set up Grok's messages to go to the same log
+grok_logger = game_logger
 
 @asynccontextmanager
 async def lifespan(app):
@@ -50,6 +76,7 @@ async def lifespan(app):
     app.state.grok_logger = grok_logger
     app.state.run_save_state_dir = run_save_state_dir # Where saved pyboy states go
     app.state.is_paused = False  # Initialize pause state
+    app.state.step_requested = False  # Initialize manual step request flag
     
     # Startup: create agent but don't start it yet
     cfg = app.state.cfg # Get merged config from app state

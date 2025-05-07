@@ -1,61 +1,112 @@
-import logging
-logger = logging.getLogger(__name__)
-
-import os
-from PIL import Image
 import asyncio
+import logging
+import time
+import io
+from pathlib import Path
 
-async def run_agent(agent, num_steps, run_log_dir, send_game_updates, grok_logger):
+# Get the consolidated game logger
+logger = logging.getLogger("game")
+
+async def run_agent(agent, num_steps=100000, run_log_dir=None, send_game_updates=None, grok_logger=None):
+    """Run the agent with improved WebSocket management."""
+    import time
+    
+    logger = logging.getLogger(__name__)
+    
+    # Clear the main game log file at the start of a new run
+    main_log_file_path = Path("llm_plays_pokemon/DATAPlaysPokemon/game.log")
     try:
-        logger.info(f"Starting agent for {num_steps} steps")
-        # Auto-press Start to exit title screen
-        try:
-            agent.emulator.press_buttons(["start"], True)
-            # Always capture frame for UI, regardless of screenshot setting
-            frame = agent.get_frame()
-            await send_game_updates(frame, "Auto-pressed Start to begin the game")
-            grok_logger.info("Auto-pressed Start to begin the game")
-            # Save frame to disk only if screenshots are enabled
-            if getattr(agent, 'use_screenshots', False):
-                # frames folder already exists
-                frame_path = os.path.join(run_log_dir, "frames", "frame_00000.png")
-                with open(frame_path, "wb") as f:
-                    f.write(frame)
-        except Exception as e:
-            logger.error(f"Error auto-pressing start: {e}")
-        steps_completed = 0
+        if main_log_file_path.exists():
+            with open(main_log_file_path, 'w') as f:
+                f.write("") # Clear the file
+            logger.info(f"Cleared main log file: {main_log_file_path}")
+    except Exception as e:
+        logger.error(f"Error clearing main log file {main_log_file_path}: {e}")
+    
+    logger.info(f"Starting agent for {num_steps} steps")
+    logger.info("Agent task started.")
+    agent.running = True
+    step_count = 0
+    
+    # Auto-press Start to begin the game if needed
+    if hasattr(agent, 'emulator'):
+        logger.info("Auto-pressing Start to begin the game")
+        agent.emulator.press_buttons(["start"], True)
+        agent.emulator.step()
         
-        while steps_completed < num_steps:
-            # Handle pause state
-            while getattr(agent.app.state, 'is_paused', False):
-                await asyncio.sleep(0.1)
+        if grok_logger:
+            grok_logger.info("Auto-pressed Start to begin the game")
+            
+        # Send initial frame update
+        if send_game_updates:
+            try:
+                frame = agent.get_frame()
+                location = agent.emulator.get_location() or "Unknown"
+                await send_game_updates(frame, f"Game started in {location}")
+            except Exception as e:
+                logger.error(f"Error sending initial frame: {e}")
+        
+        # Wait 3 seconds after pressing Start
+        logger.info("Waiting 3 seconds after pressing Start")
+        await asyncio.sleep(3.0)
+    
+    # Main agent loop
+    while agent.running and step_count < num_steps:
+        try:
+            # Check if agent is paused
+            if hasattr(agent, 'app') and hasattr(agent.app.state, 'is_paused') and agent.app.state.is_paused:
+                await asyncio.sleep(0.5)
                 continue
-
-            # Execute one agent step (Grok prompt + action)
-            agent.step()
-            steps_completed += 1
-
-            # Capture the frame and optionally save to disk
-            frame = agent.get_frame()
-            if getattr(agent, 'use_screenshots', False):
-                frame_path = os.path.join(run_log_dir, "frames", f"frame_{steps_completed:05d}.png")
-                with open(frame_path, "wb") as f:
-                    f.write(frame)
-
-            # Send the updated frame and Grok's latest response
-            message = agent.get_last_message()
-            if message:
-                grok_logger.info(message)
-            await send_game_updates(frame, message)
-
-            # Insert lag time between response/action and next prompt
+            
+            # Sleep before the next step
+            logger.info(f"run_agent: sleeping for {agent.step_delay}s before step {step_count+1}")
             await asyncio.sleep(agent.step_delay)
             
-        logger.info(f"Agent completed {steps_completed} steps")
-    except asyncio.CancelledError:
-        logger.info("Agent task was cancelled")
-        raise
-    except Exception as e:
-        logger.error(f"Error running agent: {e}")
-        # Swallow exception to keep server alive and end agent loop gracefully
-        return
+            # Execute the step
+            logger.info(f"Executing step {step_count+1}")
+            start_time = time.time()
+            
+            try:
+                # Execute the step
+                agent.step() 
+                step_count += 1
+                
+                # Get the latest message and update
+                latest_message = agent.get_last_message()
+                
+                # Log the message
+                if latest_message:
+                    logger.info(f"Agent message: {latest_message}")
+                    if grok_logger and grok_logger != logger:
+                        grok_logger.info(latest_message)
+                
+                # Send game update if handler is available
+                if send_game_updates:
+                    try:
+                        frame = agent.get_frame()
+                        if frame:
+                            # Send both the frame and message to UI
+                            await send_game_updates(frame, latest_message or "Game update")
+                    except Exception as e:
+                        logger.error(f"Error sending game update: {e}")
+                
+                # Calculate and log the elapsed time
+                elapsed = time.time() - start_time
+                logger.info(f"Step {step_count} completed in {elapsed:.2f}s")
+                
+            except Exception as e:
+                logger.error(f"Error in step {step_count}: {e}", exc_info=True)
+                await asyncio.sleep(1.0)
+                continue
+            
+        except asyncio.CancelledError:
+            logger.info("Agent task was cancelled")
+            break
+            
+        except Exception as e:
+            logger.error(f"Unexpected error in run_agent: {e}", exc_info=True)
+            await asyncio.sleep(1.0)
+    
+    logger.info(f"Agent run completed after {step_count} steps")
+    logger.info("Agent task finished.")
+    return {"steps_completed": step_count}

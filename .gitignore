@@ -8,6 +8,9 @@
 *.ram
 *.state
 
+# File with API key
+*.sh
+
 # Python
 __pycache__/
 *.py[cod]

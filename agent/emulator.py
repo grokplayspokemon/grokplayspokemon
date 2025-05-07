@@ -1,3 +1,4 @@
+# emulator.py
 import logging
 logger = logging.getLogger(__name__)
 
@@ -19,28 +20,18 @@ from pyboy import PyBoy
 # Import WARP_DICT for door detection
 from game_data.constants import WARP_DICT, MAP_ID_REF, MAP_DICT
 from config import SAVE_STATE_DIR
-from game_data.events import (
-    EVENT_FLAGS_START,
-    EVENTS_FLAGS_LENGTH,
-    MUSEUM_TICKET,
-    REQUIRED_EVENTS,
-    EventFlags,
-)
-from game_data.items import (
-    HM_ITEMS,
-    KEY_ITEMS,
-    MAX_ITEM_CAPACITY,
-    REQUIRED_ITEMS,
-    USEFUL_ITEMS,
-    Items,
-)
-from game_data.map import (
-    MAP_ID_COMPLETION_EVENTS,
-    MapIds,
-)
-from game_data.missable_objects import MissableFlags
-from game_data.flags import Flags
 from game_data.global_map import GLOBAL_MAP_SHAPE, local_to_global
+
+# Event tracking constants
+EVENT_FLAGS_START = 0xD747
+EVENTS_FLAGS_LENGTH = 0x140  # = 320
+MUSEUM_TICKET_ADDR = (0xD754, 7)  # Address and bit position
+
+# List of event IDs to ignore for reward calculations
+IGNORED_EVENT_IDS = [
+    # Add specific event IDs that should be ignored for rewards
+    # For example: museum ticket and other initial/unimportant events
+]
 
 # -- Sign posts / notice boards / PC Billboards, by tileset
 SIGN_TILE_IDS_BY_TILESET = {
@@ -76,13 +67,6 @@ class Emulator:
 
         self.seen_npcs: Set[Tuple[int, int, int]] = set()  # (map_id, grid_row, grid_col)
         self._npc_track_distance: int | None = None  # default: track all
-        self.events = EventFlags(self.pyboy)
-        # Removed self.required_events = set() - will be updated in step()
-        # Removed self.required_items = set() - will be updated in step()
-        self.base_event_flags = sum(
-                self.read_m(i).bit_count()
-                for i in range(EVENT_FLAGS_START, EVENT_FLAGS_START + EVENTS_FLAGS_LENGTH)
-            )
 
         self.essential_map_locations = {
             v: i for i, v in enumerate([40, 0, 12, 1, 13, 51, 2, 54, 14, 59, 60, 61, 15, 3, 65])
@@ -93,15 +77,22 @@ class Emulator:
         # Stores counts per tileset: {tileset_id: {(x, y, map_n): count}}
         self.seen_coords: Dict[int, Dict[Tuple[int, int, int], float]] = {}
         self.max_map_progress = 0
-        # Tracks the set of REQUIRED_EVENTS currently met according to game memory
-        self.current_required_events_met: Set[str] = set()
-        self.missables = MissableFlags(self.pyboy)
-        self.flags = Flags(self.pyboy)
         self.last_10_moves: deque[str] = deque(maxlen=10) # Stores last 10 move directions (e.g., "↑")
         # Stores visit count per world coordinate: {(x, y): count}
         self.visited_counts: Dict[Tuple[int, int], int] = {}
+        self.last_walk_dir: Dict[Tuple[int, int], str] = {}  # Track last move direction per global coord
         self.exploration_max = 10.0 # Set a non-zero max for seen_coords increment
         self.prev_coordinates: Optional[Tuple[int, int]] = None # Store previous world coords 
+        
+        # Rewards system
+        self.current_step_reward = 0.0
+        self.current_episode_reward = 0.0
+        self.episode_rewards = []
+        self.step_counter = 0
+        self.visited_tiles = set()  # Track visited tiles for reward calculation
+        self.interacted_npcs = set()  # Track NPCs that have been interacted with
+        self.npc_penalty_count = 0  # Count of NPC interaction penalties
+        self._all_events_string = ''  # Cache for event flags string
 
     def read_m(self, addr: str | int) -> int:
         if isinstance(addr, str):
@@ -111,10 +102,6 @@ class Emulator:
     def read_bit(self, addr: str | int, bit: int) -> bool:
         # add padding so zero will read '0b100000000' instead of '0b0'
         return bool(int(self.read_m(addr)) & (1 << bit))
-
-    def read_event_bits(self):
-        _, addr = self.pyboy.symbol_lookup("wEventFlags")
-        return self.pyboy.memory[addr : addr + EVENTS_FLAGS_LENGTH]
     
     def tick(self, frames):
         """Advance the emulator by the specified number of frames."""
@@ -123,6 +110,65 @@ class Emulator:
         # Auto NPC tracking (if enabled) - Keep this part
         if self._npc_track_distance is not None:
             self.update_seen_npcs(self._npc_track_distance) # Assumes update_seen_npcs uses get_npcs_in_range which uses get_sprites
+            
+    def calculate_exploration_reward(self):
+        """Calculate exploration rewards based on visited tiles."""
+        reward = 0.0
+        
+        # Get current position
+        coords = self.get_standard_coords()
+        if coords is None or coords == (0, 0, 0):
+            return 0.0
+            
+        # Check if this is a new tile
+        if coords not in self.visited_tiles:
+            # New tile: +0.01 reward
+            reward += 0.01
+            self.visited_tiles.add(coords)
+        else:
+            # Revisited tile: -0.02 penalty
+            reward -= 0.02
+            
+        return reward
+        
+    def check_npc_interaction_penalty(self):
+        """Check if there's a penalty for interacting with the same NPC twice."""
+        penalty = 0.0
+        
+        # Get the latest NPC interaction (if any)
+        latest_npc = None
+        for map_id, sprite_id in list(self.old_seen_npcs.keys()):
+            latest_npc = (map_id, sprite_id)
+            
+        # Check if this NPC was already interacted with
+        if latest_npc and latest_npc in self.interacted_npcs:
+            penalty -= 1.0
+            self.npc_penalty_count += 1
+        elif latest_npc:
+            self.interacted_npcs.add(latest_npc)
+            
+        return penalty
+    
+    def update_reward_state(self):
+        """Update the reward state based on exploration and NPC interactions."""
+        # Calculate the exploration reward
+        self.current_step_reward = self.calculate_exploration_reward()
+        
+        # Add any NPC interaction penalties
+        npc_penalty = self.check_npc_interaction_penalty()
+        self.current_step_reward += npc_penalty
+        
+        # Update the episode reward
+        self.current_episode_reward += self.current_step_reward
+        
+        # Increment step counter
+        self.step_counter += 1
+        
+        # Check if we should reset the episode (every 30 steps)
+        if self.step_counter >= 30:
+            self.episode_rewards.append(self.current_episode_reward)
+            self.current_episode_reward = 0.0
+            self.step_counter = 0
 
     def initialize(self):
         """Enhanced initialization with coordinate tracking validation."""
@@ -145,11 +191,19 @@ class Emulator:
             simple_coords = (initial_coords[0], initial_coords[1])
             self.visited_counts[simple_coords] = 1
             
+            # Add to visited tiles for reward tracking
+            self.visited_tiles.add(initial_coords)
+            
             logger.info(f"INITIALIZATION: Tracked initial coordinates {initial_coords}")
         
         # Initialize state
         self.update_state_variables()
         self.pyboy.set_emulation_speed(1)
+        
+        # Reset reward tracking values
+        self.current_step_reward = 0.0
+        self.current_episode_reward = 0.0
+        self.step_counter = 0
                     
     def _force_coordinate_tracking(self):
         """Force the current coordinate to be tracked right now."""
@@ -179,167 +233,34 @@ class Emulator:
     def sprite_hook(self, *args, **kwargs):
         sprite_id = self.pyboy.memory[self.pyboy.symbol_lookup("hSpriteIndexOrTextID")[1]]
         map_id = self.pyboy.memory[self.pyboy.symbol_lookup("wCurMap")[1]]
-        # self.seen_npcs[(map_id, sprite_id)] = 1.0 if self.scale_map_id(map_id) else 0.0
+        if map_id == 2 and sprite_id == 3:    # guide in every gym
+            self.seen_npcs.add((map_id, -1, -1))              # sentinel
+
         self.old_seen_npcs[(map_id, sprite_id)] = 1.0
+        
+        # Check for NPC penalties when interacting with sprites
+        self.check_npc_interaction_penalty()
 
     def sign_hook(self, *args, **kwargs):
         sign_id = self.read_m("hSpriteIndexOrTextID")
         map_id = self.read_m("wCurMap")
-        # self.seen_signs[(map_id, sign_id)] = 1.0 if self.scale_map_id(map_id) else 0.0
         self.old_seen_signs[(map_id, sign_id)] = 1.0
         
     def update_map_progress(self):
         map_idx = self.reader.read_current_map_id() # Use reader
         self.max_map_progress = max(0, self.max_map_progress, self.get_map_progress(map_idx))
 
-
     def get_map_progress(self, map_idx):
         return self.essential_map_locations.get(map_idx, -1)
 
-
-    def get_required_events(self) -> Set[str]:
+    def has_badge(self, name: str) -> bool:
         """
-        Checks the game's memory for currently completed required event flags.
-        Returns a set of strings representing the met events.
-        NOTE: This reflects the *live game state*, not necessarily all events
-        the agent has ever completed in this session.
+        True if *name* (case‑insensitive, with or without the string "BADGE")
+        is present in the badge byte ($D356).
         """
-        met_events = set()
-        try:
-            # Check standard event flags from the REQUIRED_EVENTS list
-            event_values = self.events.get_events(REQUIRED_EVENTS) # Ensure EventFlags class works correctly
-            for event_name, is_set in zip(REQUIRED_EVENTS, event_values):
-                if is_set:
-                    met_events.add(event_name)
+        cleaned = name.upper().replace("BADGE", "").strip()
+        return cleaned in self.reader.read_badges()
 
-            # Special non-standard event checks
-            # SS Anne Rival Battle: Check script progress (wSSAnne2FCurScript == 4 means battle done)
-            if self.read_m("wSSAnne2FCurScript") == 4:
-                 met_events.add("rival3") # Assuming "rival3" is the correct name for this event
-
-            # Game Corner Rocket: Check missable object flag
-            if self.missables.get_missable("HS_GAME_CORNER_ROCKET"): # Check constant name
-                 met_events.add("game_corner_rocket")
-
-            # Saffron Guard Drink: Check flag
-            if self.flags.get_bit("BIT_GAVE_SAFFRON_GUARDS_DRINK"): # Check constant name
-                 met_events.add("saffron_guard")
-
-            # Got Lapras: Check flag
-            if self.flags.get_bit("BIT_GOT_LAPRAS"): # Check constant name
-                 met_events.add("lapras")
-
-        except Exception as e:
-            logger.error(f"Error reading required events: {e}")
-
-        return met_events
-
-
-    def get_required_items(self) -> Set[str]:
-        """Gets the set of REQUIRED_ITEMS currently in the player's bag."""
-        try:
-            # wNumBagItems = self.read_m("wNumBagItems")
-            # _, wBagItems = self.pyboy.symbol_lookup("wBagItems")
-            # bag_item_ids = self.pyboy.memory[wBagItems : wBagItems + wNumBagItems * 2 : 2]
-
-            # Use reader method
-            items_with_qty = self.reader.read_items() # Returns list of (item_name, qty)
-            current_item_names = {item_name for item_name, qty in items_with_qty}
-
-            required_item_names = {item.name for item in REQUIRED_ITEMS}
-
-            return current_item_names.intersection(required_item_names)
-        except Exception as e:
-            logger.error(f"Error reading required items: {e}")
-            return set()
-
-    def get_events_sum(self):
-        # adds up all event flags, exclude museum ticket
-        # This seems like a custom metric, ensure it's what you want.
-        try:
-            current_event_flags = sum(
-                self.read_m(i).bit_count()
-                for i in range(EVENT_FLAGS_START, EVENT_FLAGS_START + EVENTS_FLAGS_LENGTH)
-            )
-            museum_ticket_set = self.read_bit(*MUSEUM_TICKET)
-            # Calculate difference from base, remove museum ticket if set
-            return max(0, current_event_flags - self.base_event_flags - int(museum_ticket_set))
-        except Exception as e:
-             logger.error(f"Error calculating events sum: {e}")
-             return 0
-
-    def get_screenshot(self):
-        """Get the current screenshot."""
-        return Image.fromarray(self.pyboy.screen.ndarray)
-
-    # not used by grok because grok can't do images
-    def get_screenshot_with_overlay(self, alpha=128):
-        """
-        Get the current screenshot with a tile overlay showing walkable/unwalkable areas.
-
-        Args:
-            alpha (int): Transparency value for the overlay (0-255)
-
-        Returns:
-            PIL.Image: Screenshot with tile overlay
-        """
-        from tile_visualizer import overlay_on_screenshot
-        screenshot = self.get_screenshot()
-        # collision_map here refers to the ASCII representation from get_collision_map
-        collision_map_str = self.get_collision_map()
-        # Need to adapt overlay_on_screenshot or provide the actual collision grid
-        # For now, assuming overlay_on_screenshot can handle the string or needs adjustment
-        # Placeholder:
-        # logger.warning("get_screenshot_with_overlay needs review for collision data format")
-        # Let's pass the actual collision grid if tile_visualizer supports it
-        collision_grid_numeric = self.pyboy.game_area_collision() # 18x20 numpy array
-        # return overlay_on_screenshot(screenshot, collision_grid_numeric, alpha) # If it accepts numpy array
-        return overlay_on_screenshot(screenshot, collision_map_str, alpha) # If it accepts the string map
-
-    def load_state(self, state_filename):
-        """
-        Load a PyBoy save state file into the emulator.
-
-        Args:
-            state_filename: Path to the PyBoy .state file
-        """
-        try:
-            with open(state_filename, 'rb') as f:
-                state_data = f.read()
-                state_io = io.BytesIO(state_data)
-                self.pyboy.load_state(state_io)
-        except Exception:
-            # If direct loading fails, try with pickle
-            try:
-                with open(state_filename, 'rb') as f:
-                    state_data = pickle.load(f)
-                    if "pyboy_state" in state_data:
-                        pyboy_state_io = io.BytesIO(state_data["pyboy_state"])
-                        self.pyboy.load_state(pyboy_state_io)
-                    else:
-                        raise ValueError("Invalid save state format")
-            except Exception as e2:
-                logger.error(f"Failed to load save state: {e2}")
-                raise
-
-    def save_state(self, filename_prefix="auto_save"):
-        """Saves the current emulator state to a timestamped file."""
-        saves_dir = Path(SAVE_STATE_DIR)
-        saves_dir.mkdir(exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{filename_prefix}_{timestamp}.state"
-        filepath = saves_dir / filename
-
-        try:
-            with open(filepath, "wb") as f:
-                self.pyboy.save_state(f)
-            logger.info(f"Saved state to {filepath}")
-            return str(filepath)
-        except Exception as e:
-            logger.error(f"Failed to save state to {filepath}: {e}")
-            return None
-        
     def press_buttons(self, buttons: List[str], wait: bool = True) -> str:
         """
         Dev / UI sends button strings here.  After each press we:
@@ -364,12 +285,14 @@ class Emulator:
                 g_y, g_x = local_to_global(y_loc, x_loc, map_id)
                 g_key = (g_x, g_y)
                 self.visited_counts[g_key] = self.visited_counts.get(g_key, 0) + 1
+                # Track last movement direction per global coord
+                if b in ["up", "down", "left", "right"]:
+                    self.last_walk_dir[g_key] = b
                 self.update_seen_coords_direct(cur)
                 self.update_state_variables()
                 print(self.get_state_from_memory())     # dev sees every step
 
         return "\n".join(out)
-
 
     def get_coordinates(self) -> Tuple[int, int]:
         """
@@ -391,7 +314,6 @@ class Emulator:
         reader = PokemonRedReader(self.pyboy.memory)
         dialog = reader.read_dialog()
         return dialog if dialog else None
-
 
     def get_location(self):
         """
@@ -484,322 +406,84 @@ class Emulator:
              # Fallback: return original array or None?
              return arr # Return original if numpy fails
 
-    # ---------------------------------------------------------------------------
-    # get_collision_map  –  fixed «warps» section (no AttributeError anymore)
-    # ---------------------------------------------------------------------------
     def get_collision_map(self):
         """
-        Build a structured 9 × 10 collision snapshot with entities, visit counters,
-        player direction, recent moves and current‑map warp list.
+        Build a 9×10 snapshot with visit counters, entities and *two* warp cells:
+        • real warp tile  → player must finish on it
+        • approach tile   → one step below; lets Grok walk ▾ through the door
         """
         try:
-            # ---------- 1. base terrain ----------
-            collision_18x20 = self.pyboy.game_area_collision()        # 18 × 20 bool
-            downsampled      = self._downsample_array(collision_18x20) # 9 × 10 float
+            # ---------- terrain ----------
+            base18  = self.pyboy.game_area_collision()
+            ds9x10  = self._downsample_array(base18)
 
-            # ---------- 2. player position ----------
-            world_x, world_y = self.reader.read_coordinates()
-            pr, pc           = self._get_player_grid_position()
+            # ---------- player ----------
+            wx, wy  = self.reader.read_coordinates()
+            pr, pc  = self._get_player_grid_position()
 
-            # ---------- 3. sprites / signs ----------
-            npc_grid_coords  = {(c, r) for c, r in self.get_sprites("9x10")}
-            sign_grid_coords = self.get_signs("9x10")
+            # ---------- entities ----------
+            sign_cells  = self.get_signs("9x10")
 
-            # ---------- 4. warps ----------
+            # Get detailed sprite information
+            sprite_data_list = self.get_sprites(grid_type="9x10")
+            # Create a set of NPC grid coordinates for basic collision marking
+            npc_cells = {(npc["grid_col"], npc["grid_row"]) for npc in sprite_data_list}
+
+            # ---------- warps & approach tiles ----------
             map_id      = self.reader.read_current_map_id()
             map_key     = MAP_ID_REF.get(map_id)
-            current_warps = WARP_DICT.get(map_key, [])         # ← LIST, not dict
+            warp_data   = WARP_DICT.get(map_key, [])                  # list
 
+            warp_cells, approach_cells = set(), set()
+            for w in warp_data:
+                rel_x = w["x"] - wx;  rel_y = w["y"] - wy
+                gc    = rel_x + 4;     gr   = rel_y + 4               # centre offset
+                if 0 <= gr < 9 and 0 <= gc < 10:
+                    warp_cells.add((gc, gr))
+                    if gr + 1 < 9:                                    # approach one row below
+                        approach_cells.add((gc, gr + 1))
+
+            # list returned to Grok (unchanged)
             warps_list = [
-                {
-                    "id": idx,
-                    "x":  w["x"],
-                    "y":  w["y"],
-                    "target_map":  w.get("target_map_name", w.get("target_map")),
-                    "target_warp_id": w.get("target_warp_id", -1),
-                }
-                for idx, w in enumerate(current_warps)
+                {"id": i, "x": w["x"], "y": w["y"],
+                "target_map": w.get("target_map_name", w.get("target_map")),
+                "target_warp_id": w.get("target_warp_id", -1)}
+                for i, w in enumerate(warp_data)
             ]
 
-            # grid locations of those warps (entry tiles only)
-            warp_grid_coords = set()
-            for w in current_warps:
-                rel_x = w["x"] - world_x
-                rel_y = w["y"] - world_y
-                gc    = rel_x + 4   # player centre col
-                gr    = rel_y + 4   # player centre row
-                if 0 <= gr < 9 and 0 <= gc < 10:
-                    warp_grid_coords.add((gc, gr))
-
-            # ---------- 5. facing arrow ----------
-            facing = self._get_direction(self.pyboy.game_area())
-
-            # ---------- 6. assemble 9 × 10 grid ----------
+            # ---------- grid assembly ----------
             grid = []
             for r in range(9):
                 row = []
                 for c in range(10):
-                    gx = world_x + (c - pc)      # local → world coords
-                    gy = world_y + (r - pr)
+                    gx, gy = wx + (c - pc), wy + (r - pr)
+                    ent = ent_id = None
+                    if (c,r) in warp_cells or (c,r) in approach_cells:
+                        ent = "Warp"
+                    elif (c,r) in npc_cells:
+                        ent = "NPC"
+                    elif (c,r) in sign_cells:
+                        ent = "Sign"
 
-                    entity = entity_id = None
-                    if (c, r) in warp_grid_coords:
-                        entity = "Warp"
-                    elif (c, r) in npc_grid_coords:
-                        entity = "NPC"
-                    elif (c, r) in sign_grid_coords:
-                        entity = "Sign"
-
-                    row.append({
-                        "x": gx,
-                        "y": gy,
-                        "walkable": bool(downsampled[r, c] > 0.5),
-                        "entity": entity,
-                        "entity_id": entity_id,
-                    })
+                    row.append({"x": gx, "y": gy,
+                                "walkable": bool(ds9x10[r, c] > 0.5),
+                                "entity": ent, "entity_id": ent_id})
                 grid.append(row)
 
-            return {
-                "collision_map":    grid,
-                "player_position":  {"x": world_x, "y": world_y, "direction": facing},
-                "grid_position":    {"row": pr, "col": pc},
-                "recent_directions": list(self.last_10_moves),
-                "warps":            warps_list,
-            }
+            facing = self._get_direction(self.pyboy.game_area())
+            return {"collision_map": grid,
+                    "player_position": {"x": wx, "y": wy, "direction": facing},
+                    "grid_position": {"row": pr, "col": pc},
+                    "recent_directions": list(self.last_10_moves),
+                    "warps": warps_list,
+                    "sprite_data": sprite_data_list} # Include detailed sprite data
 
-        except Exception as e:
+        except Exception:
             logger.error("get_collision_map failed", exc_info=True)
-            # minimal stub to keep agent alive
-            return {
-                "collision_map": [[{"x":0,"y":0,"walkable":False,"entity":None,"entity_id":None}]*10]*9,
-                "player_position": {"x":-1,"y":-1,"direction":"?"},
-                "grid_position": {"row":-1,"col":-1},
-                "recent_directions": [],
-                "warps": [],
-            }
-
-
-    # # working
-    # def get_collision_map(self):
-    #     """
-    #     Returns a structured representation of the current screen collision map:
-    #       - collision_map: 9×10 grid of cells with world coords, walkability, entity type, entity_id
-    #       - player_position: world (x,y) + facing arrow
-    #       - grid_position: (row,col) in the 9×10 grid
-    #       - recent_directions: last 10 moves as arrows
-    #       - warps: list of warp points with local x,y and target map
-    #     """
-    #     # 1) Base collision and downsample
-    #     collision_18x20 = self.pyboy.game_area_collision()      # 18×20 array
-    #     downsampled = self._downsample_array(collision_18x20)   # 9×10 float array
-
-    #     # 2) Sprites / NPCs / Signs on 9×10 grid
-    #     sprites_9x10 = set(self.get_sprites(grid_type='9x10'))
-    #     npcs_raw = self.get_npcs_in_range()  # may not include "id"
-    #     # Build NPC map, using id if present
-    #     npc_map = { (n["grid_col"], n["grid_row"]): n.get("id") for n in npcs_raw }
-    #     sign_cells   = self.get_signs(grid_type='9x10')
-
-    #     # 3) Player world coords & grid position
-    #     reader           = PokemonRedReader(self.pyboy.memory)
-    #     world_x, world_y = reader.read_coordinates()
-    #     pr, pc           = self._get_player_grid_position()
-
-    #     # 4) Facing direction as arrow
-    #     full_map = self.pyboy.game_area()
-    #     dir_map  = {"up":"↑","down":"↓","left":"←","right":"→"}
-    #     facing   = dir_map.get(self._get_direction(full_map), "?")
-
-    #     # 5) Warps on this map
-    #     map_id       = reader.read_current_map_id()
-    #     map_key      = MAP_ID_REF.get(map_id)
-    #     current_warps = WARP_DICT.get(map_key, [])
-    #     warps_list = [
-    #         {
-    #             "id": idx,
-    #             "x": w["x"],
-    #             "y": w["y"],
-    #             "target": w.get("target_map_name", w.get("target_map"))
-    #         }
-    #         for idx, w in enumerate(current_warps)
-    #     ]
-    #     # Also mark the two warp‐cells (entry+exit)
-    #     warp_cells = set()
-    #     for w in current_warps:
-    #         rx, ry = w["x"], w["y"]
-    #         # convert to collision‐grid coords
-    #         cx, cy = rx + (collision_center := (4,4))[0] - world_x, ry + collision_center[1] - world_y
-    #         if 0 <= cy < 9 and 0 <= cx < 10:
-    #             warp_cells.add((cy, cx))
-    #         if 0 <= cy+1 < 9 and 0 <= cx < 10:
-    #             warp_cells.add((cy+1, cx))
-
-    #     # 6) Build structured grid
-    #     collision_map = []
-    #     for r in range(9):
-    #         row = []
-    #         for c in range(10):
-    #             # compute absolute world coords
-    #             global_x = world_x + (c - pc)
-    #             global_y = world_y + (r - pr)
-
-    #             # determine entity and id
-    #             if (r, c) in warp_cells:
-    #                 entity    = "Warp"
-    #                 entity_id = None
-    #             elif (c, r) in npc_map:
-    #                 entity    = "NPC"
-    #                 entity_id = npc_map[(c, r)]
-    #             elif (c, r) in sign_cells:
-    #                 entity    = "Sign"
-    #                 entity_id = None
-    #             elif (c, r) in sprites_9x10:
-    #                 entity    = "Sprite"
-    #                 entity_id = None
-    #             else:
-    #                 entity    = None
-    #                 entity_id = None
-
-    #             cell = {
-    #                 "x": global_x,
-    #                 "y": global_y,
-    #                 "walkable": bool(downsampled[r][c]),
-    #                 "entity": entity,
-    #                 "entity_id": entity_id
-    #             }
-    #             row.append(cell)
-    #         collision_map.append(row)
-
-    #     return {
-    #         "collision_map":    collision_map,
-    #         "player_position":  {"x": world_x, "y": world_y, "direction": facing},
-    #         "grid_position":    {"row": pr, "col": pc},
-    #         "recent_directions": list(self.last_10_moves),
-    #         "warps":            warps_list
-    #     }
-
-
-
-    # def get_collision_map(self):
-    #     """
-    #     Returns an ASCII representation of the current screen collision map.
-    #     """
-    #     collision_18x20 = self.pyboy.game_area_collision()
-    #     downsampled = self._downsample_array(collision_18x20)
-    #     sprites_9x10 = self.get_sprites(grid_type='9x10')
-    #     pr, pc = self._get_player_grid_position()
-
-    #     reader = PokemonRedReader(self.pyboy.memory)
-    #     player_world_x, player_world_y = reader.read_coordinates()
-    #     map_id = reader.read_current_map_id()
-    #     map_key = MAP_ID_REF.get(map_id)
-    #     current_warps = WARP_DICT.get(map_key, [])
-
-    #     full_map = self.pyboy.game_area()
-    #     direction = self._get_direction(full_map)
-    #     if direction == "no direction found":
-    #         return None
-
-    #     dir_codes = {"up": 3, "down": 4, "left": 5, "right": 6}
-    #     player_dir = dir_codes.get(direction, 3)
-
-    #     # Debugging direction and sprite info
-    #     # print(f"DEBUG: Player direction: {direction} ({player_dir})")
-    #     # print(f"DEBUG: Sprites: {sprites_9x10}")
-
-    #     base = []
-    #     for r in range(9):
-    #         row = []
-    #         for c in range(10):
-    #             row.append("0" if downsampled[r][c] else "1")
-    #         base.append(row)
-
-    #     collision_center = (4, 4)
-    #     offset_x = collision_center[0] - player_world_x
-    #     offset_y = collision_center[1] - player_world_y
-
-    #     warp_cells = set()
-    #     for warp in current_warps:
-    #         warp_collision_x = warp["x"] + offset_x
-    #         warp_collision_y = warp["y"] + offset_y
-    #         if 0 <= warp_collision_y < 9 and 0 <= warp_collision_x < 10:
-    #             warp_cells.add((warp_collision_y, warp_collision_x))
-    #             # print(f"DEBUG: Warp at collision ({warp_collision_y},{warp_collision_x})")
-
-    #         warp_below_y = warp_collision_y + 1
-    #         if 0 <= warp_below_y < 9 and 0 <= warp_collision_x < 10:
-    #             warp_cells.add((warp_below_y, warp_collision_x))
-    #             # print(f"DEBUG: Warp below at collision ({warp_below_y},{warp_collision_x})")
-
-    #     for (r, c) in warp_cells:
-    #         base[r][c] = "W"
-
-    #     # # Place sprites (taken directly from their code)
-    #     # for sprite_pos in sprites_9x10:
-    #     #     sprite_c, sprite_r = sprite_pos
-    #     #     if 0 <= sprite_r < 9 and 0 <= sprite_c < 10:
-    #     #         if (sprite_r, sprite_c) not in warp_cells:
-    #     #             base[sprite_r][sprite_c] = "2"
-    #     #             # print(f"DEBUG: Placed sprite at collision map ({sprite_r},{sprite_c})")
-        
-    #     # ------------------------------------------------------------
-    #     # Place NPCs, signs, and generic sprites on the 9×10 grid
-    #     # precedence: player > warp > NPC > sign > generic sprite
-    #     # ------------------------------------------------------------
-    #     npc_cells   = {(c, r) for c, r, _ in                                    # already 9×10 coords
-    #                    [(n["grid_col"], n["grid_row"], n["distance"])
-    #                     for n in self.get_npcs_in_range()]}
-    #     sign_cells  = self.get_signs(grid_type='9x10')
-    #     sprite_cells = set(sprites_9x10)           # generic sprites (includes NPCs but harmless)
-
-    #     for (c, r) in sprite_cells:
-    #         if not (0 <= r < 9 and 0 <= c < 10):
-    #             continue
-    #         if (r, c) in warp_cells or (r, c) == (pr, pc):
-    #             continue  # warp or player already occupies the cell
-
-    #         if (c, r) in npc_cells:
-    #             base[r][c] = "N"
-    #         elif (c, r) in sign_cells:
-    #             base[r][c] = "S"
-    #         else:
-    #             base[r][c] = "2"            # generic / unknown sprite
-
-    #     # Player placement (direct from their code)
-    #     base[pr][pc] = str(player_dir)
-    #     # print(f"DEBUG: Placed player at collision map ({pr},{pc}) direction {player_dir}")
-
-    #     # Build the collision map with coordinates
-    #     lines = []
-    #     # Add column headers
-    #     lines.append("   " + " ".join(str(i) for i in range(10)))
-    #     # Add rows with row numbers
-    #     for r in range(9):
-    #         row_str = " ".join(base[r])
-    #         lines.append(f"{r}  {row_str}")
-
-    #     # lines += [
-    #     #     "",
-    #     #     "Legend:",
-    #     #     "W  – warp (entry + exit square)",
-    #     #     "0  – walkable",
-    #     #     "1  – unwalkable",
-    #     #     "2  – other sprite",
-    #     #     "N  – NPC",
-    #     #     "S  – sign / notice board",
-    #     #     "3  – player facing up",
-    #     #     "4  – player facing down",
-    #     #     "5  – player facing left",
-    #     #     "6  – player facing right",
-    #     # ]
-
-    #     if current_warps:
-    #         lines += ["", "Warps:"]
-    #         for w in current_warps:
-    #             tgt = w.get("target_map_name", w.get("target_map"))
-    #             lines.append(f"x: {w['x']} y: {w['y']} target: {tgt}")
-
-    #     return "\n".join(lines)
+            return {"collision_map": [[{"x":0,"y":0,"walkable":False,"entity":None,"entity_id":None}]*10]*9,
+                    "player_position": {"x":-1,"y":-1,"direction":"?"},
+                    "grid_position": {"row":-1,"col":-1},
+                    "recent_directions": [], "warps": [], "sprite_data": []}
 
     # get_valid_moves() structured dict
     def get_valid_moves(self):
@@ -815,41 +499,6 @@ class Emulator:
             if 0<=r<len(grid) and 0<=c<len(grid[0]) and grid[r][c]["walkable"]:
                 moves.append(d)
         return moves
-
-
-
-    # # get_valid_moves() ascii
-    # def get_valid_moves(self):
-    #     """Return list of valid cardinal directions based on the ASCII collision map overlay."""
-    #     ascii_map = self.get_collision_map()
-    #     if not ascii_map:
-    #         return []
-    #     lines = ascii_map.splitlines()
-    #     # Expect header + 9 rows of map data
-    #     if len(lines) < 10:
-    #         return []
-    #     # Parse the 9×10 grid rows (skip header)
-    #     grid_rows = [line.split()[1:] for line in lines[1:10]]
-    #     # Locate player tile (codes '3','4','5','6')
-    #     pr = pc = None
-    #     for r, row in enumerate(grid_rows):
-    #         for c, ch in enumerate(row):
-    #             if ch in ('3', '4', '5', '6'):
-    #                 pr, pc = r, c
-    #                 break
-    #         if pr is not None:
-    #             break
-    #     if pr is None:
-    #         return []
-    #     # Check adjacent cells for walkability ('1' is unwalkable)
-    #     valid = []
-    #     directions = {'up': (-1, 0), 'down': (1, 0), 'left': (0, -1), 'right': (0, 1)}
-    #     for d, (dr, dc) in directions.items():
-    #         nr, nc = pr + dr, pc + dc
-    #         if 0 <= nr < len(grid_rows) and 0 <= nc < len(grid_rows[0]):
-    #             if grid_rows[nr][nc] != '1':
-    #                 valid.append(d)
-    #     return valid
     
     def _get_player_grid_position(self) -> Tuple[int, int]:
         """Return the player's (row, col) in the 9x10 down-sampled grid."""
@@ -875,7 +524,7 @@ class Emulator:
     # NPC helpers
     # ---------------------------------------------------------------------
     
-    def get_npcs_in_range(self, max_distance: int | None = None) -> List[Dict]:
+    def get_npcs_in_range(self, max_distance: int | None = None, grid_type: str = "9x10") -> List[Dict]:
         """Return NPCs within *max_distance* Manhattan steps of the player.
            Uses the 9x10 grid for coordinates and distance calculation.
 
@@ -891,20 +540,31 @@ class Emulator:
         pr_9x10, pc_9x10 = self._get_player_grid_position()
 
         npcs: List[Dict] = []
-        # sprite_locations_9x10 contains (col, row) tuples
-        for col, row in sprite_locations_9x10:
-            dist = abs(row - pr_9x10) + abs(col - pc_9x10)
-            if max_distance is None or dist <= max_distance:
-                npcs.append({
-                    "grid_row": row,
-                    "grid_col": col,
-                    "distance": dist,
-                })
+        # sprite_locations_9x10 is a list of dictionaries returned by get_sprites
+        for sprite_info in sprite_locations_9x10:
+            # Safely access grid coordinates from the dictionary
+            row = sprite_info.get("grid_row")
+            col = sprite_info.get("grid_col")
+
+            # Ensure row and col are valid integers
+            if isinstance(row, int) and isinstance(col, int):
+                dist = abs(row - pr_9x10) + abs(col - pc_9x10);
+                # Check if within max_distance or if max_distance is None
+                if max_distance is None or dist <= max_distance:
+                    # Append the dictionary directly, ensuring all info is kept
+                    # Add distance to the dictionary for convenience
+                    sprite_info["distance"] = dist;
+                    npcs.append(sprite_info);
+            else:
+                # Log a warning if unexpected data is found
+                logger.warning(f"Skipping sprite_info with invalid grid coordinates: {sprite_info}");
+
+        logger.debug(f"get_npcs_in_range returned {len(npcs)} items: {npcs}")
         return npcs
 
     def update_seen_npcs(self, max_distance: int | None = None) -> int:
         """
-        Adds newly observed NPCs (using 9x10 grid coords) to `self.seen_npcs`.
+        Adds newly observed NPCs (using 9x10 grid coords) to self.seen_npcs.
         This tracks *visual* detection based on grid position, not interactions.
         Returns count of newly seen NPCs in this update.
         """
@@ -913,13 +573,30 @@ class Emulator:
             current_map_id: int = self.reader.read_current_map_id()
             initial_seen_count = len(self.seen_npcs)
 
-            # Use get_npcs_in_range which works with the 9x10 grid
-            for npc_info in self.get_npcs_in_range(max_distance):
-                # Store based on map and 9x10 grid coordinates
-                npc_key = (current_map_id, npc_info["grid_row"], npc_info["grid_col"])
-                if npc_key not in self.seen_npcs:
-                    self.seen_npcs.add(npc_key)
-                    newly_seen_count += 1
+            # Explicitly get NPCs in the dictionary format for the 9x10 grid
+            # and iterate over the detailed dictionaries
+            npc_list = self.get_npcs_in_range(max_distance, grid_type='9x10')
+            logger.debug(f"update_seen_npcs received {len(npc_list)} items from get_npcs_in_range.")
+            for i, npc_data in enumerate(npc_list):
+                logger.debug(f"Processing item {i} in update_seen_npcs: type={type(npc_data)}, data={npc_data}")
+                # Ensure npc_data is a dictionary before processing
+                if not isinstance(npc_data, dict):
+                    logger.warning(f"Skipping unexpected data format in get_npcs_in_range: {npc_data}")
+                    continue
+
+                # Access grid_row, grid_col, and sprite_index from the dictionary
+                grid_row = npc_data.get("grid_row")
+                grid_col = npc_data.get("grid_col")
+                sprite_index = npc_data.get("sprite_index")
+
+                # Check if essential data is present
+                if grid_row is not None and grid_col is not None and sprite_index is not None:
+                    # Store seen NPCs based on map and their grid coordinates
+                    npc_key = (current_map_id, grid_row, grid_col)
+
+                    if npc_key not in self.seen_npcs:
+                        self.seen_npcs.add(npc_key)
+                        newly_seen_count += 1
 
         except Exception as e:
             logger.error(f"Error updating seen NPCs: {e}")
@@ -928,13 +605,10 @@ class Emulator:
         """Return an immutable view of all *visually detected* NPCs recorded so far."""
         return frozenset(self.seen_npcs)
 
-
     def enable_auto_npc_tracking(self, max_distance: int | None = None):
-        """Call once to automatically track NPCs every frame via `tick()`."""
+        """Call once to automatically track NPCs every frame via tick()."""
         self._npc_track_distance = max_distance
         logger.info(f"Auto NPC tracking enabled (max_distance={max_distance}).")
-
-    # _original_tick = tick - Remove complex hooking for now
     
     # -----------------------------------------------------------------
     # Sign helpers
@@ -1027,7 +701,6 @@ class Emulator:
         Get the location of all sprites on the screen, mapped to a 9x10 grid.
         Returns a set of coordinates (column, row) representing sprite positions.
         """
-        sprite_positions = set()
         on_screen_sprites = []
 
         # Detect all on-screen sprites
@@ -1041,19 +714,22 @@ class Emulator:
                 # If 8x16 sprite, base is at sp.y + 8; adjust by sprite height
                 y_base = sp.y + 8  # Default to 8x8 sprite height; adjust if needed
                 y = int(y_base / 144 * 9)  # 0 to 8
-                on_screen_sprites.append((i, sp.x, sp.y, x, y))
+                current_map_id = self.reader.read_current_map_id() # Get current map ID
                 if 0 <= x < 10 and 0 <= y < 9:
-                    sprite_positions.add((x, y))
+                    on_screen_sprites.append({
+                        "sprite_index": i,
+                        "map_id": current_map_id,
+                        "grid_row": y,
+                        "grid_col": x
+                    })
 
         # Debugging output
-        # if debug:
-        #     print(f"DEBUG: On-screen sprites: {len(on_screen_sprites)}")
-        #     for idx, sx, sy, gx, gy in on_screen_sprites:
-        #         print(f"  Sprite {idx}: screen (x={sx}, y={sy}) -> grid (x={gx}, y={gy})")
-        #     print(f"DEBUG: Mapped sprite positions: {sprite_positions}")
+        if debug:
+            print(f"DEBUG: On-screen sprites ({len(on_screen_sprites)}):")
+            for npc_info in on_screen_sprites:
+                print(f"  Sprite Index: {npc_info['sprite_index']}, Map ID: {npc_info['map_id']}, Grid Pos: ({npc_info['grid_row']}, {npc_info['grid_col']})")
 
-        return sprite_positions
-
+        return on_screen_sprites
 
     # find_path should ideally use the refined collision logic from get_valid_moves
     # This would involve replacing its internal checks with calls to is_tile_walkable
@@ -1166,7 +842,6 @@ class Emulator:
 
                 # --- End Walkability Check ---
 
-
                 # If walkable, process with A*
                 tentative_g_score = g_score.get(current_node, float('inf')) + 1
 
@@ -1242,11 +917,10 @@ class Emulator:
         """Centralized function to update various state trackers."""
         self.update_map_progress()
         self.update_seen_npcs() # Update visually detected NPCs
-        # Update required items/events based on current memory
-        # self.required_items = self.get_required_items() # Only if needed elsewhere frequently
-        self.current_required_events_met = self.get_required_events()
         self.update_seen_coords()
-        
+        # Update rewards
+        self.update_reward_state()
+            
     def get_standard_coords(self):
         """
         CRITICAL FUNCTION: Standardized coordinate retrieval protocol.
@@ -1300,13 +974,43 @@ class Emulator:
             self.update_seen_coords_direct(cur)
             self.update_state_variables()
 
+            # --- NEW NPC Interaction Logic based on Dialog and Facing ---
+            dialog = self.get_active_dialog()
+            if dialog:
+                player_grid_row, player_grid_col = self._get_player_grid_position()
+                player_facing = self._get_direction(self.pyboy.game_area()) # Get facing from game area
+
+                target_npc_grid_pos = None
+                if player_facing == "↑":
+                    target_npc_grid_pos = (player_grid_row - 1, player_grid_col)
+                elif player_facing == "↓":
+                    target_npc_grid_pos = (player_grid_row + 1, player_grid_col)
+                elif player_facing == "←":
+                    target_npc_grid_pos = (player_grid_row, player_grid_col - 1)
+                elif player_facing == "→":
+                    target_npc_grid_pos = (player_grid_row, player_grid_col + 1)
+
+                if target_npc_grid_pos:
+                    # Check if there's an NPC at the calculated position
+                    npcs_in_range = self.get_sprites(grid_type='9x10')
+                    for npc_info in npcs_in_range:
+                        if (npc_info.get("grid_row"), npc_info.get("grid_col")) == target_npc_grid_pos:
+                            npc_key = (npc_info.get("map_id"), npc_info.get("sprite_index"))
+                            if npc_key[0] is not None and npc_key[1] is not None and npc_key not in self.interacted_npcs:
+                                self.interacted_npcs.add(npc_key)
+                                logger.info(f"Identified and marked interacted NPC at grid {target_npc_grid_pos} with key {npc_key}")
+                            break # Found the NPC, no need to check others
+
+            # -------------------------------------------------------------
+
+
             # developer read‑out every frame (auto mode)
             print(self.get_state_from_memory())
 
             self.prev_coordinates = cur
 
         except Exception as e:
-            logger.error(f"[step] fatal error: {e}", exc_info=True)
+            logger.error(f"[step] fatal error: {e}", exc_info=True)
 
     # update_seen_coords_direct – replace whole function body
     def update_seen_coords_direct(self, coords):
@@ -1326,13 +1030,64 @@ class Emulator:
         key = (g_x, g_y)                      # global key
         tile_dict[key] = min(tile_dict.get(key, 0.0) + 1.0, self.exploration_max)
 
+    def get_screenshot(self):
+        """Get the current screenshot."""
+        return Image.fromarray(self.pyboy.screen.ndarray)
+
+    def load_state(self, state_filename):
+        """
+        Load a PyBoy save state file into the emulator.
+
+        Args:
+            state_filename: Path to the PyBoy .state file
+        """
+        try:
+            with open(state_filename, 'rb') as f:
+                state_data = f.read()
+                state_io = io.BytesIO(state_data)
+                self.pyboy.load_state(state_io)
+        except Exception:
+            # If direct loading fails, try with pickle
+            try:
+                with open(state_filename, 'rb') as f:
+                    state_data = pickle.load(f)
+                    if "pyboy_state" in state_data:
+                        pyboy_state_io = io.BytesIO(state_data["pyboy_state"])
+                        self.pyboy.load_state(pyboy_state_io)
+                    else:
+                        raise ValueError("Invalid save state format")
+            except Exception as e2:
+                logger.error(f"Failed to load save state: {e2}")
+                raise
+
+    def save_state(self, filename_prefix="auto_save"):
+        """Saves the current emulator state to a timestamped file."""
+        saves_dir = Path(SAVE_STATE_DIR)
+        saves_dir.mkdir(exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{filename_prefix}_{timestamp}.state"
+        filepath = saves_dir / filename
+
+        try:
+            with open(filepath, "wb") as f:
+                self.pyboy.save_state(f)
+            logger.info(f"Saved state to {filepath}")
+            return str(filepath)
+        except Exception as e:
+            logger.error(f"Failed to save state to {filepath}: {e}")
+            return None
 
     def get_state_from_memory(self) -> str:
-        """Return formatted live snapshot (debug heavy)."""
+        """Return formatted live snapshot with comprehensive logging."""
         try:
+            # Get logger
+            logger = logging.getLogger("game")
+            
+            # Build the state string as before
             rdr = self.reader
             x_loc, y_loc, map_id = self.get_standard_coords() or (-1,-1,-1)
-            g_y, g_x             = (-1,-1) if map_id == -1 else local_to_global(y_loc,x_loc,map_id)
+            g_y, g_x = (-1,-1) if map_id == -1 else local_to_global(y_loc,x_loc,map_id)
 
             # header ---------------------------------------------------------------
             s  = "# Current Game State\n\n(...)\n\n"
@@ -1345,156 +1100,95 @@ class Emulator:
 
             # moves ---------------------------------------------------------------
             vm = self.get_valid_moves()
-            s += f"Valid Immediate Moves: {', '.join(vm) if vm else 'None'}\n---\nDEBUG INFO:\n"
-
-            # debug block ---------------------------------------------------------
-            s += f"  Interacted NPCs/Sprites (map_id, sprite_id): {self.old_seen_npcs}\n"
-            s += f"  Interacted Signs (map_id, text_id): {self.old_seen_signs}\n"
-            s += f"  Max Map Progress Index: {self.max_map_progress}\n"
-            s += f"  Current Required Events Met (Live): {self.current_required_events_met}\n"
-
-            ts = rdr.read_tileset()
-            s += f"  Seen Coords Count (Current Tileset {ts}): {len(self.seen_coords.get(ts,{}))}\n"
-
-            visit_cnt = self.visited_counts.get((g_x, g_y), 0)
-            s += f"  Visited Count (Current Global Coord ({g_x}, {g_y})): {visit_cnt}\n"
-            s += f"  Total Visited Coordinates: {len(self.visited_counts)}\n"
-
-            # omit the power‑on dummy entry when dumping
-            clean_dict = {k:v for k,v in self.visited_counts.items() if k != (0,0)}
-            s += f"  All Visited Coordinates: {clean_dict}\n---\n"
-
-            dlg = rdr.read_dialog() or "None"
-            s += f"Dialog: {dlg}\n"
-
-            # collision + warps ----------------------------------------------------
-            cm = self.get_collision_map()
-            s += f"{self.format_collision_map_with_counts(cm)}\n\n"
-            s += self.format_warp_info(cm)
+            s += f"Valid Immediate Moves: {', '.join(vm) if vm else 'None'}\n"
+            
+            # ADDED: LLM Visibility Information Section ----------------------------
+            s += "\n=== LLM VISIBILITY DATA (FOR TESTING) ===\n"
+            
+            # Dialog state - this affects boundary checking
+            dialog = self.get_active_dialog()
+            s += f"Dialog Active: {dialog is not None}\n"
+            if dialog:
+                s += f"Dialog Text: \"{dialog}\"\n"
+            
+            # Rest of the state information
+            s += f"NPCs in range: {self.get_npcs_in_range()}\n"
+            s += f"Seen NPCs: {self.get_seen_npcs()}\n"
+            s += f"Interacted NPCs: {self.interacted_npcs}\n"
+            
+            # Log the state through the logger (in addition to returning it)
+            logger.debug(f"Emulator memory state snapshot:\n{s[:500]}...")
+            
             return s
 
         except Exception as e:
+            # Log the error properly
+            logger = logging.getLogger("game")
             logger.error("get_state_from_memory failed", exc_info=True)
             return f"# Error generating game state string: {e} #"
-
-
-
-    def format_collision_map_ascii(self, data, interacted_npcs_map):
-        """Enhanced collision map formatter with improved visit count visualization."""
-        lines = []
-        lines.append("Collision Map (9x10 grid - Your relative view):")
-        player_pos = data.get("player_position", {})
-        grid_pos = data.get("grid_position", {})
-        map_grid = data.get("collision_map", [])
-        current_map_id = self.reader.read_current_map_id()
         
-        player_grid_r, player_grid_c = grid_pos.get("row", -1), grid_pos.get("col", -1)
-        
-        if player_grid_r == -1 or not map_grid:
-            lines.append("  Error: Map/Player data unavailable.")
-            return "\n".join(lines)
-        
-        for r, row_data in enumerate(map_grid):
-            line = []
-            for c, cell in enumerate(row_data):
-                symbol = "?" # Default error
-                if isinstance(cell, dict):
-                    # Default symbol is unwalkable
-                    symbol = "#"
-                    
-                    if cell.get("walkable", False):
-                        # Get world coordinates from the cell
-                        global_x = cell.get("x", -1)
-                        global_y = cell.get("y", -1)
-                        
-                        # Create keys in BOTH formats for consistency with step()
-                        full_key = (global_x, global_y, current_map_id)
-                        simple_key = (global_x, global_y)
-                        
-                        # Try both key formats, preferring the full key
-                        visit_count = self.visited_counts.get(full_key,
-                                        self.visited_counts.get(simple_key, 0))
-                        
-                        # Display visit count (0 will show as dot)
-                        if visit_count > 0:
-                            symbol = str(visit_count % 10)
-                        else:
-                            symbol = "."
-                    
-                    entity = cell.get("entity")
-                    entity_id = cell.get("entity_id")
-                    
-                    # Entity symbols override visit counts
-                    if r == player_grid_r and c == player_grid_c:
-                        symbol = "P"
-                    elif entity == "Warp":
-                        symbol = "W"
-                    elif entity == "Sign":
-                        symbol = "S"
-                    elif entity == "NPC":
-                        # Check if this NPC has been interacted with
-                        npc_key = (current_map_id, entity_id)
-                        if npc_key in interacted_npcs_map:
-                            symbol = "X" # Interacted
-                        else:
-                            symbol = "N" # Not interacted
-                line.append(symbol)
-            lines.append(" ".join(line))
-        
-        lines.append(f"Player Facing: {player_pos.get('direction', '?')}")
-        recent_dirs = data.get('recent_directions', [])
-        moves_str = ' '.join(recent_dirs) if recent_dirs else "None yet"
-        lines.append(f"Recent Moves: {moves_str}")
-        return "\n".join(lines)
-
     def format_collision_map_with_counts(self, data):
         """
-        ASCII collision map with per‑tile visit counts (0 ➙ ‘.’, 1‑9 digits).
-        Uses GLOBAL coordinate keys stored in self.visited_counts.
+        ASCII collision map with detailed global info per cell.
+        Each cell shows (glob_y,glob_x,flag,value). Walkable floor: count,direction; Player: P,face; NPC: N,interacted; Unwalkable: ##,##
         """
-        lines = ["Collision Map (9x10 grid - Your relative view):"]
-
+        # Build a fixed-width multi-line grid: each cell is 2 lines with padded 3-digit fields
+        map_grid = data.get("collision_map", [])
+        if not map_grid:
+            return "Error: Map data unavailable."
         player_pos = data.get("player_position", {})
-        grid_pos   = data.get("grid_position", {})
-        map_grid   = data.get("collision_map", [])
+        grid_pos = data.get("grid_position", {})
         cur_map_id = self.reader.read_current_map_id()
-
-        if not map_grid or "row" not in grid_pos:
-            lines.append("  Error: Map data unavailable.")
-            return "\n".join(lines)
-
-        p_r, p_c = grid_pos["row"], grid_pos["col"]
-
-        for r, row_data in enumerate(map_grid):
-            line = []
-            for c, cell in enumerate(row_data):
-                symbol = "#"                                   # default unwalkable
-
-                if cell.get("walkable", False):
-                    # local ➙ global conversion
-                    g_y, g_x = local_to_global(cell["y"], cell["x"], cur_map_id)
-                    v_cnt = self.visited_counts.get((g_x, g_y), 0)
-
-                    symbol = str(min(v_cnt, 9)) if v_cnt else "."
-
-                # entity overrides
-                if r == p_r and c == p_c:
-                    symbol = "P"
+        # Gather interacted NPCs
+        interacted_npcs = set()
+        if hasattr(self, 'app') and hasattr(self.app.state, 'agent'):
+            interacted_npcs = self.app.state.agent.interacted_npcs
+        sprite_data_list = data.get("sprite_data", [])
+        arrow_map = {'up':'↑','down':'↓','left':'←','right':'→'}
+        pr, pc = grid_pos.get("row", -1), grid_pos.get("col", -1)
+        # Prepare ASCII grid borders for pure-text output
+        rows = len(map_grid)
+        cols = len(map_grid[0]) if rows > 0 else 0
+        cell_w = 9
+        sep = '+' + '+'.join(['-' * cell_w for _ in range(cols)]) + '+'
+        lines = [sep]
+        for r, row in enumerate(map_grid):
+            top_cells = []
+            bot_cells = []
+            for c, cell in enumerate(row):
+                if not cell.get("walkable", False):
+                    # Unwalkable tile: use #### placeholders for 4-width fields
+                    c1, c2 = "(###,###,", " ###,###)"
                 else:
-                    ent = cell.get("entity")
-                    if ent == "Warp":
-                        symbol = "W"
-                    elif ent == "Sign":
-                        symbol = "S"
-                    elif ent == "NPC":
-                        symbol = "N"
-
-                line.append(symbol)
-            lines.append(" ".join(line))
-
-        lines.append(f"Player Facing: {player_pos.get('direction','?')}")
-        moves = data.get("recent_directions", [])
-        lines.append(f"Recent Moves: {' '.join(moves) if moves else 'None yet'}")
+                    gy, gx = local_to_global(cell["y"], cell["x"], cur_map_id)
+                    # Format coordinates with right padding but no space before comma
+                    gy_s = f"{gy:4d}".replace(" ", "")
+                    gx_s = f"{gx:4d}".replace(" ", "")
+                    # Assign flag and direction based on entity
+                    if r == pr and c == pc:
+                        flag_raw = "P"
+                        dir_raw = arrow_map.get(player_pos.get("direction", ""), "?")
+                    elif cell.get("entity") == "NPC":
+                        npc = next((s for s in sprite_data_list if s.get("grid_row") == r and s.get("grid_col") == c), None)
+                        key = (npc.get("map_id"), npc.get("sprite_index")) if npc else (None, None)
+                        flag_raw = "N"
+                        dir_raw = "T" if key in interacted_npcs else "F"
+                    else:
+                        cnt = self.visited_counts.get((gx, gy), 0)
+                        flag_raw = str(cnt)
+                        dir_raw = arrow_map.get(self.last_walk_dir.get((gx, gy), ""), "...")
+                    # Format values with right padding but no space before comma
+                    flag_s = f"{flag_raw:2}".replace(" ", " ")
+                    dir_s = f"{dir_raw:4}".replace(" ", " ")
+                    # Compose cell lines with fixed 11-char width
+                    c1 = f"({gy_s},{gx_s},"
+                    c2 = f" {flag_s},{dir_s})"
+                top_cells.append(c1)
+                bot_cells.append(c2)
+            # Append bordered row
+            lines.append('|' + '|'.join(top_cells) + '|')
+            lines.append('|' + '|'.join(bot_cells) + '|')
+            lines.append(sep)
         return "\n".join(lines)
 
     def format_warp_info(self, collision_map_data):
@@ -1514,138 +1208,10 @@ class Emulator:
             warp_info += "  None detected or loaded for this map.\n"
         
         return warp_info
-            
-    # def get_state_from_memory(self) -> str:
-    #     """
-    #     Reads the game state and returns a comprehensive string representation for the LLM.
-    #     """
-    #     try:
-    #         # Use the single reader instance
-    #         reader = self.reader
-    #         memory_str = "# Current Game State\n\nThis information is direct from the emulator at the present moment along with your collision map. Use the information below to make decisions about what to do and where to go next.\n\n"
-
-    #         name = reader.read_player_name()
-    #         name = name if name != "NINTEN" else "Not yet set"
-    #         # rival_name = reader.read_rival_name() # Optional
-    #         # rival_name = rival_name if rival_name != "SONY" else "Not yet set" # Optional
-
-    #         # Current Location & Coords
-    #         location = reader.read_location()
-    #         map_id = reader.read_current_map_id()
-    #         map_key = MAP_ID_REF.get(map_id)
-    #         dims = MAP_DICT.get(map_key, {})
-    #         width = dims.get('width', 'unknown')
-    #         height = dims.get('height', 'unknown')
-    #         cur_coords = reader.read_coordinates()
-
-    #         memory_str += f"Player: {name}\n"
-    #         memory_str += f"Location: {location} (Map ID: {map_id})\n"
-    #         memory_str += f"Local Map Dimensions (x, y): ({width}, {height})\n"
-    #         memory_str += f"Current World Coordinates (x, y): {cur_coords}\n" # Use world coords
-
-    #         # Valid Moves & Pathing (Example - pathing not implemented here)
-    #         valid_moves = self.get_valid_moves()
-    #         valid_moves_str = ", ".join(valid_moves) if valid_moves else "None"
-    #         memory_str += f"Valid Immediate Moves: {valid_moves_str}\n"
-    #         # Example of adding path instruction (replace with actual pathfinding logic if available)
-    #         # target_x, target_y = (4, 5) # Example target
-    #         # path_instr = self.calculate_direction_to_coord(target_x, target_y) # Assumes simple direct path
-    #         # memory_str += f"Keystroke Sequence to Coord ({target_x}, {target_y}): {path_instr}\n"
-
-
-    #         # --- TESTING / Debug Info ---
-    #         memory_str += "---\n" # Separator for debug info
-    #         memory_str += f"DEBUG: Interacted NPCs (map_id, sprite_id): {self.old_seen_npcs}\n"
-    #         memory_str += f"DEBUG: Interacted Signs (map_id, sign_id): {self.old_seen_signs}\n"
-    #         memory_str += f"DEBUG: Max Map Progress Index: {self.max_map_progress}\n"
-    #         memory_str += f"DEBUG: Current Required Events Met (Live): {self.current_required_events_met}\n" # Renamed variable
-
-    #         # Seen Coords Info (can be large, show summary)
-    #         current_tileset = reader.read_tileset()
-    #         seen_coords_on_tileset = self.seen_coords.get(current_tileset, {})
-    #         memory_str += f"DEBUG: Seen Coords Count (Current Tileset {current_tileset}): {len(seen_coords_on_tileset)}\n"
-    #         # memory_str += f"DEBUG: Full Seen Coords: {self.seen_coords}\n" # Potentially too large
-
-    #         memory_str += f"DEBUG: Essential Map Locations (map_id: progress_idx): {self.essential_map_locations}\n"
-    #         # get_required_events() is used to populate current_required_events_met, no need to call again
-    #         # memory_str += f"DEBUG: get_required_events() call result: {self.get_required_events()}\n"
-    #         cur_visited_count = self.visited_counts.get(cur_coords, 0)
-    #         memory_str += f"DEBUG: Visited Count (Current Coord {cur_coords}): {cur_visited_count}\n"
-    #         # memory_str += f"DEBUG: All Visited Counts: {self.visited_counts}\n" # Potentially too large
-    #         memory_str += "---\n"
-
-    #         # --- Live Game Data ---
-    #         # Inventory (Optional - uncomment if needed)
-    #         # memory_str += "Inventory:\n"
-    #         # items = reader.read_items()
-    #         # if items:
-    #         #     for item, qty in items:
-    #         #         memory_str += f"  {item} x {qty}\n"
-    #         # else:
-    #         #     memory_str += "  Empty\n"
-
-    #         # Dialog
-    #         dialog = reader.read_dialog()
-    #         memory_str += f"Dialog: {dialog if dialog else 'None'}\n"
-
-    #         # --- Visual Map Representation ---
-    #         collision_map_data = self.get_collision_map()
-
-    #         # ASCII Map
-    #         def format_collision_map_ascii(data):
-    #             lines = []
-    #             lines.append("Collision Map (9x10 grid - Your relative view):")
-    #             player_world_x = data["player_position"]["x"]
-    #             player_world_y = data["player_position"]["y"]
-    #             player_grid_r, player_grid_c = data["grid_position"]["row"], data["grid_position"]["col"]
-
-    #             for r, row_data in enumerate(data["collision_map"]):
-    #                 line = []
-    #                 for c, cell in enumerate(row_data):
-    #                     symbol = "#" # Default: Not Walkable
-    #                     if cell["walkable"]:
-    #                         symbol = "." # Walkable
-
-    #                     # Overlay entities - Prioritize Player
-    #                     if r == player_grid_r and c == player_grid_c:
-    #                          symbol = "P" # Player position takes precedence
-    #                     elif cell["entity"] == "Warp":
-    #                         symbol = "W"
-    #                     elif cell["entity"] == "NPC": # Represents any sprite
-    #                         symbol = "X" # Changed from N to X
-    #                     elif cell["entity"] == "Sign":
-    #                         symbol = "S"
-
-    #                     line.append(symbol)
-    #                 lines.append(" ".join(line))
-    #             lines.append(f"Player Facing: {data['player_position']['direction']}")
-    #             # Format recent moves with default
-    #             moves_str = ' '.join(data['recent_directions']) if data['recent_directions'] else "None yet"
-    #             lines.append(f"Recent Moves: {moves_str}")
-    #             return "\n".join(lines)
-
-    #         memory_str += f"{format_collision_map_ascii(collision_map_data)}\n\n"
-
-    #         # Structured Warp Info
-    #         memory_str += "Warps on Current Map:\n"
-    #         if collision_map_data["warps"]:
-    #             for w in collision_map_data["warps"]:
-    #                 memory_str += f"  - ID {w['id']}: At ({w['x']}, {w['y']}) -> Target Map '{w['target_map']}', Warp ID {w['target_warp_id']}\n"
-    #         else:
-    #             memory_str += "  None detected on this map.\n"
-
-    #         return memory_str
-
-    #     except Exception as e:
-    #         logger.error(f"Error generating state string: {e}", exc_info=True)
-    #         return "# Error generating game state string #"
 
     def stop(self):
         self.pyboy.stop()
 
-    # is_warp_tile - Keep original or remove if not used elsewhere?
-    # It was used in the old collision map logic. The new one calculates warps directly.
-    # Keep for potential future use or remove if confirmed unused.
     def is_warp_tile(self, grid_row: int, grid_col: int) -> bool:
         """
         Check if the specified downsampled grid cell (9x10) corresponds to a warp tile.
@@ -1660,6 +1226,63 @@ class Emulator:
             if warp_grid_row == grid_row and warp_grid_col == grid_col:
                 return True
         return False
+    
+    @property
+    def all_events_string(self):
+        """
+        Reads all event flags from memory and returns them as a binary string.
+        Caches the result for performance until explicitly cleared.
+        """
+        if not self._all_events_string:
+            result = ''
+            for i in range(EVENT_FLAGS_START, EVENT_FLAGS_START + EVENTS_FLAGS_LENGTH):
+                result += bin(self.read_m(i))[2:].zfill(8)  # Convert to binary and pad to 8 bits
+            self._all_events_string = result
+        return self._all_events_string
+    
+    def get_base_event_flags(self):
+        """
+        Calculate the baseline number of event flags that are already set,
+        which should be excluded from reward calculations.
+        """
+        # Count the number of '1's in the all_events_string but exclude ignored events
+        n_ignored_events = 0
+        for event_id in IGNORED_EVENT_IDS:
+            if self.all_events_string[event_id] == '1':
+                n_ignored_events += 1
+        
+        return max(self.all_events_string.count('1') - n_ignored_events, 0)
+    
+    def get_all_events_reward(self):
+        """
+        Calculate rewards for events that have been newly triggered.
+        Updates the rewarded_events_string to track rewarded events.
+        """
+        if self.all_events_string != self.past_events_string:
+            # Check each bit position for new events
+            first_i = -1
+            for i in range(len(self.all_events_string)):
+                # If event is active, not already rewarded, and not in ignore list
+                if (self.all_events_string[i] == '1' and 
+                    self.rewarded_events_string[i] == '0' and 
+                    i not in IGNORED_EVENT_IDS):
+                    # Mark as rewarded
+                    self.rewarded_events_string = (
+                        self.rewarded_events_string[:i] + 
+                        '1' + 
+                        self.rewarded_events_string[i+1:]
+                    )
+                    if first_i == -1:
+                        first_i = i
+        
+        # Calculate total rewarded events minus the baseline
+        return self.rewarded_events_string.count('1') - self.base_event_flags
+    
+    def update_max_event_rew(self):
+        """Update the maximum event reward earned so far."""
+        cur_rew = self.get_all_events_reward()
+        self.max_event_rew = max(cur_rew, self.max_event_rew)
+        return self.max_event_rew
         
     def calculate_direction_to_coord(self, target_x: int, target_y: int) -> str:
         """
@@ -1719,7 +1342,22 @@ class Emulator:
         self.max_map_progress = 0
         self.update_state_variables()
         
+        # Reset reward system
+        self.visited_tiles.clear()
+        if current_coords:
+            self.visited_tiles.add(current_coords)
+        self.interacted_npcs.clear()
+        self.current_step_reward = 0.0
+        self.current_episode_reward = 0.0
+        self.step_counter = 0
+        self.npc_penalty_count = 0
+        
+        # Store previous episode reward if we have one
+        if self.current_episode_reward != 0.0:
+            self.episode_rewards.append(self.current_episode_reward)
+        
         logger.info("RESET: Internal emulator trackers reset")
+
 
 # Helper function (outside class or make static) used by find_path
 def heuristic(a, b):

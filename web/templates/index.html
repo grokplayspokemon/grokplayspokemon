@@ -47,6 +47,9 @@
             padding: 1rem;
             border-bottom: 4px solid var(--pokemon-yellow);
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
         .header h1 {
@@ -66,28 +69,56 @@
         }
 
         .game-window {
-            flex: 1;
             background-color: var(--chat-bg);
             border: 4px solid var(--border-color);
-            border-radius: 8px;
             overflow: hidden;
             position: relative;
             box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
             display: flex;
-            /* Ensure canvas can be sized properly */
+            flex-direction: column;
             align-items: center;
-            /* Center canvas vertically */
-            justify-content: center;
-            /* Center canvas horizontally */
+            /* Center children horizontally */
+            justify-content: flex-start;
+            /* Stack from top */
         }
 
+        /* Container for scaled canvas and overlay */
+        #screen-container {
+            position: relative;
+            display: inline-block;
+            /* Shrink-wrap to canvas size */
+            /* Intrinsic canvas size controls container dimensions */
+        }
+
+        /* Scale canvas to fill container, preserving pixel art */
         #game-screen {
-            /* width/height set by JS */
-            object-fit: contain;
             image-rendering: pixelated;
-            max-width: 100%;
-            /* Ensure canvas doesn't overflow container */
-            max-height: 100%;
+            width: 640px;
+            height: 576px;
+        }
+
+        /* Overlay ASCII collision map atop canvas */
+        #collision-map-overlay {
+            position: absolute;
+            top: 400;
+            left: 0;
+            width: 100%;
+            /* Match canvas container dimensions */
+            height: 100%;
+            margin: 0;
+            font-family: monospace;
+            font-size: 0.6rem;
+            line-height: 0.6rem;
+            color: var(--chat-text);
+            background: rgba(0, 0, 0, 0.2);
+            white-space: pre;
+            pointer-events: none;
+            overflow: hidden;
+        }
+
+        /* Hide old collision-container */
+        #collision-container {
+            display: none !important;
         }
 
         .chat-window {
@@ -160,9 +191,6 @@
         }
 
         .status {
-            position: absolute;
-            top: 1rem;
-            left: 1rem;
             background-color: rgba(0, 0, 0, 0.9);
             color: var(--chat-text);
             padding: 0.5rem;
@@ -173,7 +201,6 @@
             gap: 1rem;
             align-items: center;
             z-index: 10;
-            /* Ensure status is above canvas */
         }
 
         .run-button {
@@ -244,29 +271,74 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #3a3a3a;
         }
+
+        /* Added collision map CSS */
+        #collision-container {
+            display: none;
+        }
+
+        #collision-container h3 {
+            margin: 0 0 0.5rem 0;
+            color: var(--pokemon-yellow);
+            font-size: 1.5rem;
+            text-shadow: 1px 1px #000;
+            text-align: center;
+        }
+
+        #collision-map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            margin: 0;
+            font-size: 0.5rem;
+            line-height: 0.5rem;
+            color: var(--chat-text);
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        #collision-info {
+            display: inline-block;
+            text-align: center;
+            vertical-align: top;
+            margin-left: 2rem;
+        }
+
+        /* Collision info items */
+        #player-facing,
+        #recent-moves,
+        #warp-list {
+            font-size: 1rem;
+            margin: 0.5rem 0;
+        }
     </style>
 </head>
 
 <body>
     <header class="header">
         <h1>Grok Plays Pokemon</h1>
+        <div class="status">
+            <span id="connectionStatus" class="status-text">Stopped</span>
+            <button class="dev-toggle-button red" id="dev-toggle" onclick="toggleDevControl()">Dev Control: OFF</button>
+            <button class="run-button" id="run-button" onclick="toggleAgent()">Run</button>
+            <button class="run-button red" id="stop-button" onclick="stopAgent()" style="display: none;">Stop</button>
+            <input type="file" id="save-state-input" style="display: none" accept=".state">
+            <button class="run-button" id="load-state-button"
+                onclick="document.getElementById('save-state-input').click()">Load Save</button>
+            <label for="delay-input" style="margin-left:1rem; color: var(--chat-text); font-size:0.7rem;">Delay
+                (s):</label>
+            <input id="delay-input" type="number" min="0" step="0.1" value="2.0"
+                style="width:4rem; font-size:0.7rem; margin-left:0.5rem;" />
+            <button id="connectButton" onclick="connectWebSocket()">Connect</button>
+            <button id="disconnectButton" onclick="disconnectWebSocket()">Disconnect</button>
+            <button id="refreshButton" onclick="connectWebSocket()">Refresh</button>
+        </div>
     </header>
 
     <main class="container">
         <div class="game-window">
-            <canvas id="game-screen"></canvas>
-            <div class="status">
-                <span class="status-text">Stopped</span>
-                <button class="dev-toggle-button red" id="dev-toggle" onclick="toggleDevControl()">Dev Control:
-                    OFF</button>
-                <button class="run-button" id="run-button" onclick="toggleAgent()">Run</button>
-                <button class="run-button purple" id="pause-button" onclick="pauseAgent()"
-                    style="display: none;">Pause</button>
-                <button class="run-button red" id="stop-button" onclick="stopAgent()"
-                    style="display: none;">Stop</button>
-                <input type="file" id="save-state-input" style="display: none" accept=".state">
-                <button class="run-button" id="load-state-button"
-                    onclick="document.getElementById('save-state-input').click()">Load Save</button>
+            <div id="screen-container">
+                <canvas id="game-screen" width="160" height="144"></canvas>
+                <pre id="collision-map-overlay"></pre>
             </div>
         </div>
 
@@ -282,10 +354,12 @@
     <script>
         console.log('Index.html script loaded');
         let devMode = false;
-        let ws = null;
+        let ws;
         let reconnectAttempts = 0;
-        const maxReconnectAttempts = 5;
-        const reconnectDelay = 1000;
+        const maxReconnectAttempts = 20; // Limit attempts
+        const initialReconnectDelay = 1000; // 1 second
+        let currentReconnectDelay = initialReconnectDelay;
+        let reconnectTimeoutId;
         let isAgentRunning = false;
         let isAgentPaused = false;
         let lastFrameUrl = null; // Store the last frame for redraws
@@ -359,110 +433,183 @@
 
         // --- WebSocket Handling ---
         function connectWebSocket() {
-            console.log(`connectWebSocket() called, attempting ws://${window.location.host}/ws`);
-            if (ws !== null) {
-                ws.close();
+            if (ws && ws.readyState !== WebSocket.CLOSED) {
+                console.log("WebSocket already connected or connecting.");
+                return; // Prevent multiple connections
             }
 
-            ws = new WebSocket(`ws://${window.location.host}/ws`);
+            const port = window.location.port || "80"; // Default to 80 if port is not in location
 
-            ws.onopen = function () {
-                console.log('WebSocket connected');
-                reconnectAttempts = 0;
+            // Use the correct host based on the environment
+            const host = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+                ? "localhost" // Use localhost for local development
+                : window.location.hostname; // Use the actual hostname for other environments
+
+            const wsUrl = `ws://${host}:${port}/ws`;
+            console.log(`Attempting to connect WebSocket to ${wsUrl}...`);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function (event) {
+                console.log("WebSocket connected:", event);
+                reconnectAttempts = 0; // Reset attempts on successful connection
+                currentReconnectDelay = initialReconnectDelay; // Reset delay
+                clearTimeout(reconnectTimeoutId); // Clear any pending reconnect
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                document.getElementById('connectionStatus').style.color = 'green';
                 checkAgentStatus(); // Check status when connection is established
-            };
-
-            ws.onclose = function () {
-                console.log('WebSocket disconnected');
-                const statusElement = document.querySelector('.status'); // Get the whole status div
-                const statusText = statusElement ? statusElement.querySelector('.status-text') : null;
-
-                if (statusText) {
-                    statusText.textContent = 'Reconnecting...';
-                    statusElement.style.backgroundColor = 'rgba(255, 165, 0, 0.8)'; // Orange for reconnecting
+                // Send initial delay setting to server
+                const delayInput = document.getElementById('delay-input');
+                if (delayInput && ws.readyState === WebSocket.OPEN) {
+                    const initialDelay = parseFloat(delayInput.value);
+                    console.log(`Sending initial delay: ${initialDelay}s`);
+                    ws.send(JSON.stringify({ type: 'set_delay', delay: initialDelay }));
                 }
-
-                // Try to reconnect with exponential backoff
-                if (reconnectAttempts < maxReconnectAttempts) {
-                    const delay = reconnectDelay * Math.pow(2, reconnectAttempts);
-                    console.log(`Attempting to reconnect in ${delay}ms...`);
-                    setTimeout(connectWebSocket, delay);
-                    reconnectAttempts++;
-                } else {
-                    if (statusText) {
-                        statusText.textContent = 'Offline';
-                        statusElement.style.backgroundColor = 'rgba(255, 0, 0, 0.8)'; // Red for offline
-                    }
-                }
-            };
-
-            ws.onerror = function (error) {
-                console.error('WebSocket error:', error);
             };
 
             ws.onmessage = function (event) {
+                // console.log("WebSocket message received:", event.data);
                 try {
                     const data = JSON.parse(event.data);
 
+                    // Check if the message type is 'update'
                     if (data.type === 'update') {
-                        // Update game frame
+                        console.log(`Update event with timestamp ${data.timestamp || 'none'}`);
+
+                        // Update game frame (draw onto canvas)
                         if (data.frame) {
-                            // Assuming hex string frame data
-                            const frameData = new Uint8Array(data.frame.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-                            const blob = new Blob([frameData], { type: 'image/png' });
-                            const url = URL.createObjectURL(blob);
+                            try {
+                                // Assuming data.frame is a hex string
+                                const frameData = new Uint8Array(data.frame.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
 
-                            // Clean up old URL if it exists
-                            if (lastFrameUrl) {
-                                URL.revokeObjectURL(lastFrameUrl);
+                                if (frameData && frameData.length > 0) {
+                                    const blob = new Blob([frameData], { type: 'image/png' });
+                                    const url = URL.createObjectURL(blob);
+
+                                    if (lastFrameUrl) {
+                                        URL.revokeObjectURL(lastFrameUrl);
+                                    }
+                                    lastFrameUrl = url;
+
+                                    const img = new Image();
+                                    img.onload = () => {
+                                        ctx.clearRect(0, 0, gameScreen.width, gameScreen.height);
+                                        ctx.drawImage(img, 0, 0, gameScreen.width, gameScreen.height);
+                                        drawGrid(); // Draw grid if devMode is ON
+                                        console.log(`Frame rendered at ${new Date().toISOString()}`);
+                                    };
+                                    img.onerror = (err) => {
+                                        console.error(`Error loading image frame: ${err}`);
+                                        redrawCanvas();
+                                    };
+                                    img.src = url;
+                                } else {
+                                    console.warn("Received empty frame data in update");
+                                    redrawCanvas();
+                                }
+                            } catch (frameError) {
+                                console.error(`Error processing frame data for canvas: ${frameError}`);
+                                redrawCanvas();
                             }
-                            lastFrameUrl = url; // Store the new URL
-
-                            const img = new Image();
-                            img.onload = () => {
-                                ctx.clearRect(0, 0, gameScreen.width, gameScreen.height); // Clear before drawing new frame
-                                ctx.drawImage(img, 0, 0, gameScreen.width, gameScreen.height);
-                                // Draw grid overlay if dev mode is on
-                                drawGrid();
-                                // URL.revokeObjectURL(url) is now done when the next frame arrives or on disconnect
-                            };
-                            img.onerror = () => {
-                                console.error("Error loading image frame.");
-                                // Optionally revoke URL here if image fails to load
-                                // URL.revokeObjectURL(url);
-                                // lastFrameUrl = null;
-                            };
-                            img.src = url;
                         } else {
-                            // If no frame in update, still potentially redraw grid if needed
+                            // If no frame, just redraw grid if needed on current canvas content
                             redrawCanvas();
+                            console.log("Update had no frame data, redrew existing canvas");
                         }
 
-
-                        // Update chat
+                        // Append text message to chat
                         if (data.message) {
                             const messageDiv = document.createElement('div');
                             messageDiv.className = 'message';
-                            messageDiv.innerHTML = `
-                                <span class="timestamp">${new Date().toLocaleTimeString()}</span>
-                                <span class="content">${data.message}</span>
-                            `;
+                            const timeSpan = document.createElement('span');
+                            timeSpan.className = 'timestamp';
+                            timeSpan.textContent = new Date().toLocaleTimeString();
+                            const pre = document.createElement('pre');
+                            pre.className = 'content';
+                            pre.textContent = data.message; // Assuming message is plain text
+                            messageDiv.appendChild(timeSpan);
+                            messageDiv.appendChild(pre);
                             chatMessages.appendChild(messageDiv);
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                            chatMessages.scrollTop = chatMessages.scrollHeight; // Auto-scroll
                         }
 
-                        // Memory state display removed to declutter Grok's Thoughts
+                        // Update collision map and info
+                        if (data.collision_map) {
+                            console.log("[Collision ASCII Map]", data.collision_map);
+                            document.getElementById('collision-map-overlay').textContent = data.collision_map;
+                        }
 
-                    } else if (data.type === 'pong') {
-                        // Handle pong if needed, e.g., calculate latency
+                        // Handle Grok's thoughts if sent separately (adjust if structure differs)
+                        // Based on previous turns, Grok's thoughts were part of the main 'message'
+                        // field or implicitly shown via agent actions/logs. If a dedicated
+                        // 'grok_thoughts' field is added later, this section would handle it.
+                        // For now, rely on 'data.message' for text updates.
+
+                    } else {
+                        console.log("Received non-'update' WebSocket message:", data);
+                        // Optionally display other message types in chat for debugging
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = 'message system-message'; // Use a different class for system messages
+                        const timeSpan = document.createElement('span');
+                        timeSpan.className = 'timestamp';
+                        timeSpan.textContent = new Date().toLocaleTimeString();
+                        const pre = document.createElement('pre');
+                        pre.className = 'content';
+                        pre.textContent = `Received type: ${data.type}\nContent: ${JSON.stringify(data, null, 2)}`;
+                        messageDiv.appendChild(timeSpan);
+                        messageDiv.appendChild(pre);
+                        chatMessages.appendChild(messageDiv);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
                     }
 
-                } catch (error) {
-                    console.error('Error processing message:', error, "Data:", event.data);
+                } catch (e) {
+                    console.error("Error processing WebSocket message:", e);
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'message error-message'; // Use a class for errors
+                    const timeSpan = document.createElement('span');
+                    timeSpan.className = 'timestamp';
+                    timeSpan.textContent = new Date().toLocaleTimeString();
+                    const pre = document.createElement('pre');
+                    pre.className = 'content';
+                    pre.textContent = `Error parsing/processing message: ${e}\nRaw data: ${event.data}`; // Show raw data on error
+                    messageDiv.appendChild(timeSpan);
+                    messageDiv.appendChild(pre);
+                    chatMessages.appendChild(messageDiv);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+            };
+
+            ws.onerror = function (event) {
+                console.error("WebSocket error:", event);
+                document.getElementById('connectionStatus').textContent = 'Error';
+                document.getElementById('connectionStatus').style.color = 'red';
+            };
+
+            ws.onclose = function (event) {
+                console.log("WebSocket closed:", event);
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                document.getElementById('connectionStatus').style.color = 'orange';
+
+                // Attempt to reconnect
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectTimeoutId = setTimeout(connectWebSocket, currentReconnectDelay);
+                    console.log(`Attempting reconnect in ${currentReconnectDelay}ms (Attempt ${reconnectAttempts + 1})`);
+                    reconnectAttempts++;
+                    // Increase delay exponentially, with a cap
+                    currentReconnectDelay = Math.min(currentReconnectDelay * 2, 30000); // Max 30 seconds
+                } else {
+                    console.warn("Max reconnect attempts reached.");
+                    document.getElementById('connectionStatus').textContent = 'Failed to Connect';
+                    document.getElementById('connectionStatus').style.color = 'red';
                 }
             };
         }
 
+        // Helper function to escape HTML for safe display
+        function escapeHTML(str) {
+            const div = document.createElement('div');
+            div.appendChild(document.createTextNode(str));
+            return div.innerHTML;
+        }
 
         // --- Agent Control Functions ---
         document.getElementById('save-state-input').addEventListener('change', async function (e) {
@@ -498,7 +645,6 @@
 
         async function toggleAgent() {
             const runButton = document.getElementById('run-button');
-            const pauseButton = document.getElementById('pause-button');
             const stopButton = document.getElementById('stop-button');
             const loadStateButton = document.getElementById('load-state-button');
             const statusText = document.querySelector('.status-text');
@@ -514,10 +660,8 @@
                         isAgentPaused = false;
                         statusText.textContent = 'Running';
                         runButton.style.display = 'none';
-                        pauseButton.style.display = 'inline';
                         stopButton.style.display = 'inline';
                         loadStateButton.style.display = 'none';
-                        pauseButton.textContent = 'Pause';
                     } else {
                         statusText.textContent = 'Error: ' + data.message;
                         runButton.disabled = false;
@@ -530,29 +674,8 @@
             }
         }
 
-        async function pauseAgent() {
-            const pauseButton = document.getElementById('pause-button');
-            const statusText = document.querySelector('.status-text');
-
-            try {
-                const response = await fetch('/pause', { method: 'POST' });
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    // The backend now dictates the state, update based on /status check
-                    await checkAgentStatus(); // Check status immediately after toggle
-                } else {
-                    statusText.textContent = 'Error: ' + data.message;
-                }
-            } catch (error) {
-                console.error('Error toggling pause:', error);
-                statusText.textContent = 'Error toggling pause';
-            }
-        }
-
         async function stopAgent() {
             const runButton = document.getElementById('run-button');
-            const pauseButton = document.getElementById('pause-button');
             const stopButton = document.getElementById('stop-button');
             const loadStateButton = document.getElementById('load-state-button');
             const statusText = document.querySelector('.status-text');
@@ -567,10 +690,8 @@
                     statusText.textContent = 'Stopped';
                     runButton.disabled = false;
                     runButton.style.display = 'inline';
-                    pauseButton.style.display = 'none';
                     stopButton.style.display = 'none';
                     loadStateButton.style.display = 'inline';
-                    pauseButton.textContent = 'Pause'; // Reset pause button text
                 } else {
                     statusText.textContent = 'Error: ' + data.message;
                 }
@@ -584,14 +705,13 @@
             try {
                 const response = await fetch('/status');
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw new Error(`HTTP error! status: ${response.status} `);
                 }
                 const data = await response.json();
 
                 const statusText = document.querySelector('.status-text');
                 const devToggle = document.getElementById('dev-toggle');
                 const runButton = document.getElementById('run-button');
-                const pauseButton = document.getElementById('pause-button');
                 const stopButton = document.getElementById('stop-button');
                 const loadStateButton = document.getElementById('load-state-button');
 
@@ -603,19 +723,15 @@
                 if (isAgentRunning) {
                     statusText.textContent = isAgentPaused ? 'Paused' : 'Running';
                     runButton.style.display = 'none';
-                    pauseButton.style.display = 'inline';
                     stopButton.style.display = 'inline';
                     loadStateButton.style.display = 'none';
-                    pauseButton.textContent = isAgentPaused ? 'Resume' : 'Pause';
                     runButton.disabled = true; // Disable run button when agent is running/paused
                 } else { // Status is 'stopped' or potentially an error state
-                    statusText.textContent = data.status === 'stopped' ? 'Stopped' : `Status: ${data.status}`; // Show other statuses if any
+                    statusText.textContent = data.status === 'stopped' ? 'Stopped' : `Status: ${data.status} `; // Show other statuses if any
                     runButton.disabled = false;
                     runButton.style.display = 'inline';
-                    pauseButton.style.display = 'none';
                     stopButton.style.display = 'none';
                     loadStateButton.style.display = 'inline';
-                    pauseButton.textContent = 'Pause'; // Reset pause button text
                 }
 
             } catch (error) {
@@ -626,33 +742,9 @@
             }
         }
 
-        // --- Canvas Setup & Resize ---
-        function resizeCanvas() {
-            const container = gameScreen.parentElement;
-            // Maintain aspect ratio (e.g., GBA 240x160 -> 3:2)
-            const aspectRatio = 10 / 9; // Game screen is 160x144 pixels which is 10x9 tiles
-            let newWidth = container.clientWidth;
-            let newHeight = container.clientHeight;
-
-            if (newWidth / newHeight > aspectRatio) {
-                // Container is wider than aspect ratio, height dictates size
-                newWidth = newHeight * aspectRatio;
-            } else {
-                // Container is taller, width dictates size
-                newHeight = newWidth / aspectRatio;
-            }
-
-            gameScreen.width = Math.floor(newWidth); // Use integers for canvas dimensions
-            gameScreen.height = Math.floor(newHeight);
-
-            redrawCanvas(); // Redraw canvas content after resize
-        }
-
-        window.addEventListener('resize', resizeCanvas);
-
-
         // --- Initial Setup ---
-        resizeCanvas(); // Initial canvas sizing
+        // Using fixed canvas size; auto-resize disabled
+        // Window resize listener and resizeCanvas removed to preserve display dimensions
         connectWebSocket(); // Initial WebSocket connection
 
         // Send periodic ping to keep connection alive
@@ -709,12 +801,36 @@
 
             // Ensure row/col are within bounds
             if (row >= 0 && row < numRows && col >= 0 && col < numCols) {
-                console.log(`Requesting navigation to grid cell (${row}, ${col})`);
+                console.log(`Requesting navigation to grid cell(${row}, ${col})`);
                 ws.send(JSON.stringify({ type: 'navigate', row, col }));
             } else {
                 console.warn(`Calculated click outside grid bounds: (${row}, ${col})`);
             }
         });
+
+        // Handle delay input changes
+        document.getElementById('delay-input').addEventListener('change', function (e) {
+            const newDelay = parseFloat(e.target.value);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'set_delay', delay: newDelay }));
+            }
+        });
+
+        // Refresh button functionality
+        const refreshButton = document.getElementById('refreshButton');
+        if (refreshButton) {
+            refreshButton.addEventListener('click', function () {
+                console.log("Refresh button clicked. Closing WebSocket and attempting to reconnect.");
+                if (ws) {
+                    ws.close(); // Close current connection
+                }
+                reconnectAttempts = 0; // Reset attempts
+                currentReconnectDelay = initialReconnectDelay; // Reset delay
+                clearTimeout(reconnectTimeoutId); // Clear any pending reconnect
+                // Add a small delay before the first reconnect attempt after manual refresh
+                reconnectTimeoutId = setTimeout(connectWebSocket, 500); // Wait 500ms
+            });
+        }
 
     </script>
 </body>

@@ -1,21 +1,20 @@
 # prompts.py
 """Prompt strings used by Grok for exploration reward maximization."""
 
-OLD_SYSTEM_PROMPT = """
+SYSTEM_PROMPT = """
 You are Grok, an autonomous agent controlling Pokémon Red via provided function tools. You must only respond with exactly one function call per turn, formatted as valid JSON with keys "name" and "arguments", and nothing else.
+Each turn, you receive the current collision map, player location, dialog text (if any), and exploration reward information. Use only the above tools to advance the game—never output free-form text or hallucinations. Always choose the single best tool call to progress in the game.
+The collision map is your vision. Your local is always the P on it. N is an NPC and W is a warp.
 
 Available tools:
-1. press_buttons (buttons: list[str], wait: bool) — Press controller buttons.
+1. press_buttons (buttons: list[str], wait: bool) — Press emulator buttons. Available buttons: "a", "b", "start", "up", "down", "left", "right".
    Example: {"name":"press_buttons","arguments":{"buttons":["up"],"wait":true}}
-2. navigate_to (row: int, col: int) — Navigate your character to specific grid coordinates.
+2. navigate_to (glob_y: int, glob_x: int) — Navigates your character to specific global map coordinates (Y, X). Your primary means of movement for exploring the world map.
 3. exit_menu () — Exit any active menu or dialog.
-4. handle_battle () — Automatically handle battle by selecting fight and pressing A.
-5. exit_to_last_map () — Return to the previous map region.
-6. check_bounds (row: int, col: int) — Check if a grid coordinate is within map bounds.
+4. handle_battle () — Automatically handle battling.
+5. exit_to_last_map () — Exit from a building to the last map you were on.
 
-Each turn, you receive the current collision map, player location, dialog text (if any), and exploration reward information. Use only the above tools to advance the game—never output free-form text or hallucinations. Always choose the single best tool call to progress in the game.
-
-Your goal is to successfully play Pokémon Red, exploring new areas and winning battles when required. Output only the JSON function call.
+Your goal is to successfully explore Pokémon Red, because exploration takes you to the subsequent areas you need to be to progress the storyline plot, and that is how you win the game.
 """
 
 SUMMARY_PROMPT = """
@@ -30,9 +29,8 @@ Unique tiles explored: {unique_tiles}
 Output only the next JSON function call to continue playing.
 """
 
-# OVERWORLD_NAVIGATION_PROMPT = """
-SYSTEM_PROMPT = """
-Below is a series of prompts designed to guide an agent to progress correctly eastward through a grid-based Pokémon overworld, avoiding obstacles and accounting for NPCs. The overworld is represented as a grid where '.' indicates traversable tiles, '#' indicates untraversable tiles, 'N' indicates NPCs, and numbers show how many times the player has traversed a tile. The agent’s goal is to move eastward (increasing x-coordinates) toward destinations like Cerulean City via Route 3 and Mt. Moon. These prompts ensure the agent analyzes its surroundings, evaluates paths, and chooses the most effective route.
+OVERWORLD_NAVIGATION_PROMPT = """
+Below is a series of prompts designed to guide an agent to progress correctly eastward through a grid-based Pokémon overworld, avoiding obstacles and accounting for NPCs. The overworld is represented as a grid where '.' indicates traversable tiles, '#' indicates untraversable tiles, 'N' indicates NPCs, and numbers show how many times the player has traversed a tile. The agent's goal is to move eastward (increasing x-coordinates) toward destinations like Cerulean City via Route 3 and Mt. Moon. These prompts ensure the agent analyzes its surroundings, evaluates paths, and chooses the most effective route.
 Series of Prompts to Guide the Agent
 1. Analyze the Current Position and Grid
 

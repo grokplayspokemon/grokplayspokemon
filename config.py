@@ -1,3 +1,4 @@
+# config.py
 import logging
 import os
 
@@ -32,7 +33,7 @@ LLM_MAX_TOKENS = 15000
 # Provider-specific models
 LLM_MODEL_ANTHROPIC = "claude-3-5-sonnet-20240620" # Or "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"
 LLM_MODEL_OPENAI = "gpt-4o-mini" # Or "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"
-LLM_MODEL_GROK = "grok-3-latest"
+LLM_MODEL_GROK = "grok-3-mini-beta"
 
 # --- Agent & Game Settings ---
 MAX_HISTORY = 10 # Max messages before summarization

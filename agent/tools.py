@@ -1,86 +1,106 @@
-# tools.py
+from pydantic import BaseModel, Field
+from typing import List, Literal, Optional, Dict, Any
+
+# Pydantic models for each tool input schema
+class PressButtonsRequest(BaseModel):
+    buttons: List[Literal["a", "b", "start", "select", "up", "down", "left", "right"]] = Field(
+        description="List of buttons to press in sequence. Valid buttons: 'a', 'b', 'start', 'select', 'up', 'down', 'left', 'right'"
+    )
+    wait: Optional[bool] = Field(
+        default=True,
+        description="Whether to wait for a brief period after pressing each button. Defaults to true."
+    )
+
+class NavigateToRequest(BaseModel):
+    glob_y: int = Field(
+        description="The global Y coordinate to navigate to."
+    )
+    glob_x: int = Field(
+        description="The global X coordinate to navigate to."
+    )
+
+class EmptyRequest(BaseModel):
+    pass
+
+class HandleBattleRequest(BaseModel):
+    buttons: List[Literal["a", "b", "start", "select", "up", "down", "left", "right"]] = Field(
+        description="List of buttons to press in sequence. Valid buttons: 'a', 'b', 'start', 'select', 'up', 'down', 'left', 'right'"
+    )
+    wait: Optional[bool] = Field(
+        default=True,
+        description="Whether to wait for a brief period after pressing each button. Defaults to true."
+    )
+
+# Generate JSON schemas from the Pydantic models
+press_buttons_schema = PressButtonsRequest.model_json_schema()
+navigate_to_schema = NavigateToRequest.model_json_schema()
+empty_schema = EmptyRequest.model_json_schema()
+handle_battle_schema = HandleBattleRequest.model_json_schema()
+
+# Define the available tools using the generated schemas
 AVAILABLE_TOOLS = [
     {
         "name": "press_buttons",
         "type": "function",
         "description": "Press a sequence of buttons on the Game Boy.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "buttons": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": ["a", "b", "start", "select", "up", "down", "left", "right"]
-                    },
-                    "description": "List of buttons to press in sequence. Valid buttons: 'a', 'b', 'start', 'select', 'up', 'down', 'left', 'right'"
-                },
-                "wait": {
-                    "type": "boolean",
-                    "description": "Whether to wait for a brief period after pressing each button. Defaults to true."
-                }
-            },
-            "required": ["buttons"],
-        },
+        "input_schema": press_buttons_schema,
     },
     {
         "name": "navigate_to",
         "type": "function",
-        "description": "Automatically navigate to a position on the map grid. The screen is divided into a (10, 9) (x, y) grid, with the top-left corner as (0, 0). You are always at (4, 4) using this scheme, and labeled (glob_r, glob_c, P, ?). The screen moves with you when you move.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "row": {
-                    "type": "integer",
-                    "description": "The row coordinate to navigate to (0-8). Scale is identical to the global coordinates."
-                },
-                "col": {
-                    "type": "integer",
-                    "description": "The column coordinate to navigate to (0-9). Scale is identical to the global coordinates."
-                }
-            },
-            "required": ["row", "col"],
-        },
+        "description": "Automatically navigate to a position on the map grid. Use only global coordinates, which are displayed for you, and follow a (glob_y, glob_x) convention.",
+        "input_schema": navigate_to_schema,
     },
     {
         "name": "exit_to_last_map",
         "type": "function",
         "description": "Exit to previous map by reversing movement actions recorded in completed_steps.",
-        "input_schema": {"type": "object", "properties": {}, "required": []}
+        "input_schema": empty_schema,
     },
     {
         "name": "exit_menu",
         "type": "function",
         "description": "Exit any active menu, dialog, or battle sequence by pressing B repeatedly. Use this when stuck in menus or dialog sequences.",
-        "input_schema": {"type": "object", "properties": {}, "required": []}
+        "input_schema": empty_schema,
     },
     {
         "name": "handle_battle",
         "type": "function",
         "description": "Handle a battle situation by first attempting to exit any dialog (if it's just an NPC conversation), then if dialog persists (meaning it's a trainer battle), select 'Fight' and repeatedly use attacks. Use this whenever dialog cannot be exited with the exit_menu tool.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "buttons": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": ["a", "b", "start", "select", "up", "down", "left", "right"]
-                    },
-                    "description": "List of buttons to press in sequence. Valid buttons: 'a', 'b', 'start', 'select', 'up', 'down', 'left', 'right'"
-                },
-                "wait": {
-                    "type": "boolean",
-                    "description": "Whether to wait for a brief period after pressing each button. Defaults to true."
-                }
-            },
-            "required": ["buttons"],
-        },
+        "input_schema": handle_battle_schema,
     },
     {
         "name": "check_bounds",
         "type": "function",
         "description": "Check if the agent is within the playable area bounds. If out of bounds, automatically attempts to return to a valid area.",
-        "input_schema": {"type": "object", "properties": {}, "required": []}
+        "input_schema": empty_schema,
     }
 ]
+
+# Optional: Define the actual function implementations
+def press_buttons(**kwargs) -> Dict[str, Any]:
+    request = PressButtonsRequest(**kwargs)
+    # Implementation here
+    return {"success": True, "buttons_pressed": request.buttons}
+
+def navigate_to(**kwargs) -> Dict[str, Any]:
+    request = NavigateToRequest(**kwargs)
+    # Implementation here
+    return {"success": True, "destination": {"glob_y": request.glob_y, "glob_x": request.glob_x}}
+
+def exit_to_last_map() -> Dict[str, Any]:
+    # Implementation here
+    return {"success": True}
+
+def exit_menu() -> Dict[str, Any]:
+    # Implementation here
+    return {"success": True}
+
+def handle_battle(**kwargs) -> Dict[str, Any]:
+    request = HandleBattleRequest(**kwargs)
+    # Implementation here
+    return {"success": True, "buttons_pressed": request.buttons}
+
+def check_bounds() -> Dict[str, Any]:
+    # Implementation here
+    return {"success": True}

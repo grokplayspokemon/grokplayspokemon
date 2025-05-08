@@ -31,6 +31,22 @@ except ImportError as e:
     # Fallback or alternative handling if needed
 
 from bin.red_pyboy_manager import PyBoyManager
+from openai import OpenAI
+
+        
+def build_xai_toolspec():
+    tool_specs = []
+    for t in AVAILABLE_TOOLS:
+        tool_specs.append({
+            "type": "function",
+            "function": {
+                "name":        t["name"],
+                "description": t["description"],
+                "parameters":  t["input_schema"],
+            },
+        })
+    return tool_specs
+
 
 class SimpleAgent:
     def __init__(self, cfg, app=None):
@@ -51,6 +67,9 @@ class SimpleAgent:
         self.model_name = cfg.llm_model
         self.temperature = cfg.llm_temperature
         self.max_tokens = cfg.llm_max_tokens
+        self.xai_tools = build_xai_toolspec()
+        # Store which provider we're using
+        self.llm_provider = cfg.llm_provider
         
         # Get Grok API key
         self.xai_api_key = os.getenv("XAI_API_KEY")
@@ -93,14 +112,10 @@ class SimpleAgent:
         self.system_prompt = SYSTEM_PROMPT
 
         # Message history
-        self.message_history = [{
-            "role": "system",
-            "content": self._get_system_prompt()
-        },
-        {
-            "role": "user",
-            "content": "I am playing a tile exploration game. Help me maximize my rewards."
-        }]
+        self.message_history: list[dict] = [
+        { "role": "system",  "content": [{"type":"text","text": self._get_system_prompt()}] },
+        { "role": "user",    "content": [{"type":"text","text": ""}] }
+        ]
 
         # Initialize tracking
         self.prev_dialog_text = None
@@ -117,7 +132,7 @@ class SimpleAgent:
         # Check for battles first - highest priority
         if self.might_be_battle() and self.is_in_non_navigation_state():
             # If in battle, prioritize handle_battle
-            logger.info("[Tool Selection] Battle detected, forcing handle_battle tool")
+            logger.info("[Tool Selection] Battle detected: using handle_battle tool")
             return "handle_battle"    
         # Check if in dialog or menu state - second priority
         elif self.is_in_non_navigation_state():
@@ -127,44 +142,112 @@ class SimpleAgent:
             # Default to press_buttons as the most commonly used tool
             return "press_buttons"
     
+
+    def _to_plain_dict(self, msg):
+        """
+        Accepts ChatCompletionMessage, dict, or pydantic model and
+        returns a plain serialisable dict with 'role' and 'content'.
+        """
+        if isinstance(msg, dict):
+            return msg
+        # pydantic BaseModel has model_dump(); fallback to built‑ins
+        if hasattr(msg, "model_dump"):
+            return msg.model_dump()
+        if hasattr(msg, "__dict__"):
+            # ChatCompletionMessage: role, content, tool_calls, etc.
+            return {k: getattr(msg, k) for k in msg.__dict__ if not k.startswith("_")}
+        raise TypeError(f"Cannot coerce {type(msg)} to dict")
+
     def sanitize_message_history(self):
-        """Filter message history to remove text-only responses that might influence Grok."""
-        sanitized_messages = []
+        """
+        Strict deduplication and normalization of message history to prevent context pollution
+        and eliminate redundant game state transmissions.
+        """
+        # Initialize tracking containers
+        cleaned = []
+        seen_content_hashes = set()
+        system_message_found = False
         
-        for msg in self.message_history:
-            # Keep all system and user messages
-            if msg["role"] in ["system", "user"]:
-                sanitized_messages.append(msg)
+        # Process each message with duplication prevention
+        for m in self.message_history:
+            # Skip null entries
+            if m is None:
                 continue
-                
-            # For assistant messages, only keep those with tool calls
-            if msg["role"] == "assistant":
-                if "tool_calls" in msg and msg["tool_calls"]:
-                    # Message has tool calls, keep it
-                    sanitized_messages.append(msg)
-                else:
-                    # Message is text-only, convert to system message to reduce mimicry
-                    sanitized_messages.append({
-                        "role": "system",
-                        "content": "NOTE: Always use tool calls instead of text responses."
-                    })
+            
+            # Normalize message format
+            if isinstance(m, dict):
+                message = m
+            elif hasattr(m, "model_dump"):
+                message = m.model_dump()
+            elif hasattr(m, "__dict__"):
+                message = {k: getattr(m, k) for k in m.__dict__ if not k.startswith("_")}
+            else:
+                logger.debug(f"Skipping message with unsupported type: {type(m)}")
+                continue
+            
+            # Enforce structural integrity
+            if "role" not in message:
+                continue
+            
+            # Process by role with deduplication
+            if message["role"] == "system":
+                if not system_message_found:
+                    cleaned.append(message)
+                    system_message_found = True
+            elif message["role"] == "user":
+                # Create content fingerprint for deduplication
+                if "content" in message:
+                    content_str = str(message["content"])
+                    content_hash = hash(content_str)
+                    
+                    if content_hash not in seen_content_hashes:
+                        seen_content_hashes.add(content_hash)
+                        cleaned.append(message)
+                    else:
+                        logger.debug(f"Removing duplicate user message")
+            elif message["role"] in ["assistant", "tool"]:
+                # Preserve tool responses and assistant messages
+                # Tool responses are typically unique by ID
+                cleaned.append(message)
         
-        self.message_history = sanitized_messages
+        # Ensure system message exists
+        if not system_message_found:
+            cleaned.insert(0, {
+                "role": "system", 
+                "content": [{"type": "text", "text": self._get_system_prompt()}]
+            })
         
+        # Ensure at least one user message exists
+        if not any(m["role"] == "user" for m in cleaned):
+            cleaned.append({
+                "role": "user",
+                "content": [{"type": "text", "text": "Explore the game world to maximize rewards."}]
+            })
+        
+        # Update message history with optimized version
+        self.message_history = cleaned
+        
+        # Log optimization metrics
+        logger.debug(f"Sanitized message history: {len(cleaned)} messages ({len(seen_content_hashes)} unique contents)")
+
+    
     def _get_system_prompt(self) -> str:
         """Get the core system prompt with tool usage instructions."""
         prompt = self.system_prompt
         
-        # Add explicit tool usage instructions
-        prompt += "\n\nCRITICAL INSTRUCTION: You MUST use the provided tools for all actions. DO NOT suggest actions in text form (e.g., 'press up'). Always use the press_buttons, navigate_to, exit_menu, handle_battle, or exit_to_last_map tools explicitly.\n"
+        # Add explicit reasoning constraints
+        prompt += "\n\nREASONING CONSTRAINTS: Focus ONLY on immediate gameplay actions. Do NOT engage in lengthy deliberations about game mechanics, hypothetical scenarios, or unrelated topics. Limit internal reasoning EXCLUSIVELY to deciding the next optimal action based on current game state. Do not reason about topics unrelated to Pokémon."
         
-        # List available tools with clear usage examples
-        prompt += "\nAvailable tools:\n"
-        prompt += "1. press_buttons: Use to press specific buttons (e.g., {\"buttons\": [\"up\"], \"wait\": true})\n"
-        prompt += "2. navigate_to: Use to move to a specific grid position (e.g., {\"row\": 3, \"col\": 4})\n"
-        prompt += "3. exit_menu: Use to exit any active menu or dialog\n"
-        prompt += "4. handle_battle: Use to handle battle situations\n"
-        prompt += "5. exit_to_last_map: Use to return to previous map\n"
+        # Add specific tool usage instructions
+        prompt += "\n\nCRITICAL INSTRUCTION: You MUST use the provided tools for all actions. DO NOT suggest actions in text form. Always use the tools explicitly.\n"
+        
+        # # List available tools with clear usage examples
+        # prompt += "\nAvailable tools:\n"
+        # prompt += "1. navigate_to: Use to move to a specific grid position (e.g., {\"row\": 3, \"col\": 4}). You will use this most of all because most of the game is exploring.\n"
+        # prompt += "2. press_buttons: Press emulator buttons. Available buttons: \'a\', \'b\', \'start\', \'up\', \'down\', \'left\', \'right\'. Use this to move around.\n"
+        # prompt += "3. exit_menu: Use to exit any active menu or dialog quickly.\n"
+        # prompt += "4. handle_battle: Use to handle battle situations when you are in a battle.\n"
+        # prompt += "5. exit_to_last_map: Use to return to previous map when you are in a building.\n"
         
         return prompt
 
@@ -315,8 +398,8 @@ class SimpleAgent:
                     if local_x is not None and local_y is not None and current_map_id is not None:
                          # Use emulator's local_to_global for consistency
                         g_y, g_x = self.emulator.local_to_global(local_y, local_x, current_map_id)
-                        npc_global_coords = (g_x, g_y)
-                        logger.debug(f"Found NPC {npc_id} at local ({local_x}, {local_y}) on map {current_map_id}, global ({g_x}, {g_y}).")
+                        npc_global_coords = (g_y, g_x)
+                        logger.debug(f"Found NPC {npc_id} at local ({local_x}, {local_y}) on map {current_map_id}, global ({g_y}, {g_x}).")
                         break # Found the NPC, no need to continue loop
 
         if not npc_global_coords:
@@ -430,14 +513,14 @@ class SimpleAgent:
             }
             
         elif tool_name == "navigate_to":
-            row = tool_input["row"]
-            col = tool_input["col"]
-            logger.info(f"[Navigation] Navigating to: ({row}, {col})")
+            glob_y = tool_input["glob_y"]
+            glob_x = tool_input["glob_x"]
+            logger.info(f"[Navigation] Navigating to global coordinates (Y, X): ({glob_y}, {glob_x})")
             
-            status, path = self.emulator.find_path(row, col)
+            status, path = self.emulator.find_path(glob_y, glob_x)
             path_rewards = 0.0
             
-            if path:
+            if path is not None:
                 # Process each step in the path with rewards
                 for direction in path:
                     self.emulator.press_buttons([direction], True)
@@ -494,7 +577,7 @@ class SimpleAgent:
                 "tool_use_id": tool_call.id,
                 "content": [
                     {"type": "text", "text": f"REWARD UPDATE: Path Reward: {path_rewards:.2f} | Total: {self.current_episode_reward:.2f} | Step {self.episode_step}/30"},
-                    {"type": "text", "text": f"\nNavigation result: {result}"},
+                    {"type": "text", "text": f"\nNavigation attempt to global ({glob_y}, {glob_x}): {result}"},
                     {"type": "text", "text": f"\nGame state information from memory after your action:\n{memory_info}"},
                 ],
             }
@@ -717,6 +800,9 @@ class SimpleAgent:
         import logging
         import random
         
+        # Call red_ram_api every step
+        self.emulator.reader.process_game_states()
+        
         # Get game logger
         logger = logging.getLogger(__name__)
         
@@ -757,7 +843,7 @@ class SimpleAgent:
                                      current_map_id = self.emulator.reader.read_current_map_id()
                                      if local_x is not None and local_y is not None and current_map_id is not None:
                                           g_y, g_x = self.emulator.local_to_global(local_y, local_x, current_map_id)
-                                          npc_global_coords = (g_x, g_y)
+                                          npc_global_coords = (g_y, g_x)
                                           break
 
                          if npc_global_coords:
@@ -784,13 +870,14 @@ class SimpleAgent:
                     # Handle battle
                     logger.info("Processing battle with handle_battle tool")
                     class FakeToolCall:
-                        def __init__(self, name, input_data):
-                            self.name = name
+                        def __init__(self, name, input_data, call_id=None):
+                            self.name  = name
                             self.input = input_data
-                            self.id = str(uuid.uuid4())
-                            self.type = "function"
+                            self.id    = call_id or str(uuid.uuid4())
+                            self.type  = "function"
+
                     
-                    battle_result = self.process_tool_call(FakeToolCall("handle_battle", {}))
+                    battle_result = self.process_tool_call(FakeToolCall("handle_battle", {}, str(uuid.uuid4())))
                     self.message_history.append({"role": "user", "content": [battle_result]})
                     
                     battle_text = dialog.replace('\n', ' ')[:50] if dialog else "Battle action"
@@ -800,13 +887,14 @@ class SimpleAgent:
                     # Non-battle dialog - exit menu
                     logger.info("Processing dialog with exit_menu tool")
                     class FakeToolCall:
-                        def __init__(self, name, input_data):
-                            self.name = name
+                        def __init__(self, name, input_data, call_id=None):
+                            self.name  = name
                             self.input = input_data
-                            self.id = str(uuid.uuid4())
-                            self.type = "function"
+                            self.id    = call_id or str(uuid.uuid4())
+                            self.type  = "function"
+
                     
-                    exit_result = self.process_tool_call(FakeToolCall("exit_menu", {}))
+                    exit_result = self.process_tool_call(FakeToolCall("exit_menu", {}, str(uuid.uuid4())))
                     self.message_history.append({"role": "user", "content": [exit_result]})
                     
                     dialog_text = dialog.replace('\n', ' ')[:50] if dialog else "Dialog"
@@ -823,45 +911,61 @@ class SimpleAgent:
                     self.update_npc_interaction_reward(sprite_index, map_id)
                     self._last_battled_npc_key = None # Clear the tracked NPC after marking
 
-                # Get valid moves
-                valid_moves = self.get_valid_moves()
-                if valid_moves:
-                    # Choose a move from valid directions
-                    move_direction = random.choice(valid_moves)
-                    logger.info(f"Exploring: Moving {move_direction}")
+                # Ask the LLM (via OpenAI endpoint) to choose the next action
+                logger.info("Requesting next action from LLM via OpenAI endpoint")
+                # Initialize the OpenAI v1 client, using XAI base for Grok
+                client_kwargs = {"api_key": self.xai_api_key}
+                if getattr(self, 'llm_provider', None) == 'grok':
+                    # Use the XAI API base for Grok; allow override via XAI_API_BASE env var
+                    client_kwargs["base_url"] = os.getenv("XAI_API_BASE", "https://api.x.ai/v1")
+                client = OpenAI(**client_kwargs)
+                try:
+                    self.sanitize_message_history()
                     
-                    # Create fake tool call for movement
-                    class FakeToolCall:
-                        def __init__(self, name, input_data):
-                            self.name = name
-                            self.input = input_data
-                            self.id = str(uuid.uuid4())
-                            self.type = "function"
+                    # Determine optimal tool selection based on game state
+                    optimal_tool = self.determine_optimal_tool_choice() if hasattr(self, 'determine_optimal_tool_choice') else None
                     
-                    # Execute the movement
-                    move_result = self.process_tool_call(FakeToolCall("press_buttons", {"buttons": [move_direction], "wait": True}))
-                    self.message_history.append({"role": "user", "content": [move_result]})
-                    
-                    # Update the last message
-                    current_location = self.emulator.get_location() or "Unknown"
-                    self.last_message = f"Exploring {current_location} (moving {move_direction})"
-                else:
-                    logger.info("No valid moves available. Trying to press A to interact")
-                    
-                    # Press A to interact with objects or NPCs
-                    class FakeToolCall:
-                        def __init__(self, name, input_data):
-                            self.name = name
-                            self.input = input_data
-                            self.id = str(uuid.uuid4())
-                            self.type = "function"
-                    
-                    interact_result = self.process_tool_call(FakeToolCall("press_buttons", {"buttons": ["a"], "wait": True}))
-                    self.message_history.append({"role": "user", "content": [interact_result]})
-                    
-                    # Update the last message
-                    current_location = self.emulator.get_location() or "Unknown"
-                    self.last_message = f"Interacting in {current_location}"
+                    completion = client.chat.completions.create(
+                        model            = "grok-3-mini-beta",
+                        reasoning_effort = "low",
+                        tools            = self.xai_tools,
+                        tool_choice      = "auto",
+                        messages         = self.message_history,
+                        temperature      = self.temperature,
+                        max_tokens       = self.max_tokens,
+                    )
+
+                    msg = completion.choices[0].message
+                    logger.info(f"LLM completion (response): {msg}")
+                    self.message_history.append(msg)              # keep assistant w/ tool_calls
+                    tool_calls = msg.tool_calls or []
+                    if not tool_calls:
+                        logger.error("LLM produced no tool_calls"); return
+
+                    for tc in tool_calls:
+                        func_name = tc.function.name
+                        func_args = json.loads(tc.function.arguments or "{}")
+                        class FakeToolCall:
+                            def __init__(self, name, input_data, call_id=None):
+                                self.name  = name
+                                self.input = input_data
+                                self.id    = call_id or str(uuid.uuid4())
+                                self.type  = "function"
+
+
+                        result_obj = self.process_tool_call(
+                                        FakeToolCall(func_name, func_args, tc.id))
+
+                        self.message_history.append({
+                            "role":        "tool",
+                            "tool_call_id": tc.id,
+                            "content":     json.dumps(result_obj),
+                        })
+
+                    self.last_message = f"Invoked {', '.join([tc.function.name for tc in tool_calls])}"
+
+                except Exception as e:
+                    logger.error(f"LLM action selection failed: {e}", exc_info=True)
         except Exception as e:
             logger.error(f"Error during step execution: {e}", exc_info=True)
         
@@ -937,10 +1041,149 @@ class SimpleAgent:
             # Fallback comparison if numpy not available
             return frame1 == frame2
         
+    def choose_best_battle_move(self):
+        """
+        Checks the enemy Pokemon's type and player's moves from the fight menu,
+        then determines the most effective damaging move.
+
+        This function assumes:
+        1. The game is in the "Fight" menu.
+        2. The first move (index 0) is currently highlighted.
+        3. `self.pyboy_manager.game` is the RedRAMAccess object for memory reads.
+        4. `self.emulator` provides `press_buttons` and `run_multiple_frames`.
+        5. `red_memory_reader` (or its alias) is accessible for constants.
+
+        Returns:
+            int: The index (0-3) of the best move to use.
+                 Returns 0 as a fallback if no suitable move is found or an error occurs.
+        """
+        if not hasattr(self, 'pyboy_manager') or not self.pyboy_manager or not hasattr(self.pyboy_manager, 'game'):
+            logger.error("[BattleAI] PyBoy manager or game RAM accessor not available.")
+            return 0 # Fallback to first move
+
+        if not hasattr(self, 'emulator'):
+            logger.error("[BattleAI] Emulator instance not available for button presses.")
+            return 0
+
+        # Ensure red_memory_reader constants are accessible
+        # This line assumes 'red_memory_reader' is imported in the scope of SimpleAgent
+        # If not, you might need to pass it or access it via self if it's an instance variable
+        try:
+            # Attempt to use red_memory_reader, assuming it's imported in the module
+            # For example, if your simple_agent.py has:
+            # from bin.ram_reader import red_memory_battle as red_memory_reader
+            pass
+        except NameError:
+            logger.error("[BattleAI] red_memory_reader constants are not accessible.")
+            return 0
+
+
+        game_reader = self.pyboy_manager.game
+
+        # 1. Get Enemy Pokémon's Types
+        enemy_type1_addr = red_memory_reader.ENEMYS_POKEMON_TYPES[0]  # 0xCFEA
+        enemy_type2_addr = red_memory_reader.ENEMYS_POKEMON_TYPES[1]  # 0xCFEB
         
-        
-        
-        
+        enemy_type1 = game_reader.read_memory(enemy_type1_addr)
+        enemy_type2 = game_reader.read_memory(enemy_type2_addr)
+
+        # In Gen 1, a Pokémon is single-typed if its second type slot is identical to its first.
+        # Or if the second type is a known "NONE" type (e.g. 0xFF, though not in POKEMON_MATCH_TYPES).
+        is_single_type = (enemy_type1 == enemy_type2)
+        # Some specific type IDs might also mean 'none', e.g., if enemy_type2 is 0xFF (common for no type)
+        # For now, POKEMON_MATCH_TYPES doesn't feature 0xFF, so (T1 == T2) is the most robust check.
+        if enemy_type2 == 0xFF: # A common value for "no type" in second slot.
+            is_single_type = True
+
+        logger.info(f"[BattleAI] Enemy Types: Primary=0x{enemy_type1:02X}, Secondary=0x{enemy_type2:02X if not is_single_type else 'N/A'}")
+
+        # 2. Iterate through Player's Moves (in Fight Menu) and find the best one
+        num_moves_addr = red_memory_reader.PLAYERS_MOVE_NUM  # 0xCFD2
+        num_moves = game_reader.read_memory(num_moves_addr)
+        logger.info(f"[BattleAI] Player has {num_moves} moves.")
+
+        if num_moves == 0:
+            logger.warning("[BattleAI] Player's Pokémon has no moves (PLAYERS_MOVE_NUM is 0). Defaulting to index 0 (Struggle).")
+            return 0
+
+        best_move_candidate = {'index': -1, 'effective_power': -1.0, 'base_power': 0, 'effectiveness_multiplier': 0.0}
+
+        # --- Addresses for the highlighted move's properties ---
+        player_move_type_addr = red_memory_reader.PLAYERS_MOVE_TYPE      # 0xCFD5
+        player_move_power_addr = red_memory_reader.PLAYERS_MOVE_POWER    # 0xCFD4
+        # player_move_pp_addr = ? (Not available in red_memory_reader.py for CURRENT PP)
+        # PLAYERS_MOVE_MAX_PP = 0xCFD7 (Max PP, not current)
+
+        # Assume cursor is at the first move (index 0) when this function is called.
+        for move_idx in range(num_moves):
+            if move_idx > 0:  # If not the first move, press "DOWN" to highlight the next.
+                self.emulator.press_buttons(["down"], wait=False)
+                # Wait for RAM to update. Adjust frames if necessary.
+                # 10-15 frames usually suffice for menu updates.
+                self.emulator.run_multiple_frames(15) 
+
+            current_move_type = game_reader.read_memory(player_move_type_addr)
+            current_move_power = game_reader.read_memory(player_move_power_addr)
+            
+            # PP Check:
+            # As per the problem constraints (only red_memory_reader.py), we cannot read current move PP.
+            # If we could, e.g., from 0xD01E + move_idx for active Pokemon's move PPs:
+            # current_move_pp = game_reader.read_memory(0xD01E + move_idx)
+            # For now, we proceed without a PP check. The game will prevent use of 0 PP moves.
+            # We'll assume a move is usable if its power > 0.
+
+            logger.debug(f"[BattleAI] Evaluating Player Move {move_idx}: Type=0x{current_move_type:02X}, Power={current_move_power}")
+
+            if current_move_power == 0:  # Skip status moves (no direct damage)
+                logger.debug(f"[BattleAI] Move {move_idx} is a status move (Power: 0). Skipping.")
+                continue
+
+            # Calculate effectiveness
+            effectiveness_vs_type1 = red_memory_reader.POKEMON_MATCH_TYPES.get((current_move_type, enemy_type1), 1.0)
+            total_effectiveness = effectiveness_vs_type1
+
+            if not is_single_type:
+                effectiveness_vs_type2 = red_memory_reader.POKEMON_MATCH_TYPES.get((current_move_type, enemy_type2), 1.0)
+                total_effectiveness *= effectiveness_vs_type2
+            
+            effective_power = current_move_power * total_effectiveness
+            logger.debug(f"[BattleAI] Move {move_idx}: Type(0x{current_move_type:02X}) vs Enemy(0x{enemy_type1:02X}, 0x{enemy_type2:02X if not is_single_type else '--'}) -> Multiplier={total_effectiveness:.2f}, EffectivePower={effective_power:.2f}")
+
+            # Update best move candidate
+            if effective_power > best_move_candidate['effective_power']:
+                best_move_candidate = {
+                    'index': move_idx, 
+                    'effective_power': effective_power, 
+                    'base_power': current_move_power,
+                    'effectiveness_multiplier': total_effectiveness
+                }
+            elif effective_power == best_move_candidate['effective_power']:
+                # Tie-breaking:
+                # 1. Prefer higher base power if effective power is the same.
+                if current_move_power > best_move_candidate['base_power']:
+                    best_move_candidate = {
+                        'index': move_idx, 
+                        'effective_power': effective_power, 
+                        'base_power': current_move_power,
+                        'effectiveness_multiplier': total_effectiveness
+                    }
+                # (Further tie-breakers like accuracy or PP could be added if data was available)
+
+        # After iterating, the cursor is on the last evaluated move.
+        # The function returns the index; the caller will navigate to it.
+
+        if best_move_candidate['index'] != -1:
+            logger.info(f"[BattleAI] Chosen Best Move: Index {best_move_candidate['index']} "
+                        f"(Original Power: {best_move_candidate['base_power']}, "
+                        f"Effective Power: {best_move_candidate['effective_power']:.2f}, "
+                        f"Multiplier: {best_move_candidate['effectiveness_multiplier']:.2f})")
+            return best_move_candidate['index']
+        else:
+            logger.warning("[BattleAI] No suitable damaging move found. Defaulting to first move (index 0).")
+            # This fallback means if all moves are status, or somehow all resulted in <=0 effective power.
+            # If num_moves > 0, returning 0 attempts the first move.
+            return 0 
+    
     def summarize_history(self):
         """Generate a summary focused on exploration rewards with improved state formatting."""
         # Create a summary focused entirely on reward optimization

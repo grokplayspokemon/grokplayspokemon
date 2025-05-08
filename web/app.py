@@ -1,3 +1,4 @@
+# app.py
 import logging
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,11 @@ manager = ConnectionManager()
 # Enable dev control mode via environment variable DEV_CONTROL
 app.state.dev_control = os.getenv("DEV_CONTROL", "false").lower() in ("1","true")
 
+# Initialize pause flag so the agent does not run when dev control is active
+app.state.is_paused = app.state.dev_control
+if app.state.dev_control:
+    logger.info("Dev control mode active: agent will start paused for manual control.")
+
 # Routes
 @app.get("/", response_class=HTMLResponse)
 async def get_home(request: Request):
@@ -141,6 +147,13 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
                     logger.error(f"Error formatting collision counts: {e}", exc_info=True)
                     ascii_map = None
                 message["collision_map"] = ascii_map
+                # Also include JSON formatted collision map for Grok
+                try:
+                    json_map = app.state.agent.emulator.format_collision_map_json(raw_map)
+                    message["collision_map_json"] = json_map
+                except Exception as e:
+                    logger.error(f"Error formatting collision map JSON: {e}", exc_info=True)
+                    message["collision_map_json"] = None
                 # Also include warps list if provided
                 warps = []
                 if isinstance(raw_map, dict):
@@ -187,14 +200,21 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     
-    # Start the agent automatically if it's not running
+    # Always auto-start agent on connect; respect dev_control by pausing after start
     if not hasattr(app.state, 'agent_task') or app.state.agent_task is None or app.state.agent_task.done():
-        logger.info("WebSocket connected, starting agent automatically.")
-        try:
-            # This calls the existing start_agent logic
-            await start_agent()
-        except Exception as e:
-            logger.error(f"Error starting agent automatically on WebSocket connection: {e}")
+        if app.state.dev_control:
+            logger.info("WebSocket connected, starting agent in paused dev mode.")
+            try:
+                await start_agent()
+                app.state.is_paused = True
+            except Exception as e:
+                logger.error(f"Error starting agent in dev mode on WebSocket connection: {e}")
+        else:
+            logger.info("WebSocket connected, starting agent automatically.")
+            try:
+                await start_agent()
+            except Exception as e:
+                logger.error(f"Error starting agent automatically on WebSocket connection: {e}")
 
     # Send an initial connection confirmation with timestamp
     try:
@@ -268,19 +288,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Respond to ping from client
                     await websocket.send_text(json.dumps({"type": "pong", "timestamp": int(time.time() * 1000)}))
                 
-                # Handle input messages (dev control)
-                elif mtype == "input" and hasattr(app.state, 'agent'):
+                # Handle input messages when agent is paused (dev control)
+                elif mtype == "input" and getattr(app.state, 'is_paused', False) and hasattr(app.state, 'agent'):
                     button = msg.get("button")
+                    logger.info(f"Dev mode: Pressed {button}")
                     if button:
                         app.state.agent.emulator.press_buttons([button], True)
                         
                         # Get updated frame and send immediately
                         frame = app.state.agent.get_frame()
                         if frame:
-                            await send_game_updates(
-                                frame, 
-                                f"Dev pressed {button}"
-                            )
+                            await send_game_updates(frame, f"Dev mode: Pressed {button}")
                         
                         # Acknowledge input
                         await websocket.send_text(json.dumps({
@@ -321,39 +339,38 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.post("/start")
 async def start_agent():
+    # Resume if paused
     if app.state.agent_task is not None and not app.state.agent_task.done():
+        if getattr(app.state, 'is_paused', False):
+            app.state.is_paused = False
+            logger.info("Dev mode deactivated: agent resumed")
+            return {"status": "success", "message": "Agent resumed"}
         return {"status": "error", "message": "Agent is already running"}
-    
+    # Start the agent if not already running
     try:
-        # Reset the pause flag when starting
+        # Reset pause flag
         app.state.is_paused = False
-        
-        # Agent should have been created during lifespan startup
+        # Create agent if not exists
         if not hasattr(app.state, 'agent'):
-            # If we don't have an agent yet, create one (This block should ideally not be hit)
-            logger.error("Agent not found in app state during start request. Re-creating (check lifespan). ")
-            # We need cfg here, but it should already be in app.state from lifespan
+            logger.error("Agent not found in app state during start request. Re-creating.")
             if not hasattr(app.state, 'cfg'):
-                 return {"status": "error", "message": "Config not found in app state."}
-            app.state.agent = SimpleAgent(
-                cfg=app.state.cfg, # Use config object
-                app=app
-            )
-        
-        # Ensure cfg is available before creating the task
+                return {"status": "error", "message": "Config not found in app state."}
+            app.state.agent = SimpleAgent(cfg=app.state.cfg, app=app)
+        # Ensure config available
         if not hasattr(app.state, 'cfg'):
             logger.error("Config not found in app state before creating agent task.")
             return {"status": "error", "message": "Config not found in app state."}
-            
+        # Launch agent task
         app.state.agent_task = asyncio.create_task(
             run_agent(
                 agent=app.state.agent,
-                num_steps=app.state.cfg.num_steps, # Use cfg object instead
+                num_steps=app.state.cfg.num_steps,
                 run_log_dir=app.state.run_log_dir,
                 send_game_updates=send_game_updates,
                 grok_logger=app.state.grok_logger
             )
         )
+        logger.info("Agent started successfully")
         return {"status": "success", "message": "Agent started successfully"}
     except Exception as e:
         logger.error(f"Error starting agent: {e}")
@@ -361,7 +378,17 @@ async def start_agent():
 
 @app.post("/pause")
 async def pause_agent():
-    return {"status": "error", "message": "Pause not supported"}
+    if not hasattr(app.state, 'agent_task') or app.state.agent_task is None:
+        return {"status": "error", "message": "Agent not running"}
+    # Toggle pause/resume
+    if getattr(app.state, 'is_paused', False):
+        app.state.is_paused = False
+        logger.info("Dev mode deactivated: agent resumed")
+        return {"status": "success", "message": "Agent resumed"}
+    else:
+        app.state.is_paused = True
+        logger.info("Dev mode activated: agent paused")
+        return {"status": "success", "message": "Agent paused"}
 
 @app.post("/stop")
 async def stop_agent():
@@ -473,5 +500,5 @@ async def get_logs():
         logger.error(f"Failed to read logs: {e}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": str(e)}
-        )
+                content={"error": str(e)}
+            )

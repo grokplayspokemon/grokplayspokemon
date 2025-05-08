@@ -107,8 +107,8 @@
             height: 100%;
             margin: 0;
             font-family: monospace;
-            font-size: 0.6rem;
-            line-height: 0.6rem;
+            font-size: 0.8rem;
+            line-height: 1rem;
             color: var(--chat-text);
             background: rgba(0, 0, 0, 0.2);
             white-space: pre;
@@ -413,22 +413,39 @@
         }
 
         // --- Dev Control Toggle ---
-        function toggleDevControl() {
+        async function toggleDevControl() {
             devMode = !devMode;
             const btn = document.getElementById('dev-toggle');
             if (devMode) {
                 btn.textContent = 'Dev Control: ON';
                 btn.classList.remove('red'); btn.classList.add('green');
-                // Optionally send pause command when entering dev mode?
-                // fetch("/pause", { method: "POST" }) // Example: pausing agent when dev control ON
-                //    .then(res => res.json())
-                //    .then(data => console.log("Agent pause toggled for Dev control:", data))
-                //    .catch(err => console.error("Error toggling pause:", err));
             } else {
                 btn.textContent = 'Dev Control: OFF';
                 btn.classList.remove('green'); btn.classList.add('red');
             }
-            redrawCanvas(); // Redraw immediately with/without grid
+            // Pause agent if devMode ON, resume agent if devMode OFF
+            const endpoint = devMode ? '/pause' : '/start';
+            fetch(endpoint, { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    console.log(`Agent ${devMode ? 'paused' : 'resumed'} for Dev control:`, data);
+                    const statusText = document.querySelector('.status-text');
+                    statusText.textContent = devMode ? 'Paused' : 'Running';
+                    isAgentPaused = devMode;
+                })
+                .catch(err => {
+                    console.error(`Error ${devMode ? 'pausing' : 'resuming'} agent in Dev control:`, err);
+                    // Revert devMode toggle and button UI
+                    devMode = !devMode;
+                    if (devMode) {
+                        btn.textContent = 'Dev Control: ON';
+                        btn.classList.remove('red'); btn.classList.add('green');
+                    } else {
+                        btn.textContent = 'Dev Control: OFF';
+                        btn.classList.remove('green'); btn.classList.add('red');
+                    }
+                });
+            redrawCanvas(); // Redraw grid overlay state
         }
 
         // --- WebSocket Handling ---
@@ -457,6 +474,19 @@
                 document.getElementById('connectionStatus').textContent = 'Connected';
                 document.getElementById('connectionStatus').style.color = 'green';
                 checkAgentStatus(); // Check status when connection is established
+                // If devMode active, ensure agent paused after reconnect
+                if (devMode) {
+                    console.log('Dev mode active after reconnect, pausing agent.');
+                    fetch('/pause', { method: 'POST' })
+                        .then(res => res.json())
+                        .then(data => {
+                            console.log('Agent paused for Dev control after reconnect:', data);
+                            const statusText = document.querySelector('.status-text');
+                            statusText.textContent = 'Paused';
+                            isAgentPaused = true;
+                        })
+                        .catch(err => console.error('Error pausing agent in Dev mode after reconnect:', err));
+                }
                 // Send initial delay setting to server
                 const delayInput = document.getElementById('delay-input');
                 if (delayInput && ws.readyState === WebSocket.OPEN) {
@@ -545,6 +575,10 @@
                         // For now, rely on 'data.message' for text updates.
 
                     } else {
+                        // Ignore pong and heartbeat messages
+                        if (data.type === 'pong' || data.type === 'heartbeat') {
+                            return;
+                        }
                         console.log("Received non-'update' WebSocket message:", data);
                         // Optionally display other message types in chat for debugging
                         const messageDiv = document.createElement('div');

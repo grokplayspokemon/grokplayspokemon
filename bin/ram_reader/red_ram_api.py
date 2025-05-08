@@ -1,6 +1,7 @@
 from enum import IntEnum
 import numpy as np
-from pyboy import PyBoy
+from  import Emulator
+from bin.red_pyboy_manager import PyBoyManager
 
 from bin.ram_reader.red_memory_battle import *
 from bin.ram_reader.red_memory_env import *
@@ -13,7 +14,8 @@ from bin.ram_reader.red_memory_player import *
 
 class PyBoyRAMInterface:
     def __init__(self, pyboy):
-        self.pyboy = pyboy
+        self.emulator = Emulator(pyboy)
+        self.pyboy = self.emulator.pyboy
 
     def read_memory(self, address):
         return self.pyboy.get_memory_value(address)

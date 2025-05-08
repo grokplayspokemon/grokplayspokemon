@@ -53,8 +53,8 @@ async def run_agent(agent, num_steps=100000, run_log_dir=None, send_game_updates
     # Main agent loop
     while agent.running and step_count < num_steps:
         try:
-            # Check if agent is paused
-            if hasattr(agent, 'app') and hasattr(agent.app.state, 'is_paused') and agent.app.state.is_paused:
+            # Check if agent is paused (dev mode)
+            if hasattr(agent, 'app') and getattr(agent.app.state, 'is_paused', False):
                 await asyncio.sleep(0.5)
                 continue
             

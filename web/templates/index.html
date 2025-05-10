@@ -37,6 +37,8 @@
             background-size: 20px 20px;
             color: var(--chat-text);
             height: 100vh;
+            overflow: hidden;
+            /* prevent page scrollbars */
             display: flex;
             flex-direction: column;
             line-height: 1.6;
@@ -60,15 +62,21 @@
         }
 
         .container {
-            display: flex;
-            flex: 1;
-            padding: 1rem 0;
+            display: grid;
+            grid-template-columns: 2fr 1.5fr;
+            grid-template-rows: 1fr 120px;
+            grid-template-areas:
+                "game chat"
+                "team team";
             gap: 1rem;
+            padding: 1rem;
             height: calc(100vh - 4rem);
-            /* Adjusted height calculation */
+            overflow: hidden;
+            /* prevent overflow of grid */
         }
 
         .game-window {
+            grid-area: game;
             background-color: var(--chat-bg);
             border: 4px solid var(--border-color);
             overflow: hidden;
@@ -122,8 +130,11 @@
         }
 
         .chat-window {
-            /* Expand chat pane by additional 299px to reach edge of screen */
-            width: calc(680px + 299px);
+            height: 100%;
+            /* constrain to grid cell height */
+            overflow: hidden;
+            /* hide any overflow at window level */
+            grid-area: chat;
             background-color: var(--chat-bg);
             border: 4px solid var(--border-color);
             border-radius: 8px;
@@ -148,6 +159,15 @@
             flex: 1;
             overflow-y: auto;
             padding: 1rem;
+            scrollbar-width: none;
+            /* hide scrollbar in Firefox */
+            -ms-overflow-style: none;
+            /* hide scrollbar in IE 10+ */
+        }
+
+        .chat-messages::-webkit-scrollbar {
+            display: none;
+            /* hide scrollbar in Chrome, Safari, Edge */
         }
 
         .message {
@@ -310,6 +330,210 @@
             font-size: 1rem;
             margin: 0.5rem 0;
         }
+
+        .team-window {
+            grid-area: team;
+            background-color: var(--chat-bg);
+            border: 4px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.5rem;
+            color: var(--chat-text);
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            height: 120px;
+            /* constrain to grid row height */
+            display: flex;
+            flex-direction: column;
+        }
+
+        .team-window h2 {
+            font-size: 1rem;
+            color: var(--pokemon-yellow);
+            margin-bottom: 0.5rem;
+        }
+
+        .team-container {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 0.5rem;
+            overflow-x: auto;
+            /* enable horizontal scrolling if needed */
+            overflow-y: hidden;
+            height: 80px;
+            /* original height */
+            scrollbar-width: none;
+            /* hide scrollbar in Firefox */
+            -ms-overflow-style: none;
+            /* hide scrollbar in IE 10+ */
+        }
+
+        .team-container::-webkit-scrollbar {
+            display: none;
+            /* hide scrollbar in Chrome, Safari, Edge */
+        }
+
+        .pokemon-card {
+            flex: 0 0 140px;
+            background-color: rgba(0, 0, 0, 0.3);
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+            padding: 0.3rem;
+            font-size: 0.6rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pokemon-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.2rem;
+        }
+
+        .pokemon-name {
+            font-weight: bold;
+            color: var(--pokemon-yellow);
+        }
+
+        .pokemon-level {
+            color: white;
+        }
+
+        .pokemon-hp {
+            margin-bottom: 0.2rem;
+            height: 8px;
+            background-color: #444;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .hp-bar {
+            height: 100%;
+            background-color: #4caf50;
+            width: 100%;
+        }
+
+        .hp-bar.low {
+            background-color: #f44336;
+        }
+
+        .hp-bar.medium {
+            background-color: #ff9800;
+        }
+
+        .pokemon-types {
+            display: flex;
+            gap: 0.2rem;
+            margin-top: 0.2rem;
+        }
+
+        .type-pill {
+            padding: 0.1rem 0.3rem;
+            border-radius: 10px;
+            font-size: 0.5rem;
+            text-transform: uppercase;
+        }
+
+        /* Type colors */
+        .type-normal {
+            background-color: #A8A878;
+            color: black;
+        }
+
+        .type-fighting {
+            background-color: #C03028;
+            color: white;
+        }
+
+        .type-flying {
+            background-color: #A890F0;
+            color: black;
+        }
+
+        .type-poison {
+            background-color: #A040A0;
+            color: white;
+        }
+
+        .type-ground {
+            background-color: #E0C068;
+            color: black;
+        }
+
+        .type-rock {
+            background-color: #B8A038;
+            color: black;
+        }
+
+        .type-bug {
+            background-color: #A8B820;
+            color: black;
+        }
+
+        .type-ghost {
+            background-color: #705898;
+            color: white;
+        }
+
+        .type-steel {
+            background-color: #B8B8D0;
+            color: black;
+        }
+
+        .type-fire {
+            background-color: #F08030;
+            color: white;
+        }
+
+        .type-water {
+            background-color: #6890F0;
+            color: white;
+        }
+
+        .type-grass {
+            background-color: #78C850;
+            color: black;
+        }
+
+        .type-electric {
+            background-color: #F8D030;
+            color: black;
+        }
+
+        .type-psychic {
+            background-color: #F85888;
+            color: white;
+        }
+
+        .type-ice {
+            background-color: #98D8D8;
+            color: black;
+        }
+
+        .type-dragon {
+            background-color: #7038F8;
+            color: white;
+        }
+
+        .type-dark {
+            background-color: #705848;
+            color: white;
+        }
+
+        .type-fairy {
+            background-color: #EE99AC;
+            color: black;
+        }
+
+        /* Species label styling */
+        .pokemon-species {
+            font-size: 0.6rem;
+            color: var(--pokemon-yellow);
+            text-align: center;
+            margin-bottom: 0.2rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     </style>
 </head>
 
@@ -347,6 +571,13 @@
                 <h2>Grok's Thoughts</h2>
             </div>
             <div class="chat-messages" id="chat-messages">
+            </div>
+        </div>
+
+        <div class="team-window">
+            <h2>Current Team</h2>
+            <div class="team-container" id="team-container">
+                <div class="pokemon-card placeholder">No Pokémon data available</div>
             </div>
         </div>
     </main>
@@ -414,29 +645,15 @@
 
         // --- Dev Control Toggle ---
         async function toggleDevControl() {
-            devMode = !devMode;
             const btn = document.getElementById('dev-toggle');
-            if (devMode) {
-                btn.textContent = 'Dev Control: ON';
-                btn.classList.remove('red'); btn.classList.add('green');
-            } else {
-                btn.textContent = 'Dev Control: OFF';
-                btn.classList.remove('green'); btn.classList.add('red');
-            }
-            // Pause agent if devMode ON, resume agent if devMode OFF
-            const endpoint = devMode ? '/pause' : '/start';
-            fetch(endpoint, { method: 'POST' })
-                .then(res => res.json())
-                .then(data => {
-                    console.log(`Agent ${devMode ? 'paused' : 'resumed'} for Dev control:`, data);
-                    const statusText = document.querySelector('.status-text');
-                    statusText.textContent = devMode ? 'Paused' : 'Running';
-                    isAgentPaused = devMode;
-                })
-                .catch(err => {
-                    console.error(`Error ${devMode ? 'pausing' : 'resuming'} agent in Dev control:`, err);
-                    // Revert devMode toggle and button UI
-                    devMode = !devMode;
+            const targetPause = !devMode;
+            const endpoint = targetPause ? '/pause' : '/start';
+            try {
+                const res = await fetch(endpoint, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    devMode = targetPause;
+                    // Update button UI
                     if (devMode) {
                         btn.textContent = 'Dev Control: ON';
                         btn.classList.remove('red'); btn.classList.add('green');
@@ -444,8 +661,18 @@
                         btn.textContent = 'Dev Control: OFF';
                         btn.classList.remove('green'); btn.classList.add('red');
                     }
-                });
-            redrawCanvas(); // Redraw grid overlay state
+                    // Update status text
+                    const statusText = document.querySelector('.status-text');
+                    statusText.textContent = devMode ? 'Paused' : 'Running';
+                    isAgentPaused = devMode;
+                    console.log(`Dev Control ${devMode ? 'activated' : 'deactivated'}:`, data);
+                } else {
+                    console.error('Failed to toggle Dev control:', data);
+                }
+            } catch (err) {
+                console.error('Error toggling Dev control:', err);
+            }
+            redrawCanvas();
         }
 
         // --- WebSocket Handling ---
@@ -474,19 +701,7 @@
                 document.getElementById('connectionStatus').textContent = 'Connected';
                 document.getElementById('connectionStatus').style.color = 'green';
                 checkAgentStatus(); // Check status when connection is established
-                // If devMode active, ensure agent paused after reconnect
-                if (devMode) {
-                    console.log('Dev mode active after reconnect, pausing agent.');
-                    fetch('/pause', { method: 'POST' })
-                        .then(res => res.json())
-                        .then(data => {
-                            console.log('Agent paused for Dev control after reconnect:', data);
-                            const statusText = document.querySelector('.status-text');
-                            statusText.textContent = 'Paused';
-                            isAgentPaused = true;
-                        })
-                        .catch(err => console.error('Error pausing agent in Dev mode after reconnect:', err));
-                }
+                // Preserve existing pause state across reconnect (no auto-pause fetch)
                 // Send initial delay setting to server
                 const delayInput = document.getElementById('delay-input');
                 if (delayInput && ws.readyState === WebSocket.OPEN) {
@@ -497,7 +712,6 @@
             };
 
             ws.onmessage = function (event) {
-                // console.log("WebSocket message received:", event.data);
                 try {
                     const data = JSON.parse(event.data);
 
@@ -505,45 +719,63 @@
                     if (data.type === 'update') {
                         console.log(`Update event with timestamp ${data.timestamp || 'none'}`);
 
+                        // CRITICAL SYNCHRONIZATION UPDATE: Add frame processing acknowledgment
+                        const processingStartTime = performance.now();
+
                         // Update game frame (draw onto canvas)
                         if (data.frame) {
-                            try {
-                                // Assuming data.frame is a hex string
-                                const frameData = new Uint8Array(data.frame.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                            // Assuming data.frame is a base64-encoded PNG
+                            const img = new Image();
+                            img.onload = () => {
+                                ctx.clearRect(0, 0, gameScreen.width, gameScreen.height);
+                                ctx.drawImage(img, 0, 0, gameScreen.width, gameScreen.height);
+                                drawGrid(); // Draw grid if devMode is ON
 
-                                if (frameData && frameData.length > 0) {
-                                    const blob = new Blob([frameData], { type: 'image/png' });
-                                    const url = URL.createObjectURL(blob);
+                                // Store frame for redrawing
+                                lastFrameUrl = img.src;
 
-                                    if (lastFrameUrl) {
-                                        URL.revokeObjectURL(lastFrameUrl);
-                                    }
-                                    lastFrameUrl = url;
-
-                                    const img = new Image();
-                                    img.onload = () => {
-                                        ctx.clearRect(0, 0, gameScreen.width, gameScreen.height);
-                                        ctx.drawImage(img, 0, 0, gameScreen.width, gameScreen.height);
-                                        drawGrid(); // Draw grid if devMode is ON
-                                        console.log(`Frame rendered at ${new Date().toISOString()}`);
-                                    };
-                                    img.onerror = (err) => {
-                                        console.error(`Error loading image frame: ${err}`);
-                                        redrawCanvas();
-                                    };
-                                    img.src = url;
-                                } else {
-                                    console.warn("Received empty frame data in update");
-                                    redrawCanvas();
+                                // CRITICAL SYNCHRONIZATION UPDATE: Send acknowledgment after render completes
+                                if (data.require_ack && ws.readyState === WebSocket.OPEN) {
+                                    const processingTime = performance.now() - processingStartTime;
+                                    ws.send(JSON.stringify({
+                                        type: 'frame_ack',
+                                        timestamp: data.timestamp,
+                                        sync_id: data.sync_id,
+                                        processing_time: processingTime
+                                    }));
                                 }
-                            } catch (frameError) {
-                                console.error(`Error processing frame data for canvas: ${frameError}`);
+                            };
+
+                            img.onerror = (err) => {
+                                console.error(`Error loading base64 image frame: ${err}`);
                                 redrawCanvas();
-                            }
+
+                                // Send error acknowledgment within error handler scope
+                                if (data.require_ack && ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({
+                                        type: 'frame_error',
+                                        timestamp: data.timestamp,
+                                        sync_id: data.sync_id,
+                                        error: String(err)
+                                    }));
+                                }
+                            };
+
+                            img.src = 'data:image/png;base64,' + data.frame;
                         } else {
                             // If no frame, just redraw grid if needed on current canvas content
                             redrawCanvas();
-                            console.log("Update had no frame data, redrew existing canvas");
+
+                            // Send acknowledgment even without frame
+                            if (data.require_ack && ws.readyState === WebSocket.OPEN) {
+                                const processingTime = performance.now() - processingStartTime;
+                                ws.send(JSON.stringify({
+                                    type: 'update_ack',
+                                    timestamp: data.timestamp,
+                                    sync_id: data.sync_id,
+                                    processing_time: processingTime
+                                }));
+                            }
                         }
 
                         // Append text message to chat
@@ -562,39 +794,17 @@
                             chatMessages.scrollTop = chatMessages.scrollHeight; // Auto-scroll
                         }
 
+                        // Update party display if party data included
+                        if (data.party) {
+                            updateTeamDisplay(data.party);
+                        }
+
                         // Update collision map and info
                         if (data.collision_map) {
                             console.log("[Collision ASCII Map]", data.collision_map);
                             document.getElementById('collision-map-overlay').textContent = data.collision_map;
                         }
-
-                        // Handle Grok's thoughts if sent separately (adjust if structure differs)
-                        // Based on previous turns, Grok's thoughts were part of the main 'message'
-                        // field or implicitly shown via agent actions/logs. If a dedicated
-                        // 'grok_thoughts' field is added later, this section would handle it.
-                        // For now, rely on 'data.message' for text updates.
-
-                    } else {
-                        // Ignore pong and heartbeat messages
-                        if (data.type === 'pong' || data.type === 'heartbeat') {
-                            return;
-                        }
-                        console.log("Received non-'update' WebSocket message:", data);
-                        // Optionally display other message types in chat for debugging
-                        const messageDiv = document.createElement('div');
-                        messageDiv.className = 'message system-message'; // Use a different class for system messages
-                        const timeSpan = document.createElement('span');
-                        timeSpan.className = 'timestamp';
-                        timeSpan.textContent = new Date().toLocaleTimeString();
-                        const pre = document.createElement('pre');
-                        pre.className = 'content';
-                        pre.textContent = `Received type: ${data.type}\nContent: ${JSON.stringify(data, null, 2)}`;
-                        messageDiv.appendChild(timeSpan);
-                        messageDiv.appendChild(pre);
-                        chatMessages.appendChild(messageDiv);
-                        chatMessages.scrollTop = chatMessages.scrollHeight;
                     }
-
                 } catch (e) {
                     console.error("Error processing WebSocket message:", e);
                     const messageDiv = document.createElement('div');
@@ -744,24 +954,34 @@
                 const data = await response.json();
 
                 const statusText = document.querySelector('.status-text');
-                const devToggle = document.getElementById('dev-toggle');
+                const devBtn = document.getElementById('dev-toggle');
                 const runButton = document.getElementById('run-button');
                 const stopButton = document.getElementById('stop-button');
                 const loadStateButton = document.getElementById('load-state-button');
 
-                // Determine running state based on status string
+                // Determine running and paused state
                 isAgentRunning = data.status === 'running' || data.status === 'paused';
                 isAgentPaused = data.status === 'paused';
 
-                // Update UI based on fetched status
+                // Sync dev toggle UI
+                if (isAgentPaused) {
+                    devBtn.textContent = 'Dev Control: ON';
+                    devBtn.classList.remove('red'); devBtn.classList.add('green');
+                    devMode = true;
+                } else {
+                    devBtn.textContent = 'Dev Control: OFF';
+                    devBtn.classList.remove('green'); devBtn.classList.add('red');
+                    devMode = false;
+                }
+                // Update UI based on fetched run status
                 if (isAgentRunning) {
                     statusText.textContent = isAgentPaused ? 'Paused' : 'Running';
                     runButton.style.display = 'none';
                     stopButton.style.display = 'inline';
                     loadStateButton.style.display = 'none';
-                    runButton.disabled = true; // Disable run button when agent is running/paused
-                } else { // Status is 'stopped' or potentially an error state
-                    statusText.textContent = data.status === 'stopped' ? 'Stopped' : `Status: ${data.status} `; // Show other statuses if any
+                    runButton.disabled = true;
+                } else {
+                    statusText.textContent = data.status === 'stopped' ? 'Stopped' : `Status: ${data.status}`;
                     runButton.disabled = false;
                     runButton.style.display = 'inline';
                     stopButton.style.display = 'none';
@@ -863,6 +1083,103 @@
                 clearTimeout(reconnectTimeoutId); // Clear any pending reconnect
                 // Add a small delay before the first reconnect attempt after manual refresh
                 reconnectTimeoutId = setTimeout(connectWebSocket, 500); // Wait 500ms
+            });
+        }
+
+        // Parse party data from WebSocket and update UI
+        function updateTeamDisplay(partyData) {
+            const teamContainer = document.getElementById('team-container');
+            if (!teamContainer) return;
+
+            // Clear current team display
+            teamContainer.innerHTML = '';
+
+            if (!partyData || partyData.length === 0) {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'pokemon-card placeholder';
+                placeholder.textContent = 'No Pokémon data available';
+                teamContainer.appendChild(placeholder);
+                return;
+            }
+
+            // Create card for each Pokémon
+            partyData.forEach(pokemon => {
+                const card = document.createElement('div');
+                card.className = 'pokemon-card';
+
+                // Species label above entry
+                const speciesDiv = document.createElement('div');
+                speciesDiv.className = 'pokemon-species';
+                speciesDiv.textContent = pokemon.species;
+                card.appendChild(speciesDiv);
+
+                // Header with name and level
+                const header = document.createElement('div');
+                header.className = 'pokemon-header';
+
+                const name = document.createElement('div');
+                name.className = 'pokemon-name';
+                name.textContent = pokemon.nickname || pokemon.species;
+
+                const level = document.createElement('div');
+                level.className = 'pokemon-level';
+                level.textContent = `Lv.${pokemon.level}`;
+
+                header.appendChild(name);
+                header.appendChild(level);
+
+                // HP bar
+                const hpContainer = document.createElement('div');
+                hpContainer.className = 'pokemon-hp';
+
+                const hpBar = document.createElement('div');
+                hpBar.className = 'hp-bar';
+                const hpPercent = (pokemon.hp / pokemon.max_hp) * 100;
+                hpBar.style.width = `${hpPercent}%`;
+
+                if (hpPercent < 25) {
+                    hpBar.classList.add('low');
+                } else if (hpPercent < 50) {
+                    hpBar.classList.add('medium');
+                }
+
+                const hpText = document.createElement('div');
+                hpText.className = 'hp-text';
+                hpText.textContent = `HP: ${pokemon.hp}/${pokemon.max_hp}`;
+
+                hpContainer.appendChild(hpBar);
+
+                // Status/Type display
+                const statusDiv = document.createElement('div');
+                statusDiv.className = 'pokemon-status';
+                statusDiv.textContent = pokemon.status || 'OK';
+
+                // Type pills
+                const typesDiv = document.createElement('div');
+                typesDiv.className = 'pokemon-types';
+
+                if (pokemon.type1) {
+                    const type1Pill = document.createElement('span');
+                    type1Pill.className = `type-pill type-${pokemon.type1.toLowerCase()}`;
+                    type1Pill.textContent = pokemon.type1;
+                    typesDiv.appendChild(type1Pill);
+                }
+
+                if (pokemon.type2) {
+                    const type2Pill = document.createElement('span');
+                    type2Pill.className = `type-pill type-${pokemon.type2.toLowerCase()}`;
+                    type2Pill.textContent = pokemon.type2;
+                    typesDiv.appendChild(type2Pill);
+                }
+
+                // Assemble card
+                card.appendChild(header);
+                card.appendChild(hpContainer);
+                card.appendChild(hpText);
+                card.appendChild(statusDiv);
+                card.appendChild(typesDiv);
+
+                teamContainer.appendChild(card);
             });
         }
 

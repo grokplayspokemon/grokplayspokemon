@@ -1,7 +1,8 @@
+# red_ram_api.py
 from enum import IntEnum
 import numpy as np
-from  import Emulator
 from bin.red_pyboy_manager import PyBoyManager
+from agent.emulator import Emulator
 
 from bin.ram_reader.red_memory_battle import *
 from bin.ram_reader.red_memory_env import *
@@ -14,8 +15,8 @@ from bin.ram_reader.red_memory_player import *
 
 class PyBoyRAMInterface:
     def __init__(self, pyboy):
-        self.emulator = Emulator(pyboy)
-        self.pyboy = self.emulator.pyboy
+        # Directly use the provided PyBoy instance for RAM I/O
+        self.pyboy = pyboy
 
     def read_memory(self, address):
         return self.pyboy.get_memory_value(address)

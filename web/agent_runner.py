@@ -1,3 +1,4 @@
+# agent_runner.py
 import asyncio
 import logging
 import time
@@ -28,47 +29,86 @@ async def run_agent(agent, num_steps=100000, run_log_dir=None, send_game_updates
     agent.running = True
     step_count = 0
     
-    # Auto-press Start to begin the game if needed
-    if hasattr(agent, 'emulator'):
-        logger.info("Auto-pressing Start to begin the game")
-        agent.emulator.press_buttons(["start"], True)
-        agent.emulator.step()
+    # Enqueue start press via patched press_buttons
+    agent.emulator.press_buttons(["start"], True)
+    # Step emulator without consuming queue to allow initial manual processing
+    agent.emulator.step()
+    # Immediately drain any queued start press to apply it before sending frame
+    from web.button_queue import queue, process_next_button
+    while not queue.empty():
+        await process_next_button("Agent-init", agent, send_game_updates)
+    
+    # Send initial frame update (if not already sent during init processing)
+    if send_game_updates:
+        try:
+            frame = agent.get_frame()
+            location = agent.emulator.get_location() or "Unknown"
+            await send_game_updates(frame, f"Game started in {location}")
+        except Exception as e:
+            logger.error(f"Error sending initial frame: {e}")
+    
+    # # Auto-press Start to begin the game if needed
+    # if hasattr(agent, 'emulator'):
+    #     logger.info("Auto-pressing Start to begin the game")
+    #     agent.emulator.press_buttons(["start"], True)
+    #     agent.emulator.step()
         
-        if grok_logger:
-            grok_logger.info("Auto-pressed Start to begin the game")
+    #     if grok_logger:
+    #         grok_logger.info("Auto-pressed Start to begin the game")
             
-        # Send initial frame update
-        if send_game_updates:
-            try:
-                frame = agent.get_frame()
-                location = agent.emulator.get_location() or "Unknown"
-                await send_game_updates(frame, f"Game started in {location}")
-            except Exception as e:
-                logger.error(f"Error sending initial frame: {e}")
+    #     # Send initial frame update
+    #     if send_game_updates:
+    #         try:
+    #             frame = agent.get_frame()
+    #             location = agent.emulator.get_location() or "Unknown"
+    #             await send_game_updates(frame, f"Game started in {location}")
+    #         except Exception as e:
+    #             logger.error(f"Error sending initial frame: {e}")
         
-        # Wait 3 seconds after pressing Start
-        logger.info("Waiting 3 seconds after pressing Start")
-        await asyncio.sleep(3.0)
+    #     # Wait 3 seconds after pressing Start
+    #     logger.info("Waiting 3 seconds after pressing Start")
+    #     await asyncio.sleep(3.0)
     
     # Main agent loop
     while agent.running and step_count < num_steps:
         try:
             # Check if agent is paused (dev mode)
             if hasattr(agent, 'app') and getattr(agent.app.state, 'is_paused', False):
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.1)
                 continue
             
             # Sleep before the next step
             logger.info(f"run_agent: sleeping for {agent.step_delay}s before step {step_count+1}")
             await asyncio.sleep(agent.step_delay)
             
+            # Check if paused again after delay to avoid stepping during Dev mode
+            if hasattr(agent, 'app') and getattr(agent.app.state, 'is_paused', False):
+                logger.info(f"run_agent paused after delay before step {step_count+1}")
+                continue
+            
             # Execute the step
             logger.info(f"Executing step {step_count+1}")
             start_time = time.time()
             
             try:
-                # Execute the step
-                agent.step() 
+                # CRITICAL UPDATE: Force frame update before step execution
+                if send_game_updates:
+                    try:
+                        frame = agent.get_frame()
+                        if frame:
+                            pre_message = f"Pre-step frame update for step {step_count+1}"
+                            await send_game_updates(frame, pre_message or "Frame update")
+                            # Add synchronization delay after pre-step render
+                            await asyncio.sleep(0.2)
+                    except Exception as e:
+                        logger.error(f"Error sending pre-step game update: {e}")
+                
+                # Execute the step with forced render flag
+                agent.step(force_render=True)
+                # After the agent enqueues presses, process all queued presses from this step
+                from web.button_queue import queue, process_next_button
+                while not queue.empty():
+                    await process_next_button("Agent", agent, send_game_updates)
                 step_count += 1
                 
                 # Get the latest message and update
@@ -80,13 +120,17 @@ async def run_agent(agent, num_steps=100000, run_log_dir=None, send_game_updates
                     if grok_logger and grok_logger != logger:
                         grok_logger.info(latest_message)
                 
-                # Send game update if handler is available
+                # CRITICAL UPDATE: Force final frame rendering with synchronization delay
                 if send_game_updates:
                     try:
+                        # Add delay for state stabilization before final frame capture
+                        await asyncio.sleep(0.1)
                         frame = agent.get_frame()
                         if frame:
                             # Send both the frame and message to UI
                             await send_game_updates(frame, latest_message or "Game update")
+                            # Add synchronization delay after frame render
+                            await asyncio.sleep(0.2)
                     except Exception as e:
                         logger.error(f"Error sending game update: {e}")
                 

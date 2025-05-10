@@ -164,8 +164,8 @@ class Emulator:
         # Update the episode reward
         self.current_episode_reward += self.current_step_reward
         
-        # Increment step counter
-        self.step_counter += 1
+        # # Increment step counter
+        # self.step_counter += 1
         
         # Check if we should reset the episode (every 30 steps)
         if self.step_counter >= 30:
@@ -281,9 +281,12 @@ class Emulator:
                 prev_coord = self.get_standard_coords()
             else:
                 prev_coord = None
-            self.pyboy.button_press(b);   self.tick(10)
-            self.pyboy.button_release(b); self.tick(120 if wait else 10)
+            self.pyboy.button(b, 8)
+            self.pyboy.tick(16)
+            # self.pyboy.button_release(b, render=True); self.tick(120 if wait else 10)
             out.append(f"Pressed {b}")
+            self.step_counter += 1
+            logger.info(f"press_buttons():Step counter: {self.step_counter}")
 
             # -------- manual-input tracking -----------
             cur = self.get_standard_coords()
@@ -1008,7 +1011,7 @@ class Emulator:
         """Advance one frame and update all trackers (auto‑loop mode)."""
         try:
             prev = self.prev_coordinates
-            self.tick(1)                                # one frame
+            self.tick(24)                                # one frame
 
             # ---- current local coord ---------------------------------------------------
             cur = self.get_standard_coords()            # (x_loc,y_loc,map_id) or None
@@ -1413,6 +1416,107 @@ class Emulator:
         self.max_event_rew = max(cur_rew, self.max_event_rew)
         return self.max_event_rew
         
+    def get_game_progression_status(self):
+        """
+        Compiles a comprehensive event tracking report for the LLM, focusing on:
+        1. Completed events
+        2. In-progress events
+        3. Next recommended actions based on current state
+        
+        Returns:
+            Dict: Structured game progression information
+        """
+        # Get current location to determine relevant events
+        current_location = self.reader.read_location()
+        current_map_id = self.reader.read_current_map_id()
+        
+        # Initialize progression data
+        progression = {
+            "current_location": current_location,
+            "map_id": current_map_id,
+            "badges": self.reader.read_badges(),
+            "completed_events": {},
+            "in_progress": {},
+            "recommended_next_steps": []
+        }
+        
+        # Track all game areas based on current state
+        # Gyms
+        progression["gyms"] = {
+            "gym1": self.gym1(),  # Pewter Gym
+            "gym2": self.gym2(),  # Cerulean Gym
+            "gym3": self.monitor_gym3_events(),
+            "gym4": self.monitor_gym4_events(),
+            "gym5": self.monitor_gym5_events(),
+            "gym6": self.monitor_gym6_events(),
+            "gym7": self.monitor_gym7_events(),
+            "gym8": self.monitor_gym8_events(),
+        }
+        
+        # Major areas
+        progression["major_areas"] = {
+            "silph_co": self.monitor_silph_co_events(),
+            "rock_tunnel": self.monitor_rock_tunnel_events(),
+            "poke_tower": self.monitor_poke_tower_events(),
+            "rocket_hideout": self.monitor_hideout_events(),
+            "mansion": self.monitor_mansion_events(),
+            "safari_zone": self.monitor_safari_events(),
+            "dojo": self.monitor_dojo_events(),
+            "lab": self.monitor_lab_events()
+        }
+        
+        # Key items and events
+        progression["key_progression"] = {
+            "hms_tms": self.monitor_hmtm_events(),
+            "snorlax": self.monitor_snorlax_events()
+        }
+        
+        # Generate next steps based on current state
+        progression["recommended_next_steps"] = self.determine_next_steps(progression)
+        
+        return progression
+
+    def determine_next_steps(self, progression):
+        """
+        Analyzes current game state to determine recommended next actions.
+        Based on game progression logic and badge requirements.
+        
+        Args:
+            progression: Dict of current game progression state
+            
+        Returns:
+            List: Ordered list of recommended next actions
+        """
+        recommendations = []
+        badges = progression["badges"]
+        
+        # Early game recommendations
+        if "BOULDER" not in badges:
+            recommendations.append("Defeat Brock in Pewter Gym to obtain the Boulder Badge")
+        elif "CASCADE" not in badges:
+            recommendations.append("Defeat Misty in Cerulean Gym to obtain the Cascade Badge")
+        elif "THUNDER" not in badges:
+            recommendations.append("Defeat Lt. Surge in Vermilion Gym to obtain the Thunder Badge")
+        
+        # Mid-game recommendations based on badges and key events
+        if "THUNDER" in badges and "RAINBOW" not in badges:
+            if not progression["key_progression"]["hms_tms"].get("got_hm01_cut", 0):
+                recommendations.append("Obtain HM01 (Cut) on the S.S. Anne")
+            else:
+                recommendations.append("Defeat Erika in Celadon Gym to obtain the Rainbow Badge")
+        
+        # Check for Rocket Hideout progress if player has appropriate badges
+        if "RAINBOW" in badges and not any(progression["major_areas"]["rocket_hideout"].values()):
+            recommendations.append("Investigate the Game Corner in Celadon City")
+        
+        # Check Pokémon Tower progress when player has reached that point
+        if "RAINBOW" in badges and not progression["major_areas"]["poke_tower"].get("beat_ghost_marowak", 0):
+            recommendations.append("Obtain the Silph Scope and investigate the Pokémon Tower in Lavender Town")
+        
+        # Continue with more sophisticated logic based on game progression...
+        
+        return recommendations[:3]  # Return top 3 recommendations
+    
     def calculate_direction_to_coord(self, target_x: int, target_y: int) -> str:
         """
         Calculates simple directional button presses (no obstacles) to reach target world coordinates.

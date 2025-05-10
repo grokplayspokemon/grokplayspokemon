@@ -41,6 +41,9 @@ os.makedirs(run_save_state_dir, exist_ok=True)
 # Define log file path
 log_file_path = 'game.log'
 
+# Clear the log file
+open(log_file_path, 'w').close()
+
 # Configure logging
 logging.basicConfig(level=config.LOG_LEVEL,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',

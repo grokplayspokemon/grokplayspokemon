@@ -17,6 +17,8 @@ import io
 from web.agent_runner import run_agent
 from agent.simple_agent import SimpleAgent
 import os
+import base64
+from web.button_queue import queue, process_next_button, set_orig_press
 
 app = FastAPI()
 
@@ -91,7 +93,7 @@ async def get_home(request: Request):
     )
 
 async def send_game_updates(frame_data: bytes, grok_message: str):
-    """Modified function to ensure UI elements are properly displayed."""
+    """Modified function to ensure UI elements are properly displayed with explicit sync."""
     import time
     import json
     
@@ -110,70 +112,38 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
         # Build the basic update message structure
         message = {
             "type": "update",
-            "timestamp": timestamp
+            "timestamp": timestamp,
+            "sync_id": timestamp  # Add sync_id for client-side synchronization
         }
         
         # Add frame data if it exists and is valid
-        if frame_data and isinstance(frame_data, bytes) and len(frame_data) > 0:
+        if frame_data and isinstance(frame_data, (bytes, bytearray)) and len(frame_data) > 0:
             try:
-                message["frame"] = frame_data.hex()
+                # Encode full frame data as base64 for UI rendering
+                message["frame"] = base64.b64encode(frame_data).decode('ascii')
+                message["frame_format"] = "base64"
                 logger.debug(f"Frame data valid: {len(frame_data)} bytes")
             except Exception as e:
-                logger.error(f"Error converting frame data: {e}")
+                logger.error(f"Error processing frame data: {e}")
         
         # CRITICAL: Always add the message content for Grok's Thoughts
         message["message"] = grok_message
         logger.info(f"Adding message to update: {grok_message[:30]}...")
         
-        # CRITICAL: Always get and include collision map data
-        try:
-            if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
-                # Retrieve raw collision data; fallback if missing
-                raw_map = app.state.agent.emulator.get_collision_map()
-                if not isinstance(raw_map, dict) or not raw_map.get('collision_map'):
-                    # Create placeholder 9x10 grid of unwalkable cells with player at center
-                    raw_map = {
-                        'collision_map': [[{'x':0,'y':0,'walkable':False,'entity':None,'entity_id':None} for _ in range(10)] for _ in range(9)],
-                        'player_position': {'x': -1, 'y': -1, 'direction': '?'},
-                        'grid_position': {'row': 4, 'col': 4},
-                        'recent_directions': [],
-                        'warps': []
-                    }
-                message["collision_map_raw"] = raw_map
-                # Format ASCII map with visit counts and player as P
-                try:
-                    ascii_map = app.state.agent.emulator.format_collision_map_with_counts(raw_map)
-                except Exception as e:
-                    logger.error(f"Error formatting collision counts: {e}", exc_info=True)
-                    ascii_map = None
-                message["collision_map"] = ascii_map
-                # Also include JSON formatted collision map for Grok
-                try:
-                    json_map = app.state.agent.emulator.format_collision_map_json(raw_map)
-                    message["collision_map_json"] = json_map
-                except Exception as e:
-                    logger.error(f"Error formatting collision map JSON: {e}", exc_info=True)
-                    message["collision_map_json"] = None
-                # Also include warps list if provided
-                warps = []
-                if isinstance(raw_map, dict):
-                    warps = raw_map.get('warps', []) or []
-                message["warps"] = warps
-                # Fallback: also log ASCII collision map to game.log for resilience
-                if ascii_map:
-                    logger.info("[ASCII MAP]\n" + ascii_map)
-            else:
-                # No emulator available, send placeholders
-                message["collision_map_raw"] = None
-                message["collision_map"] = None
-                message["warps"] = []
-        except Exception as e:
-            logger.error(f"Error getting collision map: {e}", exc_info=True)
-            message["collision_map_raw"] = None
-            message["collision_map"] = None
-            message["warps"] = []
+        # Add party data if agent exists
+        if hasattr(app.state, 'agent'):
+            try:
+                party_data = app.state.agent.get_party()
+                if party_data:
+                    message["party"] = party_data
+                    logger.debug(f"Added party data: {len(party_data)} Pokémon")
+            except Exception as e:
+                logger.error(f"Error getting party data: {e}")
         
-        # Convert to JSON and broadcast with retries
+        # CRITICAL SYNCHRONIZATION UPDATE: Add render completion acknowledgment request
+        message["require_ack"] = True
+        
+        # Convert to JSON and broadcast with retries and explicit synchronization
         try:
             message_json = json.dumps(message)
             retry_count = 0
@@ -181,8 +151,12 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
             
             while retry_count < max_retries:
                 try:
+                    # Broadcast update to all clients
                     await manager.broadcast(message_json)
                     logger.info(f"Update with timestamp {timestamp} sent to {len(manager.active_connections)} connections")
+                    
+                    # CRITICAL SYNCHRONIZATION UPDATE: Add delay after broadcast for client processing
+                    await asyncio.sleep(0.1)
                     break
                 except Exception as e:
                     retry_count += 1
@@ -200,8 +174,9 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     
-    # Always auto-start agent on connect; respect dev_control by pausing after start
-    if not hasattr(app.state, 'agent_task') or app.state.agent_task is None or app.state.agent_task.done():
+    # On WebSocket connect, start agent only if not already running
+    task_exists = hasattr(app.state, 'agent_task') and app.state.agent_task is not None and not app.state.agent_task.done()
+    if not task_exists:
         if app.state.dev_control:
             logger.info("WebSocket connected, starting agent in paused dev mode.")
             try:
@@ -215,6 +190,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 await start_agent()
             except Exception as e:
                 logger.error(f"Error starting agent automatically on WebSocket connection: {e}")
+    else:
+        # Agent already running; maintain current pause state
+        logger.info("WebSocket connected, agent already running; dev control state unchanged.")
 
     # Send an initial connection confirmation with timestamp
     try:
@@ -293,19 +271,23 @@ async def websocket_endpoint(websocket: WebSocket):
                     button = msg.get("button")
                     logger.info(f"Dev mode: Pressed {button}")
                     if button:
-                        app.state.agent.emulator.press_buttons([button], True)
-                        
-                        # Get updated frame and send immediately
-                        frame = app.state.agent.get_frame()
-                        if frame:
-                            await send_game_updates(frame, f"Dev mode: Pressed {button}")
-                        
-                        # Acknowledge input
+                        # Flush pending queued presses (remove stale auto-press events)
+                        while not queue.empty():
+                            try:
+                                queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                break
+                        # Enqueue and process via shared button queue
+                        await queue.put(button)
+                        await process_next_button("Dev mode", app.state.agent, send_game_updates)
+                        logger.info(f"Dev mode: processed button {button}")
+                        # Acknowledge input after processing
                         await websocket.send_text(json.dumps({
                             "type": "ack",
                             "button": button,
                             "timestamp": int(time.time() * 1000)
                         }))
+                        
                 
                 # Handle refresh frame request
                 elif mtype == "refresh_frame":
@@ -315,7 +297,52 @@ async def websocket_endpoint(websocket: WebSocket):
                         if frame:
                             await send_game_updates(frame, f"Frame refresh in {location}")
                             logger.info(f"Sent frame refresh for {location}")
-            
+
+                # Handle navigation clicks in Dev Mode
+                elif mtype == "navigate" and getattr(app.state, 'is_paused', False) and hasattr(app.state, 'agent'):
+                    row = msg.get("row")
+                    col = msg.get("col")
+                    logger.info(f"Dev mode: navigation request to grid cell ({row}, {col})")
+                    try:
+                        raw_map = app.state.agent.emulator.get_collision_map()
+                        cell = raw_map["collision_map"][row][col]
+                        target_y = cell.get("y")
+                        target_x = cell.get("x")
+                        # Use agent's navigate_to tool for pathfinding
+                        class FakeToolCall:
+                            def __init__(self, name, input_data, call_id=None):
+                                self.name = name
+                                self.input = input_data
+                                self.id = call_id
+                                self.type = "function"
+                        # Process navigation tool call
+                        result = app.state.agent.process_tool_call(
+                            FakeToolCall("navigate_to", {"glob_y": target_y, "glob_x": target_x}, str(uuid.uuid4()))
+                        )
+                        # Send tool result message
+                        await websocket.send_text(json.dumps({
+                            "type": "tool_result",
+                            "content": result
+                        }))
+                        # Send updated frame
+                        frame = app.state.agent.get_frame()
+                        if frame:
+                            await send_game_updates(frame, f"Dev mode: navigated to ({row}, {col})")
+                    except Exception as e:
+                        logger.error(f"Error in dev mode navigation: {e}", exc_info=True)
+
+                # Handle delay setting in Dev Mode
+                elif mtype == "set_delay" and hasattr(app.state, 'agent'):
+                    delay = msg.get("delay")
+                    try:
+                        # Update agent step delay
+                        app.state.agent.step_delay = float(delay)
+                        if hasattr(app.state, 'cfg'):
+                            app.state.cfg.step_delay = float(delay)
+                        logger.info(f"Dev mode: step_delay set to {delay}s")
+                    except Exception:
+                        logger.error(f"Invalid delay value received: {delay}", exc_info=True)
+
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON message: {raw[:50]}...")
             
@@ -356,6 +383,22 @@ async def start_agent():
             if not hasattr(app.state, 'cfg'):
                 return {"status": "error", "message": "Config not found in app state."}
             app.state.agent = SimpleAgent(cfg=app.state.cfg, app=app)
+        # Patch emulator.press_buttons once, on first agent instantiation
+        from web.button_queue import queue, set_orig_press
+        # Patch only once per server lifetime
+        if set_orig_press and hasattr(app.state, 'agent') and getattr(app.state, '_press_patched', False) is False:
+            # Save the original implementation
+            set_orig_press(app.state.agent.emulator.press_buttons)
+            # Override to enqueue
+            def enqueue_press(buttons, wait=True):
+                for b in buttons:
+                    try:
+                        queue.put_nowait(b)
+                    except asyncio.QueueFull:
+                        pass
+            app.state.agent.emulator.press_buttons = enqueue_press
+            # Mark patched to avoid re-patching
+            app.state._press_patched = True
         # Ensure config available
         if not hasattr(app.state, 'cfg'):
             logger.error("Config not found in app state before creating agent task.")

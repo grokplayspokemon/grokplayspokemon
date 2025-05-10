@@ -42,7 +42,7 @@ USE_COLLISION_MAP = True # ASCII overlay provided to LLM
 USE_SCREENSHOTS = False # Screenshots sent to LLM
 USE_NAVIGATOR = True # Deprecated/Unused?
 # Delay in seconds between each agent step for viewers to see updates
-STEP_DELAY = 3.0
+STEP_DELAY = 0.0
 
 # --- Logging ---
 LOG_LEVEL = logging.INFO # e.g., logging.DEBUG, logging.INFO, logging.WARNING

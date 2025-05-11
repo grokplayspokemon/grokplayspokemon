@@ -2,19 +2,23 @@
 import logging
 logger = logging.getLogger(__name__)
 
+from game_data.red_memory_battle import *
+from game_data.red_memory_menus import *
+from game_data.red_memory_env import *
+from game_data.red_memory_items import *
+
 from dataclasses import dataclass
 from enum import IntEnum, IntFlag
-from game_data.red_memory_battle import (
-    ENEMY_PARTY_COUNT, 
-    ENEMY_PARTY_SPECIES, 
-    ENEMYS_POKEMON_TYPES, 
-    POKEMON_MATCH_TYPES,
-    PLAYERS_MOVE_POWER,
-    PLAYERS_MOVE_TYPE,
-    PLAYERS_MOVE_PP,
-    PLAYERS_MOVE_NUM,
-)
-from game_data.red_memory_menus import *
+# from game_data.red_memory_battle import (
+#     ENEMY_PARTY_COUNT, 
+#     ENEMY_PARTY_SPECIES, 
+#     ENEMYS_POKEMON_TYPES, 
+#     POKEMON_MATCH_TYPES,
+#     PLAYERS_MOVE_POWER,
+#     PLAYERS_MOVE_TYPE,
+#     PLAYERS_MOVE_PP,
+#     PLAYERS_MOVE_NUM,
+# )
 
 class StatusCondition(IntFlag):
     NONE = 0
@@ -1399,7 +1403,7 @@ class GameState(IntEnum):
     
 class Game:
     def __init__(self, pyboy):
-        self.ram_interface = PokemonRedReader(pyboy)
+        self.ram_interface = PokemonRedReader(pyboy.memory)
 
         self.world = World(self)
         self.battle = Battle(self)

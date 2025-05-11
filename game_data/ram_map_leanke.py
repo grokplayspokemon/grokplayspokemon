@@ -252,7 +252,7 @@ def rock_tunnel(game):
     )
 
 
-def rock_tunnel_events(game):
+def monitor_rock_tunnel_events(game):
     events_status_rock_tunnel = {
         "beat_rock_tunnel_1_trainer_0": TRAINER * int(read_bit(game, 0xD7D2, 1)),
         "beat_rock_tunnel_1_trainer_1": TRAINER * int(read_bit(game, 0xD7D2, 2)),
@@ -320,6 +320,34 @@ def ssanne(game):
             Beat_Ss_Anne_10_Trainer_5,
         ]
     )
+    
+def monitor_ssanne_events(game):
+    events_status_ssanne = {
+        "beat_ss_anne_5_trainer_0": TRAINER * int(read_bit(game, 0xD7FF, 4)),
+        "beat_ss_anne_5_trainer_1": TRAINER * int(read_bit(game, 0xD7FF, 5)),
+        "rubbed_captains_back": BILL_CAPT * int(read_bit(game, 0xD803, 1)),
+        "ss_anne_left": BILL_CAPT * int(read_bit(game, 0xD803, 2)),
+        "walked_past_guard_after_ss_anne_left": BILL_CAPT * int(read_bit(game, 0xD803, 3)),
+        "started_walking_out_of_dock": BILL_CAPT * int(read_bit(game, 0xD803, 4)),
+        "walked_out_of_dock": BILL_CAPT * int(read_bit(game, 0xD803, 5)),
+        "beat_ss_anne_8_trainer_0": TRAINER * int(read_bit(game, 0xD805, 1)),
+        "beat_ss_anne_8_trainer_1": TRAINER * int(read_bit(game, 0xD805, 2)),
+        "beat_ss_anne_8_trainer_2": TRAINER * int(read_bit(game, 0xD805, 3)),
+        "beat_ss_anne_8_trainer_3": TRAINER * int(read_bit(game, 0xD805, 4)),
+        "beat_ss_anne_9_trainer_0": TRAINER * int(read_bit(game, 0xD807, 1)),
+        "beat_ss_anne_9_trainer_1": TRAINER * int(read_bit(game, 0xD807, 2)),
+        "beat_ss_anne_9_trainer_2": TRAINER * int(read_bit(game, 0xD807, 3)),
+        "beat_ss_anne_9_trainer_3": TRAINER * int(read_bit(game, 0xD807, 4)),
+        "beat_ss_anne_10_trainer_0": TRAINER * int(read_bit(game, 0xD809, 1)),
+        "beat_ss_anne_10_trainer_1": TRAINER * int(read_bit(game, 0xD809, 2)),
+        "beat_ss_anne_10_trainer_2": TRAINER * int(read_bit(game, 0xD809, 3)),
+        "beat_ss_anne_10_trainer_3": TRAINER * int(read_bit(game, 0xD809, 4)),
+        "beat_ss_anne_10_trainer_4": TRAINER * int(read_bit(game, 0xD809, 5)),
+        "beat_ss_anne_10_trainer_5": TRAINER * int(read_bit(game, 0xD809, 6)),
+    }
+    return events_status_ssanne
+
+
 
 
 def mtmoon(game):
@@ -355,6 +383,25 @@ def mtmoon(game):
             Got_Helix_Fossil,
         ]
     )
+    
+def monitor_mtmoon_events(game):
+    events_status_mtmoon = {
+        "mtmoon_1_trainer_1": TRAINER * int(read_bit(game, 0xD7F5, 1)),
+        "mtmoon_1_trainer_2": TRAINER * int(read_bit(game, 0xD7F5, 2)),
+        "mtmoon_1_trainer_3": TRAINER * int(read_bit(game, 0xD7F5, 3)),
+        "mtmoon_1_trainer_4": TRAINER * int(read_bit(game, 0xD7F5, 4)),
+        "mtmoon_1_trainer_5": TRAINER * int(read_bit(game, 0xD7F5, 5)),
+        "mtmoon_1_trainer_6": TRAINER * int(read_bit(game, 0xD7F5, 6)),
+        "mtmoon_1_trainer_7": TRAINER * int(read_bit(game, 0xD7F5, 7)),
+        "mtmoon_super_nerd": TRAINER * int(read_bit(game, 0xD7F6, 1)),
+        "mtmoon_3_trainer_0": TRAINER * int(read_bit(game, 0xD7F6, 2)),
+        "mtmoon_3_trainer_1": TRAINER * int(read_bit(game, 0xD7F6, 3)),
+        "mtmoon_3_trainer_2": TRAINER * int(read_bit(game, 0xD7F6, 4)),
+        "mtmoon_3_trainer_3": TRAINER * int(read_bit(game, 0xD7F6, 5)),
+        "mtmoon_got_dome_fossil": TASK * int(read_bit(game, 0xD7F6, 6)),
+        "mtmoon_got_helix_fossil": TASK * int(read_bit(game, 0xD7F6, 7)),
+    }
+    return events_status_mtmoon
 
 
 def routes(game):
@@ -832,6 +879,179 @@ def routes(game):
         ]
     )
 
+def monitor_route_events(game):
+    events_status_route = {
+        "route3_0": TRAINER * int(read_bit(game, 0xD7C3, 2)),
+        "route3_1": TRAINER * int(read_bit(game, 0xD7C3, 3)),
+        "route3_2": TRAINER * int(read_bit(game, 0xD7C3, 4)),
+        "route3_3": TRAINER * int(read_bit(game, 0xD7C3, 5)),
+        "route3_4": TRAINER * int(read_bit(game, 0xD7C3, 6)),
+        "route3_5": TRAINER * int(read_bit(game, 0xD7C3, 7)),
+        "route3_6": TRAINER * int(read_bit(game, 0xD7C4, 0)),
+        "route3_7": TRAINER * int(read_bit(game, 0xD7C4, 1)),
+
+        "route4_0": TRAINER * int(read_bit(game, 0xD7C5, 2)),
+
+        "route24_rocket": TRAINER * int(read_bit(game, 0xD7EF, 1)),
+        "route24_0": TRAINER * int(read_bit(game, 0xD7EF, 2)),
+        "route24_1": TRAINER * int(read_bit(game, 0xD7EF, 3)),
+        "route24_2": TRAINER * int(read_bit(game, 0xD7EF, 4)),
+        "route24_3": TRAINER * int(read_bit(game, 0xD7EF, 5)),
+        "route24_4": TRAINER * int(read_bit(game, 0xD7EF, 6)),
+        "route24_5": TRAINER * int(read_bit(game, 0xD7EF, 7)),
+
+        "route25_0": TRAINER * int(read_bit(game, 0xD7F1, 1)),
+        "route25_1": TRAINER * int(read_bit(game, 0xD7F1, 2)),
+        "route25_2": TRAINER * int(read_bit(game, 0xD7F1, 3)),
+        "route25_3": TRAINER * int(read_bit(game, 0xD7F1, 4)),
+        "route25_4": TRAINER * int(read_bit(game, 0xD7F1, 5)),
+        "route25_5": TRAINER * int(read_bit(game, 0xD7F1, 6)),
+        "route25_6": TRAINER * int(read_bit(game, 0xD7F1, 7)),
+        "route25_7": TRAINER * int(read_bit(game, 0xD7F2, 0)),
+        "route25_8": TRAINER * int(read_bit(game, 0xD7F2, 1)),
+
+        "route9_0": TRAINER * int(read_bit(game, 0xD7CF, 1)),
+        "route9_1": TRAINER * int(read_bit(game, 0xD7CF, 2)),
+        "route9_2": TRAINER * int(read_bit(game, 0xD7CF, 3)),
+        "route9_3": TRAINER * int(read_bit(game, 0xD7CF, 4)),
+        "route9_4": TRAINER * int(read_bit(game, 0xD7CF, 5)),
+        "route9_5": TRAINER * int(read_bit(game, 0xD7CF, 6)),
+        "route9_6": TRAINER * int(read_bit(game, 0xD7CF, 7)),
+        "route9_7": TRAINER * int(read_bit(game, 0xD7D0, 0)),
+        "route9_8": TRAINER * int(read_bit(game, 0xD7D0, 1)),
+
+        "route6_0": TRAINER * int(read_bit(game, 0xD7C9, 1)),
+        "route6_1": TRAINER * int(read_bit(game, 0xD7C9, 2)),
+        "route6_2": TRAINER * int(read_bit(game, 0xD7C9, 3)),
+        "route6_3": TRAINER * int(read_bit(game, 0xD7C9, 4)),
+        "route6_4": TRAINER * int(read_bit(game, 0xD7C9, 5)),
+        "route6_5": TRAINER * int(read_bit(game, 0xD7C9, 6)),
+
+        "route11_0": TRAINER * int(read_bit(game, 0xD7D5, 1)),
+        "route11_1": TRAINER * int(read_bit(game, 0xD7D5, 2)),
+        "route11_2": TRAINER * int(read_bit(game, 0xD7D5, 3)),
+        "route11_3": TRAINER * int(read_bit(game, 0xD7D5, 4)),
+        "route11_4": TRAINER * int(read_bit(game, 0xD7D5, 5)),
+        "route11_5": TRAINER * int(read_bit(game, 0xD7D5, 6)),
+        "route11_6": TRAINER * int(read_bit(game, 0xD7D5, 7)),
+        "route11_7": TRAINER * int(read_bit(game, 0xD7D6, 0)),
+        "route11_8": TRAINER * int(read_bit(game, 0xD7D6, 1)),
+        "route11_9": TRAINER * int(read_bit(game, 0xD7D6, 2)),
+
+        "route8_0": TRAINER * int(read_bit(game, 0xD7CD, 1)),
+        "route8_1": TRAINER * int(read_bit(game, 0xD7CD, 2)),
+        "route8_2": TRAINER * int(read_bit(game, 0xD7CD, 3)),
+        "route8_3": TRAINER * int(read_bit(game, 0xD7CD, 4)),
+        "route8_4": TRAINER * int(read_bit(game, 0xD7CD, 5)),
+        "route8_5": TRAINER * int(read_bit(game, 0xD7CD, 6)),
+        "route8_6": TRAINER * int(read_bit(game, 0xD7CD, 7)),
+        "route8_7": TRAINER * int(read_bit(game, 0xD7CE, 0)),
+        "route8_8": TRAINER * int(read_bit(game, 0xD7CE, 1)),
+
+        "route10_0": TRAINER * int(read_bit(game, 0xD7D1, 1)),
+        "route10_1": TRAINER * int(read_bit(game, 0xD7D1, 2)),
+        "route10_2": TRAINER * int(read_bit(game, 0xD7D1, 3)),
+        "route10_3": TRAINER * int(read_bit(game, 0xD7D1, 4)),
+        "route10_4": TRAINER * int(read_bit(game, 0xD7D1, 5)),
+        "route10_5": TRAINER * int(read_bit(game, 0xD7D1, 6)),
+
+        "route12_0": TRAINER * int(read_bit(game, 0xD7D7, 2)),
+        "route12_1": TRAINER * int(read_bit(game, 0xD7D7, 3)),
+        "route12_2": TRAINER * int(read_bit(game, 0xD7D7, 4)),
+        "route12_3": TRAINER * int(read_bit(game, 0xD7D7, 5)),
+        "route12_4": TRAINER * int(read_bit(game, 0xD7D7, 6)),
+        "route12_5": TRAINER * int(read_bit(game, 0xD7D7, 7)),
+        "route12_6": TRAINER * int(read_bit(game, 0xD7D8, 0)),
+
+        "route16_0": TRAINER * int(read_bit(game, 0xD7DF, 1)),
+        "route16_1": TRAINER * int(read_bit(game, 0xD7DF, 2)),
+        "route16_2": TRAINER * int(read_bit(game, 0xD7DF, 3)),
+        "route16_3": TRAINER * int(read_bit(game, 0xD7DF, 4)),
+        "route16_4": TRAINER * int(read_bit(game, 0xD7DF, 5)),
+        "route16_5": TRAINER * int(read_bit(game, 0xD7DF, 6)),
+
+        "route17_0": TRAINER * int(read_bit(game, 0xD7E1, 1)),
+        "route17_1": TRAINER * int(read_bit(game, 0xD7E1, 2)),
+        "route17_2": TRAINER * int(read_bit(game, 0xD7E1, 3)),
+        "route17_3": TRAINER * int(read_bit(game, 0xD7E1, 4)),
+        "route17_4": TRAINER * int(read_bit(game, 0xD7E1, 5)),
+        "route17_5": TRAINER * int(read_bit(game, 0xD7E1, 6)),
+        "route17_6": TRAINER * int(read_bit(game, 0xD7E1, 7)),
+        "route17_7": TRAINER * int(read_bit(game, 0xD7E2, 0)),
+        "route17_8": TRAINER * int(read_bit(game, 0xD7E2, 1)),
+        "route17_9": TRAINER * int(read_bit(game, 0xD7E2, 2)),
+
+        "route13_0": TRAINER * int(read_bit(game, 0xD7D9, 1)),
+        "route13_1": TRAINER * int(read_bit(game, 0xD7D9, 2)),
+        "route13_2": TRAINER * int(read_bit(game, 0xD7D9, 3)),
+        "route13_3": TRAINER * int(read_bit(game, 0xD7D9, 4)),
+        "route13_4": TRAINER * int(read_bit(game, 0xD7D9, 5)),
+        "route13_5": TRAINER * int(read_bit(game, 0xD7D9, 6)),
+        "route13_6": TRAINER * int(read_bit(game, 0xD7D9, 7)),
+        "route13_7": TRAINER * int(read_bit(game, 0xD7DA, 0)),
+        "route13_8": TRAINER * int(read_bit(game, 0xD7DA, 1)),
+        "route13_9": TRAINER * int(read_bit(game, 0xD7DA, 2)),
+
+        "route14_0": TRAINER * int(read_bit(game, 0xD7DB, 1)),
+        "route14_1": TRAINER * int(read_bit(game, 0xD7DB, 2)),
+        "route14_2": TRAINER * int(read_bit(game, 0xD7DB, 3)),
+        "route14_3": TRAINER * int(read_bit(game, 0xD7DB, 4)),
+        "route14_4": TRAINER * int(read_bit(game, 0xD7DB, 5)),
+        "route14_5": TRAINER * int(read_bit(game, 0xD7DB, 6)),
+        "route14_6": TRAINER * int(read_bit(game, 0xD7DB, 7)),
+        "route14_7": TRAINER * int(read_bit(game, 0xD7DC, 0)),
+        "route14_8": TRAINER * int(read_bit(game, 0xD7DC, 1)),
+        "route14_9": TRAINER * int(read_bit(game, 0xD7DC, 2)),
+
+        "route15_0": TRAINER * int(read_bit(game, 0xD7DD, 1)),
+        "route15_1": TRAINER * int(read_bit(game, 0xD7DD, 2)),
+        "route15_2": TRAINER * int(read_bit(game, 0xD7DD, 3)),
+        "route15_3": TRAINER * int(read_bit(game, 0xD7DD, 4)),
+        "route15_4": TRAINER * int(read_bit(game, 0xD7DD, 5)),
+        "route15_5": TRAINER * int(read_bit(game, 0xD7DD, 6)),
+        "route15_6": TRAINER * int(read_bit(game, 0xD7DD, 7)),
+        "route15_7": TRAINER * int(read_bit(game, 0xD7DE, 0)),
+        "route15_8": TRAINER * int(read_bit(game, 0xD7DE, 1)),
+        "route15_9": TRAINER * int(read_bit(game, 0xD7DE, 2)),
+
+        "route18_0": TRAINER * int(read_bit(game, 0xD7E3, 1)),
+        "route18_1": TRAINER * int(read_bit(game, 0xD7E3, 2)),
+        "route18_2": TRAINER * int(read_bit(game, 0xD7E3, 3)),
+
+        "route19_0": TRAINER * int(read_bit(game, 0xD7E5, 1)),
+        "route19_1": TRAINER * int(read_bit(game, 0xD7E5, 2)),
+        "route19_2": TRAINER * int(read_bit(game, 0xD7E5, 3)),
+        "route19_3": TRAINER * int(read_bit(game, 0xD7E5, 4)),
+        "route19_4": TRAINER * int(read_bit(game, 0xD7E5, 5)),
+        "route19_5": TRAINER * int(read_bit(game, 0xD7E5, 6)),
+        "route19_6": TRAINER * int(read_bit(game, 0xD7E5, 7)),
+        "route19_7": TRAINER * int(read_bit(game, 0xD7E6, 0)),
+        "route19_8": TRAINER * int(read_bit(game, 0xD7E6, 1)),
+        "route19_9": TRAINER * int(read_bit(game, 0xD7E6, 2)),
+
+        "route20_0": TRAINER * int(read_bit(game, 0xD7E7, 1)),
+        "route20_1": TRAINER * int(read_bit(game, 0xD7E7, 2)),
+        "route20_2": TRAINER * int(read_bit(game, 0xD7E7, 3)),
+        "route20_3": TRAINER * int(read_bit(game, 0xD7E7, 4)),
+        "route20_4": TRAINER * int(read_bit(game, 0xD7E7, 5)),
+        "route20_5": TRAINER * int(read_bit(game, 0xD7E7, 6)),
+        "route20_6": TRAINER * int(read_bit(game, 0xD7E7, 7)),
+        "route20_7": TRAINER * int(read_bit(game, 0xD7E8, 0)),
+        "route20_8": TRAINER * int(read_bit(game, 0xD7E8, 1)),
+        "route20_9": TRAINER * int(read_bit(game, 0xD7E8, 2)),
+
+        "route21_0": TRAINER * int(read_bit(game, 0xD7E9, 1)),
+        "route21_1": TRAINER * int(read_bit(game, 0xD7E9, 2)),
+        "route21_2": TRAINER * int(read_bit(game, 0xD7E9, 3)),
+        "route21_3": TRAINER * int(read_bit(game, 0xD7E9, 4)),
+        "route21_4": TRAINER * int(read_bit(game, 0xD7E9, 5)),
+        "route21_5": TRAINER * int(read_bit(game, 0xD7E9, 6)),
+        "route21_6": TRAINER * int(read_bit(game, 0xD7E9, 7)),
+        "route21_7": TRAINER * int(read_bit(game, 0xD7EA, 0)),
+        "route21_8": TRAINER * int(read_bit(game, 0xD7EA, 1))
+    }
+    
+    return events_status_route
 
 def misc(game):
     # "0xD7C6-7": "Bought Magikarp",
@@ -886,6 +1106,27 @@ def misc(game):
             sixteen,
         ]
     )
+
+def monitor_misc_events(game):
+    misc_events_dict = {
+        "bought_magikarp": TASK * int(read_bit(game, 0xD7C6, 7)),
+        "hall_of_fame_dex_rating": TASK * int(read_bit(game, 0xD747, 3)),
+        "daisy_walking": TASK * int(read_bit(game, 0xD74A, 2)),
+        "bought_museum_ticket": TASK * int(read_bit(game, 0xD754, 0)),
+        "got_old_amber": TASK * int(read_bit(game, 0xD754, 1)),
+        "got_bike_voucher": TASK * int(read_bit(game, 0xD771, 1)),
+        "got_10_coins": TASK * int(read_bit(game, 0xD77E, 2)),
+        "got_20_coins": TASK * int(read_bit(game, 0xD77E, 3)),
+        "got_20_coins_2": TASK * int(read_bit(game, 0xD77E, 4)),
+        "got_coin_case": TASK * int(read_bit(game, 0xD783, 0)),
+        "got_potion_sample": TASK * int(read_bit(game, 0xD7BF, 0)),
+        "got_itemfinder": TASK * int(read_bit(game, 0xD7D6, 7)),
+        "got_exp_all": TASK * int(read_bit(game, 0xD7DD, 0)),
+        "rescued_mr_fuji": TASK * int(read_bit(game, 0xD7E0, 7)),
+        "beat_mewtwo": TASK * int(read_bit(game, 0xD85F, 1)),
+        "rescued_mr_fuji_2": TASK * int(read_bit(game, 0xD769, 7))
+    }
+    return misc_events_dict
 
 
 def snorlax(game):
@@ -1026,6 +1267,15 @@ def bill(game):
         ]
     )
 
+def monitor_bill_events(game):
+    return {
+        "met_bill": BILL_CAPT * int(read_bit(game, 0xD7F1, 0)),
+        "used_cell_separator_on_bill": BILL_CAPT * int(read_bit(game, 0xD7F2, 3)),
+        "got_ss_ticket": BILL_CAPT * int(read_bit(game, 0xD7F2, 4)),
+        "met_bill_2": BILL_CAPT * int(read_bit(game, 0xD7F2, 5)),
+        "bill_said_use_cell_separator": BILL_CAPT * int(read_bit(game, 0xD7F2, 6)),
+        "left_bills_house_after_helping": BILL_CAPT * int(read_bit(game, 0xD7F2, 7)),
+    }
 
 def oak(game):
     # "0xD74B-7": "Oak Appeared In Pallet",
@@ -1066,6 +1316,21 @@ def oak(game):
             pallet_after_getting_pokeballs_2,
         ]
     )
+
+def monitor_oak_events(game):
+    return {
+        "oak_appeared_in_pallet": TASK * int(read_bit(game, 0xD74B, 7)),
+        "followed_oak_into_lab": TASK * int(read_bit(game, 0xD747, 0)),
+        "oak_asked_to_choose_mon": TASK * int(read_bit(game, 0xD74B, 1)),
+        "got_starter": TASK * int(read_bit(game, 0xD74B, 2)),
+        "followed_oak_into_lab_2": TASK * int(read_bit(game, 0xD74B, 0)),
+        "got_pokedex": QUEST * int(read_bit(game, 0xD74B, 5)),
+        "got_oaks_parcel": QUEST * int(read_bit(game, 0xD74E, 1)),
+        "pallet_after_getting_pokeballs": QUEST * int(read_bit(game, 0xD747, 6)),
+        "oak_got_parcel": QUEST * int(read_bit(game, 0xD74E, 0)),
+        "got_pokeballs_from_oak": TASK * int(read_bit(game, 0xD74B, 4)),
+        "pallet_after_getting_pokeballs_2": TASK * int(read_bit(game, 0xD74B, 6)),
+    }
 
 
 def towns(game):
@@ -1111,6 +1376,21 @@ def towns(game):
         ]
     )
 
+def monitor_towns_events(game):
+    return {
+        "got_town_map": TASK * int(read_bit(game, 0xD74A, 0)),
+        "entered_blues_house": TASK * int(read_bit(game, 0xD74A, 1)),
+        "beat_viridian_forest_trainer_0": TRAINER * int(read_bit(game, 0xD7F3, 2)),
+        "beat_viridian_forest_trainer_1": TRAINER * int(read_bit(game, 0xD7F3, 3)),
+        "beat_viridian_forest_trainer_2": TRAINER * int(read_bit(game, 0xD7F3, 4)),
+        "got_nugget": TASK * int(read_bit(game, 0xD7EF, 0)),
+        "nugget_reward_available": TASK * int(read_bit(game, 0xD7F0, 1)),
+        "beat_cerulean_rocket_thief": TRAINER * int(read_bit(game, 0xD75B, 7)),
+        "got_bicycle": QUEST * int(read_bit(game, 0xD75F, 0)),
+        "seel_fan_boast": TASK * int(read_bit(game, 0xD771, 6)),
+        "pikachu_fan_boast": TASK * int(read_bit(game, 0xD771, 7)),
+        "got_poke_flute": QUEST * int(read_bit(game, 0xD76C, 0)),
+    }
 
 def lab(game):
     # "0xD7A3-0": "Gave Fossil To Lab",
@@ -1652,6 +1932,21 @@ def gym8(game):
 
 
 # BET ADDED
+def monitor_gym1_events(game):
+    events_status_gym1 = {
+        "one": GYM_LEADER * int(read_bit(game, 0xD765, 1)),
+        "g1_1": GYM_TRAINER * int(read_bit(game, 0xD765, 2)),
+    }
+    return events_status_gym1  # sum(events_status_gym1.values())
+
+def monitor_gym2_events(game):
+    events_status_gym2 = {
+        "two": GYM_LEADER * int(read_bit(game, 0xD765, 1)),
+        "g2_1": GYM_TRAINER * int(read_bit(game, 0xD765, 2)),
+        "g2_2": GYM_TRAINER * int(read_bit(game, 0xD765, 3)),
+    }
+    return events_status_gym2  # sum(events_status_gym2.values())
+
 def monitor_gym3_events(game):
     events_status_gym3 = {
         "lock_one": GYM_TASK * int(read_bit(game, 0xD773, 1)),
@@ -1748,6 +2043,20 @@ def rival(game):
     Beat_Silph_Co_Rival = RIVAL * int(read_bit(game, 0xD82F, 0))
 
     return sum([one, two, three, four, five, six, seven, eight, nine, Beat_Silph_Co_Rival])
+
+def monitor_rival_events(game):
+    return {
+        "rival_appeared_in_pallet": TASK * int(read_bit(game, 0xD74B, 3)),
+        "rival_2": TASK * int(read_bit(game, 0xD7EB, 0)),
+        "rival_3": TASK * int(read_bit(game, 0xD7EB, 1)),
+        "rival_4": TASK * int(read_bit(game, 0xD7EB, 5)),
+        "rival_5": TASK * int(read_bit(game, 0xD7EB, 6)),
+        "rival_6": TASK * int(read_bit(game, 0xD75A, 0)),
+        "rival_7": TASK * int(read_bit(game, 0xD764, 6)),
+        "rival_8": TASK * int(read_bit(game, 0xD764, 7)),
+        "rival_9": TASK * int(read_bit(game, 0xD7EB, 7)),
+        "beat_silph_co_rival": TASK * int(read_bit(game, 0xD82F, 0)),
+    }
 
 
 ######################################################################################################

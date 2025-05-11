@@ -14,27 +14,17 @@ import time
 import random
 from pathlib import Path
 
-from agent.prompts import SYSTEM_PROMPT, SUMMARY_PROMPT
+from agent.prompts import SYSTEM_PROMPT, SUMMARY_PROMPT, BATTLE_SYSTEM_PROMPT
 from agent.tools import AVAILABLE_TOOLS
 from agent.emulator import Emulator
 from game_data.nav import Nav
-from agent.memory_reader import PokemonType
-try:
-    from bin.ram_reader.red_memory_battle import *
-    from bin.ram_reader.red_memory_env import *
-    from bin.ram_reader.red_memory_items import *
-    from bin.ram_reader.red_memory_map import *
-    from bin.ram_reader.red_memory_menus import *
-    from bin.ram_reader.red_memory_player import *
-    from bin.ram_reader.red_ram_debug import *
-    from pyboy.utils import WindowEvent
-except ImportError as e:
-    logger.warning(f"Could not import RAM reader modules: {e}")
-    # Fallback or alternative handling if needed
+from agent.memory_reader import *
 
 from bin.red_pyboy_manager import PyBoyManager
 from openai import OpenAI
 import game_data.ram_map_leanke as ram_map
+
+
 
         
 def build_xai_toolspec():
@@ -95,6 +85,9 @@ class SimpleAgent:
             logger.warning("PyBoyManager could not be imported, proceeding without it.")
             self.pyboy_manager = None
         
+        self.red_reader = PokemonRedReader(self.emulator)
+        self.game = Game(self.emulator.pyboy)
+        
         # Set Grok provider settings
         self.model_name = cfg.llm_model
         self.temperature = cfg.llm_temperature
@@ -131,6 +124,7 @@ class SimpleAgent:
         # Battle tracking
         self.was_in_battle = False
         self.currently_in_battle = False  # Track if currently in battle state
+        self.battle_prompt_history = None  # Separate history for battles
         self._last_battled_npc_key: tuple[int, int] | None = None # Track (map_id, sprite_index) of the last NPC battled
         # Track last battle moves and selection for UI display
         self.last_move_list: list[str] = []
@@ -169,6 +163,89 @@ class SimpleAgent:
         
         cfg.debug = False  # or True, as appropriate
         cfg.extra_buttons = False  # or True, as appropriate
+        
+        self.required_events = {
+            "EVENT_FOLLOWED_OAK_INTO_LAB",
+            # "EVENT_PALLET_AFTER_GETTING_POKEBALLS",
+            "EVENT_FOLLOWED_OAK_INTO_LAB_2",
+            "EVENT_OAK_ASKED_TO_CHOOSE_MON",
+            "EVENT_GOT_STARTER",
+            "EVENT_BATTLED_RIVAL_IN_OAKS_LAB",
+            "EVENT_GOT_POKEDEX",
+            "EVENT_OAK_GOT_PARCEL",
+            "EVENT_GOT_OAKS_PARCEL",
+            "EVENT_BEAT_VIRIDIAN_GYM_GIOVANNI",
+            "EVENT_BEAT_BROCK",
+            "EVENT_BEAT_CERULEAN_RIVAL",
+            "EVENT_BEAT_CERULEAN_ROCKET_THIEF",
+            "EVENT_BEAT_MISTY",
+            "EVENT_GOT_BICYCLE",
+            "EVENT_BEAT_POKEMON_TOWER_RIVAL",
+            "EVENT_BEAT_GHOST_MAROWAK",
+            "EVENT_RESCUED_MR_FUJI_2",
+            "EVENT_GOT_POKE_FLUTE",
+            "EVENT_GOT_BIKE_VOUCHER",
+            "EVENT_2ND_LOCK_OPENED",
+            "EVENT_1ST_LOCK_OPENED",
+            "EVENT_BEAT_LT_SURGE",
+            "EVENT_BEAT_ERIKA",
+            "EVENT_FOUND_ROCKET_HIDEOUT",
+            "EVENT_GOT_HM04",
+            "EVENT_GAVE_GOLD_TEETH",
+            "EVENT_BEAT_KOGA",
+            "EVENT_BEAT_BLAINE",
+            "EVENT_BEAT_SABRINA",
+            # "EVENT_GOT_HM05",
+            # "EVENT_FIGHT_ROUTE12_SNORLAX",
+            # "EVENT_BEAT_ROUTE12_SNORLAX",
+            # "EVENT_FIGHT_ROUTE16_SNORLAX",
+            # "EVENT_BEAT_ROUTE16_SNORLAX",
+            # "EVENT_GOT_HM02",
+            "EVENT_RESCUED_MR_FUJI",
+            "EVENT_2ND_ROUTE22_RIVAL_BATTLE",
+            "EVENT_BEAT_ROUTE22_RIVAL_2ND_BATTLE",
+            "EVENT_PASSED_CASCADEBADGE_CHECK",
+            # "EVENT_PASSED_THUNDERBADGE_CHECK",
+            # "EVENT_PASSED_RAINBOWBADGE_CHECK",
+            # "EVENT_PASSED_SOULBADGE_CHECK",
+            # "EVENT_PASSED_MARSHBADGE_CHECK",
+            # "EVENT_PASSED_VOLCANOBADGE_CHECK",
+            "EVENT_PASSED_EARTHBADGE_CHECK",
+            "EVENT_MET_BILL",
+            "EVENT_USED_CELL_SEPARATOR_ON_BILL",
+            "EVENT_GOT_SS_TICKET",
+            "EVENT_MET_BILL_2",
+            "EVENT_BILL_SAID_USE_CELL_SEPARATOR",
+            "EVENT_LEFT_BILLS_HOUSE_AFTER_HELPING",
+            "EVENT_BEAT_MT_MOON_EXIT_SUPER_NERD",
+            "EVENT_GOT_HM01",
+            "EVENT_RUBBED_CAPTAINS_BACK",
+            "EVENT_ROCKET_HIDEOUT_4_DOOR_UNLOCKED",
+            "EVENT_ROCKET_DROPPED_LIFT_KEY",
+            "EVENT_BEAT_ROCKET_HIDEOUT_GIOVANNI",
+            "EVENT_BEAT_SILPH_CO_RIVAL",
+            "EVENT_BEAT_SILPH_CO_GIOVANNI",
+            "EVENT_GOT_HM03",
+            "EVENT_BEAT_LORELEIS_ROOM_TRAINER_0",
+            "EVENT_BEAT_BRUNOS_ROOM_TRAINER_0",
+            "EVENT_BEAT_AGATHAS_ROOM_TRAINER_0",
+            "EVENT_BEAT_LANCE",
+            "EVENT_BEAT_CHAMPION_RIVAL",
+            "ELITE4_CHAMPION_EVENTS_END",
+            # Random trainers we need to beat
+            # lass at the entrance of route 9
+            "EVENT_BEAT_ROUTE_9_TRAINER_0",
+            # # exploding graveler trainer in rock tunnel
+            "EVENT_BEAT_ROCK_TUNNEL_2_TRAINER_1",
+            # # lass at the end of rock tunnel
+            "EVENT_BEAT_ROCK_TUNNEL_1_TRAINER_5",
+            # # Rock tunnel super nerd
+            "EVENT_BEAT_ROCK_TUNNEL_1_TRAINER_3",
+            # # second rock tunnel super nerd
+            "EVENT_BEAT_ROCK_TUNNEL_2_TRAINER_7",
+            # # required rock tunnel trainer
+            "EVENT_BEAT_ROCK_TUNNEL_2_TRAINER_5",
+        }
     
     def determine_optimal_tool_choice(self):
         """Determine which tool to force based on current game state."""
@@ -306,6 +383,7 @@ class SimpleAgent:
         try:
             # Analyze game progression using ram_map integration
             self._cached_event_status = self.analyze_game_progression()
+            print(f"update_event_tracking(): self._cached_event_status: {self._cached_event_status}")
             # Expose cached status to emulator for state info exposure
             setattr(self.emulator, '_cached_event_status', self._cached_event_status)
             # Format event progression data for LLM consumption
@@ -313,8 +391,10 @@ class SimpleAgent:
             # Update history summary and agent state
             self.history_summary = progression_summary
             self.game_progression = self._cached_event_status
-            logger.info("Event tracking updated")
-            logger.debug(f"Current progression: {progression_summary[:200]}...")
+            logger.info(f"update_event_tracking(): Event tracking updated: {progression_summary}.")
+            # Only log progression summary when not in an active battle
+            if not getattr(self, 'currently_in_battle', False):
+                logger.info(f"Current progression: {progression_summary[:200]}...")
         except Exception as e:
             logger.error(f"Failed to update event tracking: {e}", exc_info=True)
 
@@ -341,24 +421,29 @@ class SimpleAgent:
         current_loc = progression['current_location']
         
         # Add information about nearby relevant areas
-        # This helps the LLM understand what it should be doing in the current area
         for area_name, area_data in progression['major_areas'].items():
             # Simple heuristic to determine if area is relevant to current location
             if area_name.lower() in current_loc.lower() or self.is_area_nearby(area_name, current_loc):
                 summary += f"\n{area_name.upper()} STATUS:\n"
-                completed = []
-                in_progress = []
                 
-                for event_name, status in area_data.items():
-                    if status > 0:
-                        completed.append(event_name)
-                    elif self.is_event_available(event_name, progression):
-                        in_progress.append(event_name)
-                
-                if completed:
-                    summary += f"- Completed: {', '.join(completed)}\n"
-                if in_progress:
-                    summary += f"- Available: {', '.join(in_progress)}\n"
+                # TYPE CHECK: Handle both dictionary and string area_data types
+                if isinstance(area_data, dict):
+                    completed = []
+                    in_progress = []
+                    
+                    for event_name, status in area_data.items():
+                        if status > 0:
+                            completed.append(event_name)
+                        elif self.is_event_available(event_name, progression):
+                            in_progress.append(event_name)
+                    
+                    if completed:
+                        summary += f"- Completed: {', '.join(completed)}\n"
+                    if in_progress:
+                        summary += f"- Available: {', '.join(in_progress)}\n"
+                else:
+                    # If area_data is just a description string, display it directly
+                    summary += f"- Description: {area_data}\n"
         
         return summary
 
@@ -391,6 +476,97 @@ class SimpleAgent:
         # Default to True - assume event is available unless proven otherwise
         return True
    
+    def format_state(self) -> str:
+        """
+        Format the current game state in a way that's optimized for LLM processing.
+        Now includes event progression information.
+        """
+        # # Start with explicit header
+        # state_parts = ["## CURRENT GAME STATE ##"]
+        
+        game_state = self.game.process_game_states()
+        # Add reward information prominently at the top
+        state_parts = [f"{game_state}"]
+        
+        world = self.game.world
+        state_parts.append(f"{world}")
+        
+        items = self.game.items
+        state_parts.append(f"{items}")
+        
+        player = self.game.player
+        state_parts.append(f"{player}")
+        
+        map = self.game.map
+        state_parts.append(f"{map}")
+        
+        menu = self.game.menus
+        state_parts.append(f"{menu}")
+        
+        player = self.game.player
+        state_parts.append(f"{player}")
+        
+        print(f"format_state(): state_parts: {state_parts}")
+        
+        # state_parts.append(f"- Episode Reward: {self.current_episode_reward:.2f}")
+        # state_parts.append(f"- Episode Step: {self.episode_step}/30")
+        # state_parts.append(f"- Unique Tiles Explored: {len(self.visited_tiles)}")
+        # if self.episode_rewards:
+        #     state_parts.append(f"- Previous Episode Rewards: {', '.join([f'{r:.2f}' for r in self.episode_rewards])}")
+        
+        # # Add game state information
+        # if self.latest_game_state:
+        #     state_parts.append("\nGAME ENVIRONMENT:")
+        #     state_parts.append(self.latest_game_state)
+        
+        # # Add explicit detection of special states
+        # if self.is_in_non_navigation_state():
+        #     state_parts.append("\nSPECIAL STATE DETECTED:")
+        #     state_parts.append("⚠️ DIALOG/MENU ACTIVE - No penalties applied")
+        #     # state_parts.append("Use exit_menu tool to clear dialogs/menus")
+            
+        #     # Add battle detection
+        #     if self.currently_in_battle:
+        #         state_parts.append("⚠️ CURRENTLY IN BATTLE!")
+        
+        # # Add event tracking information - NEW SECTION
+        # if self.game_progression:
+        #     state_parts.append("\nGAME PROGRESSION:")
+            
+            # # Add badges collected
+            # badges = self.game_progression.get("badges", [])
+            # state_parts.append(f"- Badges: {', '.join(badges) if badges else 'None yet'}")
+            
+            # # Add next steps (most important for guidance)
+            # next_steps = self.game_progression.get("recommended_next_steps", [])
+            # if next_steps:
+            #     state_parts.append("\nRECOMMENDED NEXT ACTIONS:")
+            #     for i, step in enumerate(next_steps, 1):
+            #         state_parts.append(f"{i}. {step}")
+            
+            # # Add relevant events for current area
+            # current_loc = self.game_progression.get("current_location", "")
+            # state_parts.append(f"\nCURRENT AREA ({current_loc}) EVENTS:")
+            
+            # # Find relevant area data based on current location
+            # for area_name, area_data in self.game_progression.get("major_areas", {}).items():
+            #     if area_name.lower() in current_loc.lower() or self.is_area_nearby(area_name, current_loc):
+            #         # Add incomplete events for the current area
+            #         incomplete_events = []
+            #         for event_name, status in area_data.items():
+            #             if status == 0 and self.is_event_available(event_name, self.game_progression):
+            #                 incomplete_events.append(event_name)
+                    
+            #         if incomplete_events:
+            #             state_parts.append(f"- Available Events: {', '.join(incomplete_events[:3])}")
+        
+        # # Add history summary if available
+        # if self.history_summary:
+        #     state_parts.append("\nHISTORY SUMMARY:")
+        #     state_parts.append(self.history_summary)
+        
+        return "\n".join(state_parts)
+    
     def format_game_state(self) -> str:
         """
         Format the current game state in a way that's optimized for LLM processing.
@@ -416,7 +592,6 @@ class SimpleAgent:
         if self.is_in_non_navigation_state():
             state_parts.append("\nSPECIAL STATE DETECTED:")
             state_parts.append("⚠️ DIALOG/MENU ACTIVE - No penalties applied")
-            # state_parts.append("Use exit_menu tool to clear dialogs/menus")
             
             # Add battle detection
             if self.currently_in_battle:
@@ -444,15 +619,27 @@ class SimpleAgent:
             # Find relevant area data based on current location
             for area_name, area_data in self.game_progression.get("major_areas", {}).items():
                 if area_name.lower() in current_loc.lower() or self.is_area_nearby(area_name, current_loc):
-                    # Add incomplete events for the current area
-                    incomplete_events = []
-                    for event_name, status in area_data.items():
-                        if status == 0 and self.is_event_available(event_name, self.game_progression):
-                            incomplete_events.append(event_name)
-                    
-                    if incomplete_events:
-                        state_parts.append(f"- Available Events: {', '.join(incomplete_events[:3])}")
-        
+                    # ERROR LOCATION: Add type checking for area_data
+                    if isinstance(area_data, dict):
+                        # Add incomplete events for the current area
+                        incomplete_events = []
+                        for event_name, status in area_data.items():
+                            if status == 0 and self.is_event_available(event_name, self.game_progression):
+                                incomplete_events.append(event_name)
+                        
+                        if incomplete_events:
+                            state_parts.append(f"- Available Events: {', '.join(incomplete_events[:3])}")
+                    else:
+                        # If area_data is a string (description), display it directly
+                        state_parts.append(f"- Area Description: {area_data}")
+
+        # Include collision map for LLM when out of battle
+        if not self.currently_in_battle:
+            state_parts.append("\nCOLLISION MAP:")
+            cmap = self.emulator.get_collision_map()
+            print(f"format_game_state(): cmap: {cmap}")
+            state_parts.append(self.emulator.format_collision_map_simple(cmap))
+
         # Add history summary if available
         if self.history_summary:
             state_parts.append("\nHISTORY SUMMARY:")
@@ -984,6 +1171,11 @@ class SimpleAgent:
         dialog = self.emulator.get_active_dialog()
         in_battle = self.might_be_battle()
         
+        # Provide grok with current state
+        game_state = self.game.process_game_states()
+        logger.info(f"Game state: {game_state}")
+        
+        
         # CRITICAL: maintain battle state across the entire encounter
         # If we were in battle previously or critical hit appears in dialog, we're still in battle
         if (self.was_in_battle or 
@@ -994,36 +1186,87 @@ class SimpleAgent:
         # Check if a battle just finished
         battle_just_finished = self.was_in_battle and not in_battle
         
+        # Switch message history for battle start/end
+        if in_battle:
+            # Initialize battle history on entry
+            if not self.was_in_battle:
+                # Setup battle system prompt
+                self.battle_prompt_history = [
+                    {"role": "system", "content": [{"type":"text","text": BATTLE_SYSTEM_PROMPT.strip()}]}
+                ]
+                # Build battle details for LLM
+                try:
+                    # Player stats
+                    party_data = self.red_reader.memory.reader.read_party_pokemon()
+                    print(f"party_data: {party_data}")
+                    if party_data:
+                        player = party_data[0]
+                        player_hp = player.current_hp
+                        player_max = player.max_hp
+                        moves = player.moves
+                    else:
+                        player_hp = 0
+                        player_max = 0
+                        moves = []
+                    # Enemy stats
+                    enemy_info = self.game.battle.get_enemy_fighting_pokemon_dict()
+                    enemy_hp = enemy_info['hp_avail']
+                    enemy_max = enemy_info['hp_total']
+                    t1 = enemy_info.get('type_1')
+                    t2 = enemy_info.get('type_2')
+                    primary = PokemonType(t1)
+                    secondary = PokemonType(t2) if t2 not in (None, 0) else None
+                    types_str = primary.name + (f"/{secondary.name}" if secondary else "")
+                    details = (
+                        f"Battle Details:\n"
+                        f"Player HP: {player_hp}/{player_max}\n"
+                        f"Enemy HP: {enemy_hp}/{enemy_max} ({types_str})\n"
+                        f"Available moves: {', '.join(moves)}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to gather battle details: {e}", exc_info=True)
+                    details = "Battle Details unavailable."
+                    
+                try:
+                    enemy_types = self.red_reader.memory.reader.read_enemy_current_pokemon_types()
+                    details += f"\nEnemy types: {enemy_types}"
+                except Exception as e:
+                    logger.error(f"Failed to gather enemy types: {e}", exc_info=True)
+                    details += "\nEnemy types unavailable."
+
+                self.battle_prompt_history.append({"role":"user","content":[{"type":"text","text": details} ]})
+            # Use battle history for LLM
+            self.message_history = self.battle_prompt_history
+        elif self.was_in_battle:
+            # Battle ended, reset to normal system prompt
+            self.message_history = [
+                {"role":"system","content":[{"type":"text","text": self._get_system_prompt()}]}
+            ]
+            self.battle_prompt_history = None
+        
         # Log dialog/battle state
         if dialog:
-            logger.info(f"Dialog detected: {dialog[:30]}...")
-            if in_battle:
-                logger.info("Battle state detected")
-            else:
-                logger.info("Dialog state detected")
-        else:
-            logger.info("No dialog detected")
+            dialog_text = dialog.replace('\n', ' ')[:500]
+            logger.info(f"Dialog or battle active: {dialog_text}")
+            self.last_message = f"Dialog: {dialog_text}"
+            # Append the dialog as a user message so the LLM can see it
+            self.message_history.append({"role": "user", "content": [{"type": "text", "text": dialog_text}]})
         
         # CRITICAL SYNCHRONIZATION UPDATE: Force emulator step for UI stability
         if force_render or in_battle:
             self.emulator.step()
             time.sleep(0.1)  # Stabilization delay
 
-        # If any dialog or battle is active, defer all decisions to LLM
-        if dialog:
-            dialog_text = dialog.replace('\n', ' ')[:500]
-            logger.info(f"Dialog or battle active: {dialog_text}")
-            self.last_message = f"Dialog: {dialog_text}"
         # Always ask the LLM to choose the next action via tools
         logger.info("Requesting next action from LLM via OpenAI endpoint")
 
         try:
-            # Add the current game state (including dialog, battle status, rewards) for LLM context
+            # Always provide the current game state to Grok
             try:
                 state_text = self.format_game_state()
                 self.message_history.append({"role": "user", "content": [{"type": "text", "text": state_text}]})
             except Exception as e:
-                logger.error(f"Failed to append game state to message history: {e}", exc_info=True)
+                logger.error(f"Failed to append game state: {e}", exc_info=True)
             # Sanitize history to remove duplicates and enforce structure
             self.sanitize_message_history()
             # Initialize LLM client
@@ -1102,7 +1345,47 @@ class SimpleAgent:
                 self.last_message = f"Grok invoked tool call {tool_calls}: {', '.join(tool_details)}"
             else:
                 content = msg.content or ""
-                self.last_message = content.strip()
+                # Fallback: if the model returned a JSON tool call in content, parse and invoke it
+                fallback_invoked = False
+                raw = content.strip()
+                try:
+                    call_obj = json.loads(raw)
+                    if isinstance(call_obj, dict) and 'name' in call_obj:
+                        func_name = call_obj['name']
+                        func_args = call_obj.get('arguments', {}) or {}
+                        result_obj = self.process_tool_call(FakeToolCall(func_name, func_args, f"fallback_raw"))
+                        logger.info(f"Fallback raw tool call '{func_name}' args: {func_args} -> result: {result_obj}")
+                        self.message_history.append({
+                            "role": "tool",
+                            "tool_call_id": "fallback_raw",
+                            "content": json.dumps(result_obj),
+                        })
+                        self.last_message = f"Fallback invoked raw tool call {func_name}({func_args})"
+                        fallback_invoked = True
+                except Exception:
+                    pass
+                if not fallback_invoked:
+                    # Fallback: parse raw <function_call> tags to invoke tools
+                    func_calls = re.findall(r"<function_call>\s*(\{.*?\})\s*</function_call>", content, flags=re.DOTALL)
+                    for idx, fc_json in enumerate(func_calls):
+                        try:
+                            call_obj = json.loads(fc_json)
+                            func_name = call_obj.get("name")
+                            func_args = call_obj.get("arguments", {})
+                            result_obj = self.process_tool_call(FakeToolCall(func_name, func_args, f"fallback_{idx}"))
+                            logger.info(f"Fallback tool call '{func_name}' args: {func_args} -> result: {result_obj}")
+                            self.message_history.append({
+                                "role": "tool",
+                                "tool_call_id": f"fallback_{idx}",
+                                "content": json.dumps(result_obj),
+                            })
+                            self.last_message = f"Fallback invoked tool call {func_name}({func_args})"
+                            fallback_invoked = True
+                        except Exception as e:
+                            logger.error(f"Failed to parse fallback function call JSON: {e}")
+                # If still no fallback, retain raw content as last_message
+                if not fallback_invoked:
+                    self.last_message = content.strip()
 
         except Exception as e:
             logger.error(f"LLM action selection failed: {e}", exc_info=True)
@@ -1329,11 +1612,11 @@ class SimpleAgent:
         self.message_history = [
             {
                 "role": "system", 
-                "content": self.system_prompt
+                "content": [{"type": "text", "text": self.system_prompt}]
             },
             {
                 "role": "user",
-                "content": f"EXPLORATION REWARD SUMMARY:\n{episode_summary}\n\nHelp me maximize exploration rewards in the next steps."
+                "content": [{"type": "text", "text": f"EXPLORATION REWARD SUMMARY:\n{episode_summary}\n\nHelp me maximize exploration rewards in the next steps."}]
             }
         ]
         
@@ -1354,8 +1637,7 @@ class SimpleAgent:
         # Add current game state as a user message with clear formatting
         formatted_state = self.format_game_state()
         self.message_history.append(
-            {"role": "user",
-            "content": formatted_state}
+            {"role": "user", "content": [{"type": "text", "text": formatted_state}]}
         )
             
         # Update last message
@@ -1428,40 +1710,13 @@ class SimpleAgent:
             dict: Structured event data by area
         """
         memory_adapter = MemoryAdapter(self.emulator)
-        events = {
-            "GYMS": {
-                "GYM1": ram_map.gym1(memory_adapter),
-                "GYM2": ram_map.gym2(memory_adapter),
-                "GYM3": ram_map.gym3(memory_adapter),
-                "GYM4": ram_map.gym4(memory_adapter),
-                "GYM5": ram_map.gym5(memory_adapter),
-                "GYM6": ram_map.gym6(memory_adapter),
-                "GYM7": ram_map.gym7(memory_adapter),
-                "GYM8": ram_map.gym8(memory_adapter)
-            },
-            "AREAS": {
-                "SILPH_CO": ram_map.silph_co(memory_adapter),
-                "ROCK_TUNNEL": ram_map.rock_tunnel(memory_adapter),
-                "MTMOON": ram_map.mtmoon(memory_adapter),
-                "POKEMON_TOWER": ram_map.poke_tower(memory_adapter),
-                "ROCKET_HIDEOUT": ram_map.hideout(memory_adapter),
-                "MANSION": ram_map.mansion(memory_adapter),
-                "SAFARI": ram_map.safari(memory_adapter),
-                "DOJO": ram_map.dojo(memory_adapter)
-            },
-            "EVENTS": {
-                "SNORLAX": ram_map.snorlax(memory_adapter),
-                "HMTM": ram_map.hmtm(memory_adapter),
-                "BILL": ram_map.bill(memory_adapter),
-                "OAK": ram_map.oak(memory_adapter),
-                "TOWNS": ram_map.towns(memory_adapter),
-                "LAB": ram_map.lab(memory_adapter),
-                "MISC": ram_map.misc(memory_adapter)
-            }
-        }
         detailed_events = {
+            "ROUTE": ram_map.monitor_route_events(memory_adapter),
+            "MISC": ram_map.monitor_misc_events(memory_adapter),
             "SILPH_CO": ram_map.monitor_silph_co_events(memory_adapter),
-            "ROCK_TUNNEL": ram_map.rock_tunnel_events(memory_adapter),
+            "ROCK_TUNNEL": ram_map.monitor_rock_tunnel_events(memory_adapter),
+            "GYM1": ram_map.monitor_gym1_events(memory_adapter),
+            "GYM2": ram_map.monitor_gym2_events(memory_adapter),
             "GYM3": ram_map.monitor_gym3_events(memory_adapter),
             "GYM4": ram_map.monitor_gym4_events(memory_adapter),
             "GYM5": ram_map.monitor_gym5_events(memory_adapter),
@@ -1475,22 +1730,37 @@ class SimpleAgent:
             "MANSION": ram_map.monitor_mansion_events(memory_adapter),
             "SAFARI": ram_map.monitor_safari_events(memory_adapter),
             "SNORLAX": ram_map.monitor_snorlax_events(memory_adapter),
-            "HMTM": ram_map.monitor_hmtm_events(memory_adapter)
+            "HMTM": ram_map.monitor_hmtm_events(memory_adapter),
+            "MTMOON": ram_map.monitor_mtmoon_events(memory_adapter),
+            "SSANNE": ram_map.monitor_ssanne_events(memory_adapter),
+            "BILL": ram_map.monitor_bill_events(memory_adapter),
+            "OAK": ram_map.monitor_oak_events(memory_adapter),
+            "TOWNS": ram_map.monitor_towns_events(memory_adapter),
+            "ROCKET_HIDEOUT": ram_map.monitor_hideout_events(memory_adapter),
+            "MONITOR_MANSION_EVENTS": ram_map.monitor_mansion_events(memory_adapter),
+            "RIVAL": ram_map.monitor_rival_events(memory_adapter),
         }
-        return {"summary": events, "detailed": detailed_events}
+        
+        # Create a summary of all events
+        summary_events = {}
+        for category, events in detailed_events.items():
+            for event_name, event_status in events.items():
+                summary_events[event_name] = event_status
+        
+        return {"summary": summary_events, "detailed": detailed_events}
 
     def analyze_game_progression(self):
         """
         Process event data and generate recommendations.
-        """
+        """       
         events = self.monitor_game_events()
         current_location = self.emulator.reader.read_location()
         # Include current map ID for context
         current_map_id = self.emulator.reader.read_current_map_id()
         badges = self.emulator.reader.read_badges()
-        progress_stats = self._calculate_progress_stats(events, badges)
+        progress_stats = self._calculate_progress_stats(events, badges, current_location)
         relevant_areas = self._get_relevant_areas(current_location)
-        recommendations = self._generate_recommendations(events, badges)
+        recommendations = self._generate_recommendations(events, badges, relevant_areas)
         # Format progression for event summary
         progression = {
             "current_location": current_location,
@@ -1501,20 +1771,366 @@ class SimpleAgent:
         }
         return progression
 
-    def _calculate_progress_stats(self, events, badges):
-        """Calculate game progress statistics."""
-        # Implementation details...
-        return {}
+    def _calculate_progress_stats(self, events, badges, current_location):
+        """
+        Calculate game progress statistics based on completed events and badges.
+        
+        Args:
+            events: Dictionary of events with their completion status
+            badges: List or dictionary of obtained badges
+            current_location: Current location in the game
+            
+        Returns:
+            Dictionary of progress statistics
+        """
+        # Extract completed events from the events dictionary
+        completed_events = set()
+        for event_name, status in events["summary"].items():
+            if status:  # If the event is completed (True)
+                completed_events.add(event_name)
+        
+        # Calculate percentage of required events completed
+        total_required = len(self.required_events)
+        completed_required = len(completed_events.intersection(self.required_events))
+        required_completion_percentage = (completed_required / total_required) * 100 if total_required > 0 else 0
+        
+        # Calculate percentage of badges obtained - handle different badge formats
+        total_badges = 8  # There are 8 badges in Pokémon Red
+        
+        # Handle different badge data formats
+        if isinstance(badges, dict):
+            badges_obtained = sum(1 for badge, obtained in badges.items() if obtained)
+        elif isinstance(badges, list):
+            badges_obtained = len(badges)  # If it's a list of badges
+        else:
+            # If it's a single integer or other format, use it directly
+            badges_obtained = badges if isinstance(badges, int) else 0
+        
+        badge_completion_percentage = (badges_obtained / total_badges) * 100 if total_badges > 0 else 0
+        
+        # Determine game stage based on events and badges
+        game_stage = self._determine_game_stage(completed_events, badges_obtained)
+        
+        # Identify next key events based on completed events
+        next_events = self._identify_next_events(completed_events)
+        
+        # Check which gyms have been beaten
+        beaten_gyms = []
+        if "EVENT_BEAT_BROCK" in completed_events:
+            beaten_gyms.append("Pewter Gym (Brock)")
+        if "EVENT_BEAT_MISTY" in completed_events:
+            beaten_gyms.append("Cerulean Gym (Misty)")
+        if "EVENT_BEAT_LT_SURGE" in completed_events:
+            beaten_gyms.append("Vermilion Gym (Lt. Surge)")
+        if "EVENT_BEAT_ERIKA" in completed_events:
+            beaten_gyms.append("Celadon Gym (Erika)")
+        if "EVENT_BEAT_KOGA" in completed_events:
+            beaten_gyms.append("Fuchsia Gym (Koga)")
+        if "EVENT_BEAT_SABRINA" in completed_events:
+            beaten_gyms.append("Saffron Gym (Sabrina)")
+        if "EVENT_BEAT_BLAINE" in completed_events:
+            beaten_gyms.append("Cinnabar Gym (Blaine)")
+        if "EVENT_BEAT_VIRIDIAN_GYM_GIOVANNI" in completed_events:
+            beaten_gyms.append("Viridian Gym (Giovanni)")
+        
+        return {
+            "completed_required_events": completed_required,
+            "total_required_events": total_required,
+            "required_completion_percentage": required_completion_percentage,
+            "badges_obtained": badges_obtained,
+            "total_badges": total_badges,
+            "badge_completion_percentage": badge_completion_percentage,
+            "game_stage": game_stage,
+            "next_key_events": next_events,
+            "current_location": current_location,
+            "beaten_gyms": beaten_gyms
+        }
+
+    def _determine_game_stage(self, completed_events, badges_obtained):
+        """Helper function to determine the current stage of the game"""
+        if "EVENT_BEAT_CHAMPION_RIVAL" in completed_events:
+            return "Post-Game"
+        elif "EVENT_BEAT_LANCE" in completed_events:
+            return "Champion Battle"
+        elif "EVENT_BEAT_AGATHAS_ROOM_TRAINER_0" in completed_events:
+            return "Elite Four - Lance"
+        elif "EVENT_BEAT_BRUNOS_ROOM_TRAINER_0" in completed_events:
+            return "Elite Four - Agatha"
+        elif "EVENT_BEAT_LORELEIS_ROOM_TRAINER_0" in completed_events:
+            return "Elite Four - Bruno"
+        elif badges_obtained == 8 and "EVENT_BEAT_ROUTE22_RIVAL_2ND_BATTLE" in completed_events:
+            return "Elite Four - Lorelei"
+        elif "EVENT_BEAT_VIRIDIAN_GYM_GIOVANNI" in completed_events:
+            return "Victory Road"
+        elif badges_obtained >= 7:
+            return "Final Gym - Viridian City"
+        elif badges_obtained >= 6:
+            return "Seventh Gym - Cinnabar Island"
+        elif badges_obtained >= 5:
+            return "Sixth Gym - Fuchsia City"
+        elif "EVENT_BEAT_SILPH_CO_GIOVANNI" in completed_events:
+            return "Fifth Gym - Saffron City"
+        elif "EVENT_BEAT_ERIKA" in completed_events and "EVENT_RESCUED_MR_FUJI" in completed_events:
+            return "Silph Co."
+        elif "EVENT_GOT_POKE_FLUTE" in completed_events:
+            return "Fourth Gym - Celadon City"
+        elif "EVENT_BEAT_LT_SURGE" in completed_events:
+            return "Pokémon Tower - Lavender Town"
+        elif "EVENT_GOT_HM01" in completed_events:
+            return "Third Gym - Vermilion City"
+        elif "EVENT_BEAT_MISTY" in completed_events:
+            return "S.S. Anne"
+        elif "EVENT_BEAT_BROCK" in completed_events:
+            return "Second Gym - Cerulean City"
+        elif "EVENT_GOT_OAKS_PARCEL" in completed_events:
+            return "First Gym - Pewter City"
+        elif "EVENT_GOT_STARTER" in completed_events:
+            return "Beginning Journey"
+        else:
+            return "Game Start"
+
+    def _identify_next_events(self, completed_events):
+        """Helper function to identify the next key events to complete"""
+        # Define the order of key events based on the game progression
+        event_order = [
+            "EVENT_FOLLOWED_OAK_INTO_LAB",
+            "EVENT_FOLLOWED_OAK_INTO_LAB_2",
+            "EVENT_OAK_ASKED_TO_CHOOSE_MON",
+            "EVENT_GOT_STARTER",
+            "EVENT_BATTLED_RIVAL_IN_OAKS_LAB",
+            "EVENT_GOT_POKEDEX",
+            "EVENT_GOT_OAKS_PARCEL",
+            "EVENT_OAK_GOT_PARCEL",
+            "EVENT_BEAT_BROCK",
+            "EVENT_BEAT_MT_MOON_EXIT_SUPER_NERD",
+            "EVENT_BEAT_CERULEAN_RIVAL",
+            "EVENT_BEAT_CERULEAN_ROCKET_THIEF",
+            "EVENT_BEAT_MISTY",
+            "EVENT_MET_BILL",
+            "EVENT_BILL_SAID_USE_CELL_SEPARATOR",
+            "EVENT_USED_CELL_SEPARATOR_ON_BILL",
+            "EVENT_GOT_SS_TICKET",
+            "EVENT_LEFT_BILLS_HOUSE_AFTER_HELPING",
+            "EVENT_GOT_HM01",
+            "EVENT_RUBBED_CAPTAINS_BACK",
+            "EVENT_BEAT_LT_SURGE",
+            "EVENT_BEAT_ROUTE_9_TRAINER_0",
+            "EVENT_BEAT_ROCK_TUNNEL_1_TRAINER_3",
+            "EVENT_BEAT_ROCK_TUNNEL_1_TRAINER_5",
+            "EVENT_BEAT_ROCK_TUNNEL_2_TRAINER_1",
+            "EVENT_BEAT_ROCK_TUNNEL_2_TRAINER_5",
+            "EVENT_BEAT_ROCK_TUNNEL_2_TRAINER_7",
+            "EVENT_BEAT_POKEMON_TOWER_RIVAL",
+            "EVENT_BEAT_GHOST_MAROWAK",
+            "EVENT_RESCUED_MR_FUJI",
+            "EVENT_RESCUED_MR_FUJI_2",
+            "EVENT_GOT_POKE_FLUTE",
+            "EVENT_FOUND_ROCKET_HIDEOUT",
+            "EVENT_ROCKET_DROPPED_LIFT_KEY",
+            "EVENT_ROCKET_HIDEOUT_4_DOOR_UNLOCKED",
+            "EVENT_BEAT_ROCKET_HIDEOUT_GIOVANNI",
+            "EVENT_BEAT_ERIKA",
+            "EVENT_BEAT_SILPH_CO_RIVAL",
+            "EVENT_BEAT_SILPH_CO_GIOVANNI",
+            "EVENT_PASSED_CASCADEBADGE_CHECK",
+            "EVENT_GOT_HM03",
+            "EVENT_GOT_HM04",
+            "EVENT_GAVE_GOLD_TEETH",
+            "EVENT_BEAT_KOGA",
+            "EVENT_BEAT_SABRINA",
+            "EVENT_BEAT_BLAINE",
+            "EVENT_BEAT_VIRIDIAN_GYM_GIOVANNI",
+            "EVENT_PASSED_EARTHBADGE_CHECK",
+            "EVENT_2ND_ROUTE22_RIVAL_BATTLE",
+            "EVENT_BEAT_ROUTE22_RIVAL_2ND_BATTLE",
+            "EVENT_BEAT_LORELEIS_ROOM_TRAINER_0",
+            "EVENT_BEAT_BRUNOS_ROOM_TRAINER_0",
+            "EVENT_BEAT_AGATHAS_ROOM_TRAINER_0",
+            "EVENT_BEAT_LANCE",
+            "EVENT_BEAT_CHAMPION_RIVAL"
+        ]
+        
+        # Find the next uncompleted events
+        next_events = []
+        for event in event_order:
+            if event not in completed_events and event in self.required_events:
+                next_events.append(event)
+                # Return the next 3 events at most
+                if len(next_events) >= 3:
+                    break
+        
+        return next_events
 
     def _get_relevant_areas(self, current_location):
-        """Determine which areas are relevant to current location."""
-        # Implementation details...
-        return {}
+        """
+        Determine which areas are relevant to current location and game progress.
+        
+        Args:
+            current_location: Current location in the game
+            
+        Returns:
+            Dictionary of relevant areas with descriptions
+        """
+        # Map locations to their map IDs and readable names
+        location_map = {
+            0: {"name": "PALLET TOWN", "description": "Starting town with Professor Oak's Lab"},
+            1: {"name": "VIRIDIAN CITY", "description": "City with the final gym (initially closed) and Poké Mart"},
+            2: {"name": "PEWTER CITY", "description": "City with the first gym led by Brock (Rock-type)"},
+            3: {"name": "CERULEAN CITY", "description": "City with the second gym led by Misty (Water-type)"},
+            4: {"name": "LAVENDER TOWN", "description": "Town with Pokémon Tower, haunted by ghost Pokémon"},
+            5: {"name": "VERMILION CITY", "description": "Port city with the third gym led by Lt. Surge (Electric-type)"},
+            6: {"name": "CELADON CITY", "description": "Large city with department store and fourth gym led by Erika (Grass-type)"},
+            7: {"name": "FUCHSIA CITY", "description": "City with the fifth gym led by Koga (Poison-type) and Safari Zone"},
+            8: {"name": "CINNABAR ISLAND", "description": "Island with the seventh gym led by Blaine (Fire-type) and Pokémon Mansion"},
+            9: {"name": "INDIGO PLATEAU", "description": "Location of the Elite Four and Pokémon League Champion"},
+            10: {"name": "SAFFRON CITY", "description": "Central city with the sixth gym led by Sabrina (Psychic-type) and Silph Co."},
+            # Routes
+            12: {"name": "ROUTE 1", "description": "Path connecting Pallet Town and Viridian City"},
+            13: {"name": "ROUTE 2", "description": "Path connecting Viridian City and Pewter City"},
+            14: {"name": "ROUTE 3", "description": "Path leading to Mt. Moon with several trainers"},
+            15: {"name": "ROUTE 4", "description": "Path connecting Mt. Moon and Cerulean City"},
+            16: {"name": "ROUTE 5", "description": "Path connecting Cerulean City and Saffron City"},
+            17: {"name": "ROUTE 6", "description": "Path connecting Saffron City and Vermilion City"},
+            18: {"name": "ROUTE 7", "description": "Path connecting Saffron City and Celadon City"},
+            19: {"name": "ROUTE 8", "description": "Path connecting Saffron City and Lavender Town"},
+            20: {"name": "ROUTE 9", "description": "Path east of Cerulean City with trainers"},
+            21: {"name": "ROUTE 10", "description": "Path leading to Rock Tunnel and Lavender Town"},
+            22: {"name": "ROUTE 11", "description": "Path east of Vermilion City with trainers"},
+            23: {"name": "ROUTE 12", "description": "Path connecting Lavender Town and Route 13, may be blocked by Snorlax"},
+            24: {"name": "ROUTE 13", "description": "Path connecting Route 12 and Route 14 with trainers"},
+            25: {"name": "ROUTE 14", "description": "Path connecting Route 13 and Route 15 with trainers"},
+            26: {"name": "ROUTE 15", "description": "Path connecting Route 14 and Fuchsia City with trainers"},
+            27: {"name": "ROUTE 16", "description": "Path west of Celadon City, may be blocked by Snorlax"},
+            28: {"name": "ROUTE 17", "description": "Cycling Road connecting Route 16 and Route 18"},
+            29: {"name": "ROUTE 18", "description": "Path connecting Route 17 and Fuchsia City"},
+            30: {"name": "ROUTE 19", "description": "Water route south of Fuchsia City requiring Surf"},
+            31: {"name": "ROUTE 20", "description": "Water route connecting Route 19 and Cinnabar Island"},
+            32: {"name": "ROUTE 21", "description": "Water route connecting Cinnabar Island and Pallet Town"},
+            33: {"name": "ROUTE 22", "description": "Path west of Viridian City leading to Victory Road"},
+            34: {"name": "ROUTE 23", "description": "Path to Indigo Plateau requiring all 8 badges"},
+            35: {"name": "ROUTE 24", "description": "Path north of Cerulean City with trainers and rival battle"},
+            36: {"name": "ROUTE 25", "description": "Path leading to Bill's House"},
+            # Important locations
+            52: {"name": "VIRIDIAN FOREST", "description": "Forest maze with Bug-type Pokémon and trainers"},
+            59: {"name": "MT. MOON", "description": "Cave system with Zubat, Geodude, and Team Rocket members"},
+            60: {"name": "ROCK TUNNEL", "description": "Dark cave requiring Flash with strong wild Pokémon"},
+            61: {"name": "POKEMON TOWER", "description": "Tower filled with Ghost-type Pokémon and possessed trainers"},
+            84: {"name": "ROCKET HIDEOUT", "description": "Team Rocket's secret base under the Celadon Game Corner"},
+            130: {"name": "SAFARI ZONE", "description": "Special area where you can catch rare Pokémon using Safari Balls"},
+            138: {"name": "POKEMON MANSION", "description": "Abandoned mansion with Fire-type Pokémon and the Gym Key"},
+            166: {"name": "SILPH CO.", "description": "Office building taken over by Team Rocket"},
+            178: {"name": "S.S. ANNE", "description": "Cruise ship docked at Vermilion City where you get HM01 (Cut)"},
+            200: {"name": "VICTORY ROAD", "description": "Final cave before the Elite Four requiring all 8 gym badges"},
+            201: {"name": "BILL'S HOUSE", "description": "House of Pokémon researcher Bill who gives you the S.S. Ticket"},
+        }
+        
+        # If location is known, return it and adjacent areas
+        location_info = None
+        for loc_id, loc_data in location_map.items():
+            if current_location in loc_data["name"] or loc_data["name"] in current_location:
+                location_info = loc_data
+                break
+        
+        # Define adjacency map for locations
+        adjacency = {
+            "PALLET TOWN": ["ROUTE 1", "ROUTE 21"],
+            "VIRIDIAN CITY": ["ROUTE 1", "ROUTE 2", "ROUTE 22"],
+            "PEWTER CITY": ["ROUTE 2", "ROUTE 3"],
+            "CERULEAN CITY": ["ROUTE 4", "ROUTE 5", "ROUTE 9", "ROUTE 24"],
+            "LAVENDER TOWN": ["ROUTE 8", "ROUTE 10", "ROUTE 12", "POKEMON TOWER"],
+            "VERMILION CITY": ["ROUTE 6", "ROUTE 11", "S.S. ANNE"],
+            "CELADON CITY": ["ROUTE 7", "ROUTE 16", "ROCKET HIDEOUT"],
+            "FUCHSIA CITY": ["ROUTE 15", "ROUTE 18", "ROUTE 19", "SAFARI ZONE"],
+            "CINNABAR ISLAND": ["ROUTE 20", "ROUTE 21", "POKEMON MANSION"],
+            "INDIGO PLATEAU": ["ROUTE 23", "VICTORY ROAD"],
+            "SAFFRON CITY": ["ROUTE 5", "ROUTE 6", "ROUTE 7", "ROUTE 8", "SILPH CO."],
+            "VIRIDIAN FOREST": ["ROUTE 2"],
+            "MT. MOON": ["ROUTE 3", "ROUTE 4"],
+            "ROCK TUNNEL": ["ROUTE 10"],
+            "ROUTE 24": ["CERULEAN CITY", "ROUTE 25"],
+            "ROUTE 25": ["ROUTE 24", "BILL'S HOUSE"],
+            "VICTORY ROAD": ["ROUTE 23", "INDIGO PLATEAU"]
+        }
+        
+        relevant_areas = {}
+        
+        # Add current location
+        if location_info:
+            relevant_areas[location_info["name"]] = location_info["description"]
+            
+            # Add adjacent areas
+            if location_info["name"] in adjacency:
+                for adjacent in adjacency[location_info["name"]]:
+                    for loc_id, loc_data in location_map.items():
+                        if adjacent == loc_data["name"]:
+                            relevant_areas[adjacent] = loc_data["description"]
+                            break
+        else:
+            # If location not in map, add generic info
+            relevant_areas["CURRENT LOCATION"] = f"You are currently at {current_location}"
+        
+        return relevant_areas
 
-    def _generate_recommendations(self, events, badges):
-        """Generate game progression recommendations."""
-        # Implementation details...
-        return []
+    def _generate_recommendations(self, events, badges, relevant_areas):
+        """
+        Generate game progression recommendations based on events, badges, and relevant areas.
+        """
+        # Extract completed events
+        completed_events = set()
+        for event_name, status in events["summary"].items():
+            if status:  # If the event is completed (True)
+                completed_events.add(event_name)
+        
+        # ROBUST BADGE DETECTION: Handle multiple badge representation formats
+        if isinstance(badges, dict):
+            num_badges = sum(1 for badge, obtained in badges.items() if obtained)
+        elif isinstance(badges, list):
+            num_badges = len(badges)  # Count number of badges if it's a list
+        else:
+            num_badges = badges if isinstance(badges, int) else 0
+        
+        # EVENT INFERENCE: If player has badges, they MUST have completed early game events
+        # Add these events to completed_events set regardless of memory flag status
+        if num_badges > 0:
+            early_game_events = [
+                "EVENT_FOLLOWED_OAK_INTO_LAB",
+                "EVENT_FOLLOWED_OAK_INTO_LAB_2",
+                "EVENT_OAK_ASKED_TO_CHOOSE_MON",
+                "EVENT_GOT_STARTER",
+                "EVENT_BATTLED_RIVAL_IN_OAKS_LAB",
+                "EVENT_GOT_POKEDEX",
+                "EVENT_GOT_OAKS_PARCEL",
+                "EVENT_OAK_GOT_PARCEL"
+            ]
+            for event in early_game_events:
+                completed_events.add(event)
+        
+        # Generate recommendations based on game stage
+        recommendations = []
+        
+        # Skip early game progression if player has badges
+        if num_badges == 0:
+            if "EVENT_GOT_STARTER" not in completed_events:
+                recommendations.append("Go to Professor Oak's Lab to choose your starter Pokémon.")
+            elif "EVENT_GOT_POKEDEX" not in completed_events:
+                recommendations.append("Talk to Professor Oak to receive your Pokédex.")
+            elif "EVENT_GOT_OAKS_PARCEL" not in completed_events:
+                recommendations.append("Go to Viridian City Poké Mart to get Oak's Parcel.")
+            elif "EVENT_OAK_GOT_PARCEL" not in completed_events:
+                recommendations.append("Return to Professor Oak to deliver his Parcel.")
+        
+        # SPECIFIC BADGE DETECTION: Recommend Mt. Moon if player has Boulder Badge
+        if "BOULDER" in badges or (isinstance(badges, list) and "BOULDER" in badges):
+            if "EVENT_BEAT_MT_MOON_EXIT_SUPER_NERD" not in completed_events:
+                recommendations.append("Navigate through Mt. Moon to reach Cerulean City.")
+            else:
+                recommendations.append("Head to Cerulean City to challenge Misty at the Gym.")
+        
+        # Add existing gym progression logic...
+        # [Additional recommendation code would continue here]
+        
+        # Return up to 3 recommendations
+        return recommendations[:3]
 
     @property
     def currently_in_dialog(self) -> bool:

@@ -281,9 +281,14 @@ class Emulator:
                 prev_coord = self.get_standard_coords()
             else:
                 prev_coord = None
-            self.pyboy.button(b, 8)
-            self.pyboy.tick(16)
-            # self.pyboy.button_release(b, render=True); self.tick(120 if wait else 10)
+            # Correct button press sequence
+            self.pyboy.button_press(b)
+            # Short press duration
+            self.tick(8)
+            # Release the button
+            self.pyboy.button_release(b)
+            # Wait duration after release based on 'wait'
+            self.tick(120 if wait else 10)
             out.append(f"Pressed {b}")
             self.step_counter += 1
             logger.info(f"press_buttons():Step counter: {self.step_counter}")

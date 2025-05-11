@@ -563,6 +563,8 @@
             <div id="screen-container">
                 <canvas id="game-screen" width="160" height="144"></canvas>
                 <pre id="collision-map-overlay"></pre>
+                <pre id="debug-output"
+                    style="background: rgba(0,0,0,0.7); color: var(--chat-text); font-family: monospace; font-size: 0.7rem; max-height: 100px; overflow-y: auto; width: 640px; margin-top: 8px;"></pre>
             </div>
         </div>
 
@@ -598,6 +600,7 @@
         const chatMessages = document.getElementById('chat-messages');
         const gameScreen = document.getElementById('game-screen');
         const ctx = gameScreen.getContext('2d');
+        const debugOutput = document.getElementById('debug-output');
 
         // --- Grid Drawing Function ---
         function drawGrid() {
@@ -792,6 +795,10 @@
                             messageDiv.appendChild(pre);
                             chatMessages.appendChild(messageDiv);
                             chatMessages.scrollTop = chatMessages.scrollHeight; // Auto-scroll
+                            // Mirror the latest message under the game screen
+                            if (debugOutput) {
+                                debugOutput.textContent = data.message;
+                            }
                         }
 
                         // Update party display if party data included

@@ -36,7 +36,9 @@ LLM_MODEL_OPENAI = "gpt-4o-mini" # Or "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"
 LLM_MODEL_GROK = "grok-3-mini-beta"
 
 # --- Agent & Game Settings ---
-MAX_HISTORY = 10 # Max messages before summarization
+MAX_HISTORY = 40 # Max messages before summarization
+MAX_BATTLE_HISTORY = 5 # Max battle history to keep
+
 USE_OVERLAY = False # Overlays the screenshot w/ the visible screen tiles
 USE_COLLISION_MAP = True # ASCII overlay provided to LLM
 USE_SCREENSHOTS = False # Screenshots sent to LLM

@@ -139,6 +139,14 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
                     logger.debug(f"Added party data: {len(party_data)} Pokémon")
             except Exception as e:
                 logger.error(f"Error getting party data: {e}")
+            # Add ASCII collision map under the game screen
+            try:
+                collision_data = app.state.agent.emulator.get_collision_map()
+                collision_ascii = app.state.agent.emulator.format_collision_map_simple(collision_data)
+                message["collision_map"] = collision_ascii
+                logger.debug("Added collision_map to update")
+            except Exception as e:
+                logger.error(f"Error adding collision_map: {e}")
         
         # CRITICAL SYNCHRONIZATION UPDATE: Add render completion acknowledgment request
         message["require_ack"] = True

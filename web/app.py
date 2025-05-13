@@ -72,7 +72,10 @@ class ConnectionManager:
         
         # Clean up disconnected clients
         for conn in disconnected:
-            await self.disconnect(conn)
+            for connection in self.active_connections:
+                if conn is connection:
+                    self.active_connections.remove(conn)
+                    break
 
 manager = ConnectionManager()
 
@@ -109,9 +112,10 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
         return
         
     try:
-        # Build the basic update message structure
+        # Determine if this is an Agent action message
+        is_agent_action = grok_message.startswith("Agent:")
         message = {
-            "type": "update",
+            "type": "tool_result" if is_agent_action else "update",
             "timestamp": timestamp,
             "sync_id": timestamp  # Add sync_id for client-side synchronization
         }
@@ -124,11 +128,21 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
                 message["frame_format"] = "base64"
                 logger.debug(f"Frame data valid: {len(frame_data)} bytes")
             except Exception as e:
-                logger.error(f"Error processing frame data: {e}")
+                logger.error(f"Error processing frame (emulator screen) data: {e}")
         
-        # CRITICAL: Always add the message content for Grok's Thoughts
-        message["message"] = grok_message
-        logger.info(f"Adding message to update: {grok_message[:30]}...")
+        # Route the message based on type
+        if is_agent_action:
+            # Agent actions go to the Agent Actions pane
+            message["content"] = [{"type": "text", "text": grok_message}]
+        else:
+            message["message"] = grok_message
+            logger.info(f"Adding message to update: {grok_message[:500]}...")
+        
+        # Add Grok's latest thought if available
+        if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'get_latest_grok_thought'):
+            grok_thought = app.state.agent.get_latest_grok_thought()
+            message["grok_thought"] = grok_thought
+            logger.debug(f"Added Grok's thought to update: {grok_thought[:500]}...")
         
         # Add party data if agent exists
         if hasattr(app.state, 'agent'):
@@ -147,6 +161,29 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
                 logger.debug("Added collision_map to update")
             except Exception as e:
                 logger.error(f"Error adding collision_map: {e}")
+        
+        # Add progress bar info for next goal
+        try:
+            import game_data.ram_map_leanke as ram_map
+            progression = getattr(app.state.agent, 'game_progression', {}) or {}
+            relevant_areas = progression.get('major_areas', {})
+            next_goal = None
+            for area_name in relevant_areas:
+                if area_name.upper().startswith('ROUTE'):
+                    next_goal = area_name
+                    break
+            percent = 0
+            if next_goal:
+                events = ram_map.monitor_route_events(app.state.agent.emulator.pyboy)
+                key_prefix = next_goal.lower().replace(' ', '')
+                route_events = {k: v for k, v in events.items() if k.startswith(key_prefix + '_')}
+                total = len(route_events)
+                done = sum(1 for v in route_events.values() if v)
+                percent = int((done / total) * 100) if total else 0
+            message['progress_bar'] = {'goal': next_goal, 'percent': percent}
+            logger.debug(f"Added progress_bar for goal {next_goal}: {percent}%")
+        except Exception as e:
+            logger.error(f"Error adding progress information: {e}")
         
         # CRITICAL SYNCHRONIZATION UPDATE: Add render completion acknowledgment request
         message["require_ack"] = True
@@ -216,7 +253,8 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 frame = app.state.agent.get_frame()
                 location = app.state.agent.emulator.get_location() or "Unknown"
-                await send_game_updates(frame, f"Connected to game in {location}")
+                # Pass an empty string or default for grok_message here, it will be overwritten
+                await send_game_updates(frame, "") 
             except Exception as e:
                 logger.error(f"Error sending initial frame: {e}")
     except Exception as e:
@@ -310,6 +348,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif mtype == "navigate" and getattr(app.state, 'is_paused', False) and hasattr(app.state, 'agent'):
                     row = msg.get("row")
                     col = msg.get("col")
+                    if row == 4 and col == 4:
+                        logger.info("Dev mode: navigation request to self, skipping")
+                        await websocket.send_text(json.dumps({"type": "tool_result", "content": "Cannot navigate to yourself."}))
+                        continue
                     logger.info(f"Dev mode: navigation request to grid cell ({row}, {col})")
                     try:
                         raw_map = app.state.agent.emulator.get_collision_map()
@@ -321,12 +363,16 @@ async def websocket_endpoint(websocket: WebSocket):
                             def __init__(self, name, input_data, call_id=None):
                                 self.name = name
                                 self.input = input_data
+                                self.arguments = input_data
                                 self.id = call_id
                                 self.type = "function"
                         # Process navigation tool call
                         result = app.state.agent.process_tool_call(
                             FakeToolCall("navigate_to", {"glob_y": target_y, "glob_x": target_x}, str(uuid.uuid4()))
                         )
+                        # Execute all enqueued button presses
+                        for _ in range(queue.qsize()):
+                            await process_next_button("Dev mode", app.state.agent, send_game_updates)
                         # Send tool result message
                         await websocket.send_text(json.dumps({
                             "type": "tool_result",
@@ -335,9 +381,53 @@ async def websocket_endpoint(websocket: WebSocket):
                         # Send updated frame
                         frame = app.state.agent.get_frame()
                         if frame:
-                            await send_game_updates(frame, f"Dev mode: navigated to ({row}, {col})")
+                            raw_map = app.state.agent.emulator.get_collision_map()
+                            cell = raw_map["collision_map"][row][col]
+                            target_y = cell.get("y")
+                            target_x = cell.get("x")
+                            await send_game_updates(frame, f"Dev mode: navigated to (glob_y: {target_y}, glob_x: {target_x}) (grid_y: {row}, grid_x: {col})")
                     except Exception as e:
                         logger.error(f"Error in dev mode navigation: {e}", exc_info=True)
+
+                # Allow manual coordinate navigation
+                elif mtype == "navigate_to_coords" and getattr(app.state, 'is_paused', False) and hasattr(app.state, 'agent'):
+                    gy = msg.get("glob_y")
+                    gx = msg.get("glob_x")
+                    logger.info(f"Dev mode: manual navigation request to global coords ({gy}, {gx})")
+                    try:
+                        # Use agent's navigate_to tool for pathfinding
+                        class FakeToolCall:
+                            def __init__(self, name, input_data, call_id=None):
+                                self.name = name
+                                self.input = input_data
+                                self.arguments = input_data
+                                self.id = call_id
+                                self.type = "function"
+                        result = app.state.agent.process_tool_call(
+                            FakeToolCall("navigate_to", {"glob_y": gy, "glob_x": gx}, str(uuid.uuid4()))
+                        )
+                        # Execute all enqueued button presses
+                        for _ in range(queue.qsize()):
+                            await process_next_button("Dev mode", app.state.agent, send_game_updates)
+                        # Send tool result and frame
+                        await websocket.send_text(json.dumps({"type": "tool_result", "content": result}))
+                        frame = app.state.agent.get_frame()
+                        if frame:
+                            try:
+                                await send_game_updates(frame, f"Dev mode: manual navigated to ({gy}, {gx})")
+                            except Exception as e:
+                                logger.warning(f"send_game_updates failed: {e}, sending update directly via websocket")
+                                # Fallback: send update directly over this WebSocket
+                                update_msg = {
+                                    "type": "update",
+                                    "timestamp": int(time.time() * 1000),
+                                    "frame": base64.b64encode(frame).decode('ascii'),
+                                    "frame_format": "base64",
+                                    "message": f"Dev mode: manual navigated to ({gy}, {gx})"
+                                }
+                                await websocket.send_text(json.dumps(update_msg))
+                    except Exception as e:
+                        logger.error(f"Error in manual navigation: {e}", exc_info=True)
 
                 # Handle delay setting in Dev Mode
                 elif mtype == "set_delay" and hasattr(app.state, 'agent'):

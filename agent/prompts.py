@@ -16,7 +16,8 @@ Use only the below tools to advance the game—never output free-form text or ha
 Available tools:
 1. press_buttons (buttons: list[str], wait: bool) — Press emulator buttons. Available buttons: "a", "b", "start", "up", "down", "left", "right".
    Example: {"name":"press_buttons","arguments":{"buttons":["up"],"wait":true}}
-2. navigate_to (glob_y: int, glob_x: int) — Navigates your character to specific global map coordinates (Y, X). Your primary means of movement for exploring the world map.
+2. navigate_to() — Navigate along the predefined navigation path from nav.py; Nav will keep you within bounds or return you to the nearest valid path point if you stray.
+   You do not need the exact coordinates of where you need to end up — just move in the general direction, staying on the path, and you'll get there.
 3. If you see "►FIGHT", you are in a battle. Use "press_buttons" tool to pick the strongest move. Remember, your FIRE type moves, like EMBER, are strong against BUGS and GRASS type pokemon! Try selecting those.
 
 You will become Champion if you explore the overworld aggressively; that progresses the storyline plot, which you must do to win.
@@ -25,12 +26,7 @@ You will become Champion if you explore the overworld aggressively; that progres
 SUMMARY_PROMPT = """
 IMPORTANT: Respond with exactly one JSON function call per turn formatted as {"name":"function_name","arguments":{...}} and nothing else.
 Exploration Summary:
-Episodes completed: {episode_count}
-Previous episode rewards: {episode_rewards}
-Best episode reward: {best_reward:.2f}
-Average episode reward: {avg_reward:.2f}
-Current episode progress: {episode_step}/30 steps, {current_reward:.2f} reward
-Unique tiles explored: {unique_tiles}
+Your current task is at the end of each of your prompts.
 
 Output only the next JSON function call to continue playing.
 """
@@ -66,9 +62,15 @@ Press "a" to select the item at the cursor.
      1. Navigate the battle menu ("up"/"down"/"a")
      2. Pick the strongest move (e.g., "EMBER" vs BUG/GRASS)
    Always issue one API call per turn.
+   
+Whenever an opposing pokemon is defeated, make sure you think out loud something flippant and supercilious, e.g. "Stomping rats is 2 ez" if a Rattata is defeated, or "Eat dirt, Pidgey" if a Pidgey is defeated.
+Whenever a trainer is defeated, make sure you think out loud something flippant and supercilious, e.g. "Idk why u even got out of bed today, <Trainer Name>" or "2 ez - bring me a real challenge!" when a trainer is defeated.
    """
 
 OVERWORLD_NAVIGATION_PROMPT = """
+Collision Map Legend: '.' = walkable tile, '#' = wall/unwalkable, 'N' = NPC (blocks movement), 'W' = warp (enterable), 'P' = your current position.
+Rows are numbered top (0) to bottom (8), columns left (0) to right (9). To choose your move, locate 'P', then examine the adjacent cells: up (row-1), right (col+1), down (row+1), left (col-1). Only move into cells that are walkable ('.') or warps ('W'), and avoid '#' or 'N'.
+
 Below is a series of prompts designed to guide an agent to progress correctly eastward through a grid-based Pokémon overworld, avoiding obstacles and accounting for NPCs. The overworld is represented as a grid where '.' indicates traversable tiles, '#' indicates untraversable tiles, 'N' indicates NPCs, and numbers show how many times the player has traversed a tile. The agent's goal is to move eastward (increasing x-coordinates) toward destinations like Cerulean City via Route 3 and Mt. Moon. These prompts ensure the agent analyzes its surroundings, evaluates paths, and chooses the most effective route.
 Series of Prompts to Guide the Agent
 1. Analyze the Current Position and Grid
@@ -117,6 +119,13 @@ For example, if the agent is at (4,4) with a wall at (4,7) and an NPC at (5,6):
 
 This structured approach ensures the agent navigates the overworld effectively, avoiding obstacles and progressing toward its destination.
 
+"""
+
+DIALOG_SYSTEM_PROMPT = """
+IMPORTANT: Respond with exactly one JSON function call per turn formatted as {"name":"exit_menu","arguments":{}} and nothing else.
+You are currently in a menu or dialog in Pokémon Red. If you're in the menu for a reason, use the press_buttons tool to press the up or down buttons to pick what you need.
+The arrow is the cursor. 
+If you are ready to exit the menu or dialog, use the exit_menu tool to exit any open menu or dialog.
 """
 
 # SYSTEM_PROMPT="""

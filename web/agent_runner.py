@@ -91,18 +91,6 @@ async def run_agent(agent, num_steps=100000, run_log_dir=None, send_game_updates
             start_time = time.time()
             
             try:
-                # CRITICAL UPDATE: Force frame update before step execution
-                if send_game_updates:
-                    try:
-                        frame = agent.get_frame()
-                        if frame:
-                            pre_message = f"Pre-step frame update for step {step_count+1}"
-                            await send_game_updates(frame, pre_message or "Frame update")
-                            # Add synchronization delay after pre-step render
-                            await asyncio.sleep(0.2)
-                    except Exception as e:
-                        logger.error(f"Error sending pre-step game update: {e}")
-                
                 # Execute the step with forced render flag
                 agent.step(force_render=True)
                 # After the agent enqueues presses, process all queued presses from this step

@@ -14,7 +14,7 @@ import time
 import random
 from pathlib import Path
 
-from agent.prompts import SYSTEM_PROMPT, SUMMARY_PROMPT, BATTLE_SYSTEM_PROMPT
+from agent.prompts import SYSTEM_PROMPT, SUMMARY_PROMPT, BATTLE_SYSTEM_PROMPT, DIALOG_SYSTEM_PROMPT
 from agent.tools import AVAILABLE_TOOLS
 from agent.emulator import Emulator
 from game_data.nav import Nav
@@ -23,6 +23,7 @@ from agent.memory_reader import *
 from bin.red_pyboy_manager import PyBoyManager
 from openai import OpenAI
 import game_data.ram_map_leanke as ram_map
+from game_data.global_map import MAP_DATA, MAP_ROW_OFFSET, MAP_COL_OFFSET
 
 
 
@@ -38,6 +39,19 @@ def build_xai_toolspec():
                 "parameters":  t["input_schema"],
             },
         })
+    # Add tool for exiting menus/dialogs
+    tool_specs.append({
+        "type": "function",
+        "function": {
+            "name": "exit_menu",
+            "description": "Exit any open menu or dialog by pressing the B button",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    })
     return tool_specs
 
 
@@ -68,6 +82,7 @@ class FakeToolCall:
         """
         self.name = name
         self.input = input_data
+        self.arguments = input_data
         self.id = id
 
 class SimpleAgent:
@@ -108,6 +123,8 @@ class SimpleAgent:
         self.app = app
         self.step_delay = getattr(cfg, 'step_delay', 0.1)
         self.history_summary = None
+        # Track latest Grok chain-of-thought
+        self.latest_grok_thought = ""
         self.latest_game_state = None
         
         # Reward system
@@ -125,7 +142,10 @@ class SimpleAgent:
         self.was_in_battle = False
         self.currently_in_battle = False  # Track if currently in battle state
         self.battle_prompt_history = None  # Separate history for battles
-        self._last_battled_npc_key: tuple[int, int] | None = None # Track (map_id, sprite_index) of the last NPC battled
+        self._last_battled_npc_key: tuple[int, int] | None = None  # Track (map_id, sprite_index) of the last NPC battled
+        # Dialog state tracking
+        self.dialog_prompt_history = None  # Separate history for non-battle dialogs
+        self.was_in_dialog = False  # Track if we were in a dialog state
         # Track last battle moves and selection for UI display
         self.last_move_list: list[str] = []
         self.last_chosen_move_index: int | None = None
@@ -138,6 +158,10 @@ class SimpleAgent:
         self.last_tool_type = None
         self.same_button_press_count = 0
         self.last_button_pressed = None
+        self.location_map = {}
+        # Navigation fallback scheduling: if off path, wait before returning
+        self.return_scheduled = False
+        self.nav_wait_counter = 0
         
         # System prompt
         self.system_prompt = SYSTEM_PROMPT
@@ -160,7 +184,7 @@ class SimpleAgent:
         self.last_event_check_time = 0
         self.event_check_interval = 5  # Check events every 5 seconds
         self.game_progression = None
-        
+        self.obs = {}
         cfg.debug = False  # or True, as appropriate
         cfg.extra_buttons = False  # or True, as appropriate
         
@@ -249,6 +273,10 @@ class SimpleAgent:
     
     def determine_optimal_tool_choice(self):
         """Determine which tool to force based on current game state."""
+        logger.debug(f"[Tool Analysis] Current game state: {self.format_game_state()}")
+        logger.debug(f"[Tool Analysis] Available tools: {', '.join(AVAILABLE_TOOLS)}")
+        # logger.debug(f"[Tool Decision] Selected {tool_name} based on {selection_reason}")
+
         # Check for battles first - highest priority
         if self.might_be_battle() and self.is_in_non_navigation_state():
             pass
@@ -367,14 +395,11 @@ class SimpleAgent:
         
         # Add specific tool usage instructions
         prompt += "\n\nCRITICAL INSTRUCTION: You MUST use the provided tools for all actions. DO NOT suggest actions in text form. Always use the tools explicitly.\n"
-        
-        # # List available tools with clear usage examples
-        # prompt += "\nAvailable tools:\n"
-        # prompt += "1. navigate_to: Use to move to a specific grid position (e.g., {\"row\": 3, \"col\": 4}). You will use this most of all because most of the game is exploring.\n"
-        # prompt += "2. press_buttons: Press emulator buttons. Available buttons: \'a\', \'b\', \'start\', \'up\', \'down\', \'left\', \'right\'. Use this to move around.\n"
-        # prompt += "3. exit_menu: Use to exit any active menu or dialog quickly.\n"
-        # prompt += "4. handle_battle: Use to handle battle situations when you are in a battle.\n"
-        # prompt += "5. exit_to_last_map: Use to return to previous map when you are in a building.\n"
+        # List available tools with usage
+        prompt += "\nAvailable tools:\n"
+        prompt += "1. press_buttons(buttons: list[str], wait: bool) — Press emulator buttons (e.g., ['up'], ['b']).\n"
+        prompt += "2. navigate_to(glob_y: int, glob_x: int) — Navigate to specified global coordinates.\n"
+        prompt += "3. exit_menu() — Exit any open menu or dialog by pressing B.\n"
         
         return prompt
 
@@ -506,65 +531,8 @@ class SimpleAgent:
         player = self.game.player
         state_parts.append(f"{player}")
         
-        print(f"format_state(): state_parts: {state_parts}")
-        
-        # state_parts.append(f"- Episode Reward: {self.current_episode_reward:.2f}")
-        # state_parts.append(f"- Episode Step: {self.episode_step}/30")
-        # state_parts.append(f"- Unique Tiles Explored: {len(self.visited_tiles)}")
-        # if self.episode_rewards:
-        #     state_parts.append(f"- Previous Episode Rewards: {', '.join([f'{r:.2f}' for r in self.episode_rewards])}")
-        
-        # # Add game state information
-        # if self.latest_game_state:
-        #     state_parts.append("\nGAME ENVIRONMENT:")
-        #     state_parts.append(self.latest_game_state)
-        
-        # # Add explicit detection of special states
-        # if self.is_in_non_navigation_state():
-        #     state_parts.append("\nSPECIAL STATE DETECTED:")
-        #     state_parts.append("⚠️ DIALOG/MENU ACTIVE - No penalties applied")
-        #     # state_parts.append("Use exit_menu tool to clear dialogs/menus")
-            
-        #     # Add battle detection
-        #     if self.currently_in_battle:
-        #         state_parts.append("⚠️ CURRENTLY IN BATTLE!")
-        
-        # # Add event tracking information - NEW SECTION
-        # if self.game_progression:
-        #     state_parts.append("\nGAME PROGRESSION:")
-            
-            # # Add badges collected
-            # badges = self.game_progression.get("badges", [])
-            # state_parts.append(f"- Badges: {', '.join(badges) if badges else 'None yet'}")
-            
-            # # Add next steps (most important for guidance)
-            # next_steps = self.game_progression.get("recommended_next_steps", [])
-            # if next_steps:
-            #     state_parts.append("\nRECOMMENDED NEXT ACTIONS:")
-            #     for i, step in enumerate(next_steps, 1):
-            #         state_parts.append(f"{i}. {step}")
-            
-            # # Add relevant events for current area
-            # current_loc = self.game_progression.get("current_location", "")
-            # state_parts.append(f"\nCURRENT AREA ({current_loc}) EVENTS:")
-            
-            # # Find relevant area data based on current location
-            # for area_name, area_data in self.game_progression.get("major_areas", {}).items():
-            #     if area_name.lower() in current_loc.lower() or self.is_area_nearby(area_name, current_loc):
-            #         # Add incomplete events for the current area
-            #         incomplete_events = []
-            #         for event_name, status in area_data.items():
-            #             if status == 0 and self.is_event_available(event_name, self.game_progression):
-            #                 incomplete_events.append(event_name)
-                    
-            #         if incomplete_events:
-            #             state_parts.append(f"- Available Events: {', '.join(incomplete_events[:3])}")
-        
-        # # Add history summary if available
-        # if self.history_summary:
-        #     state_parts.append("\nHISTORY SUMMARY:")
-        #     state_parts.append(self.history_summary)
-        
+        print(f"format_state(): state_parts: {state_parts}")        
+       
         return "\n".join(state_parts)
     
     def format_game_state(self) -> str:
@@ -637,7 +605,7 @@ class SimpleAgent:
         if not self.currently_in_battle:
             state_parts.append("\nCOLLISION MAP:")
             cmap = self.emulator.get_collision_map()
-            print(f"format_game_state(): cmap: {cmap}")
+            # print(f"format_game_state(): cmap: {cmap}")
             state_parts.append(self.emulator.format_collision_map_simple(cmap))
 
         # Add history summary if available
@@ -645,7 +613,22 @@ class SimpleAgent:
             state_parts.append("\nHISTORY SUMMARY:")
             state_parts.append(self.history_summary)
         
-        return "\n".join(state_parts)
+        # Build and log the full state description
+        state_description = "\n".join(state_parts)
+        logger.debug(f"[State Snapshot]\n{state_description}")
+        
+        # Provide global coordinates for navigation
+        try:
+            coords = self.emulator.get_standard_coords()  # (y, x, map_id)
+            if coords:
+                gy, gx, gmap = coords
+                # Optionally include human-readable location
+                loc_name = self.emulator.reader.read_location()
+                state_parts.append(f"GLOBAL COORDINATES: Y={gy}, X={gx}, MAP_ID={gmap} ({loc_name})")
+        except Exception:
+            pass
+        
+        return state_description
 
     def calculate_step_reward(self, current_position):
         """Calculate reward for the current step based on exploration.
@@ -699,53 +682,10 @@ class SimpleAgent:
         return False
         
     def might_be_battle(self):
-        """Determine if current dialog might be a battle dialog based on content.
+        """Determine if the agent is currently in a battle using the game state."""
+        # Use the definitive game state variable to check for battle status.
+        return self.game.battle._in_battle_state()
         
-        This method checks for the battle UI pattern and battle-related terms.
-        """
-        # There will always be a dialog if there is a battle.
-        dialog = self.emulator.get_active_dialog()
-        if not dialog:
-            self.currently_in_battle = False
-            return False
-            
-        elif dialog:
-            # Stays True until out of battle.
-            if self.currently_in_battle:
-                return True
-            # Primary battle indicator: FIGHT menu option in the battle UI
-            if "►FIGHT" in dialog:
-                logger.info("[Battle Detection] Battle UI detected with ►FIGHT menu")
-                self.currently_in_battle = True
-                return True
-                
-            # Secondary battle UI pattern detection (include move options)
-            battle_ui_patterns = ["►FIGHT", "PkMn", "ITEM", "RUN", "SCRATCH", "GROWL", "EMBER", "LEER"]
-            pattern_matches = sum(1 for pattern in battle_ui_patterns if pattern in dialog)
-            # Require multiple indicators to confirm battle UI
-            if pattern_matches >= 3:
-                logger.info(f"[Battle Detection] Battle UI detected with {pattern_matches} UI elements")
-                self.currently_in_battle = True
-                return True
-                
-            # Fallback to keyword detection with explicit phrases
-            battle_keywords = [
-                "wants to fight", "sent out", "trainer", "battle", "attack",
-                "used", "fainted", "effective", "damage", "defeated", "pokémon", "pokemon"
-            ]
-            
-            # Check for explicit battle keywords in dialog
-            dialog_lower = dialog.lower()
-            for keyword in battle_keywords:
-                if keyword in dialog_lower:
-                    logger.info(f"[Battle Detection] Battle keyword detected: {keyword}")
-                    self.currently_in_battle = True
-                    return True
-        else:
-            # Error - should always either be in a dialog or not in a dialog
-            self.currently_in_battle = False
-            return False
-            
     def navigate_to_move(self, current_index, target_index):
         """Execute precise cursor movement with complete state rendering"""
         logger.info(f"[BattleAI] Cursor at position {current_index}, navigating to target position {target_index}")
@@ -816,8 +756,15 @@ class SimpleAgent:
             
     def process_tool_call(self, tool_call):
         """Process a single tool call with reward tracking."""
-        tool_name = tool_call.name
-        tool_input = tool_call.input
+        logger.info(f"[Tool Execution] Processing {tool_call.name} with args: {tool_call.arguments}")
+        try:
+            result = self._execute_tool(tool_call)
+            logger.debug(f"[Tool Result] {tool_call.name} returned: {str(result)[:200]}")  # Truncate long outputs
+            return result
+        except Exception as e:
+            logger.error(f"[Tool Error] Failed to execute {tool_call.name}: {str(e)}")
+            raise
+        
         
         # Record this tool use for tracking
         self.completed_steps.append(tool_name)
@@ -917,6 +864,10 @@ class SimpleAgent:
                 # Process each step in the path with rewards
                 for direction in path:
                     self.emulator.press_buttons([direction], True)
+                    # Validate for active dialog after each navigation step and abort if dialog appears
+                    if self.emulator.get_active_dialog():
+                        logger.info("navigate_to: Active dialog detected, aborting navigation")
+                        break
                     
                     # Calculate reward for this step
                     current_position = self.emulator.get_game_coords()
@@ -1158,7 +1109,16 @@ class SimpleAgent:
     
     def step(self, force_render=False):
         """Execute a single step with strict timing controls and navigation."""
-        
+               
+        self.currently_in_battle = self.emulator.is_in_battle()
+        # Retrieve the latest observation dict for accurate state
+        self.obs = self.red_reader.get_observation(self.emulator, self.game)
+        # Append current observation for Grok to the message history
+        try:
+            obs_text = f"Observation: {self.obs}"
+            self.message_history.append({'role': 'user', 'content': [{'type': 'text', 'text': obs_text}]})
+        except Exception as e:
+            logger.error(f'Failed to append observation to message history: {e}')
         current_time = time.time()
         if self.event_tracking_enabled and current_time - self.last_event_check_time >= self.event_check_interval:
             self.update_event_tracking()
@@ -1169,12 +1129,13 @@ class SimpleAgent:
         
         # Check for any active dialog and current battle state
         dialog = self.emulator.get_active_dialog()
+        # Normalize dialog text for prompt
+        dialog_text = dialog.replace('\n', ' ')[:500] if dialog else ""
         in_battle = self.might_be_battle()
         
         # Provide grok with current state
         game_state = self.game.process_game_states()
         logger.info(f"Game state: {game_state}")
-        
         
         # CRITICAL: maintain battle state across the entire encounter
         # If we were in battle previously or critical hit appears in dialog, we're still in battle
@@ -1185,8 +1146,12 @@ class SimpleAgent:
         
         # Check if a battle just finished
         battle_just_finished = self.was_in_battle and not in_battle
+        # Determine dialog state transitions
+        in_dialog = dialog is not None and not in_battle
+        dialog_just_started = in_dialog and not self.was_in_dialog
+        dialog_just_finished = self.was_in_dialog and not in_dialog
         
-        # Switch message history for battle start/end
+        # Switch message history for battle, dialog, and navigation
         if in_battle:
             # Initialize battle history on entry
             if not self.was_in_battle:
@@ -1237,21 +1202,59 @@ class SimpleAgent:
                 self.battle_prompt_history.append({"role":"user","content":[{"type":"text","text": details} ]})
             # Use battle history for LLM
             self.message_history = self.battle_prompt_history
-        elif self.was_in_battle:
-            # Battle ended, reset to normal system prompt
+            # Log dialog/battle state when in battle
+            if dialog:
+                dialog_text = dialog.replace('\\n', ' ')[:500]
+                logger.info(f"Dialog or battle active: {dialog_text}")
+                self.last_message = f"Dialog: {dialog_text}"
+                # Append the dialog to battle history
+                self.message_history.append({"role": "user", "content": [{"type": "text", "text": dialog_text}]})
+
+            # Append current game state to battle history
+            try:
+                state_text = self.format_game_state()
+                self.message_history.append({"role": "user", "content": [{"type": "text", "text": state_text}]})
+            except Exception as e:
+                logger.error(f"Failed to append game state to battle history: {e}", exc_info=True)
+
+        elif battle_just_finished:
+            # Battle just ended, reset to normal system prompt and reset history with current game state
+            system_prompt = self._get_system_prompt()
+            # Immediately add current game state instead of empty message
+            state_text = self.format_game_state()
             self.message_history = [
-                {"role":"system","content":[{"type":"text","text": self._get_system_prompt()}]}
+                {"role":"system","content":[{"type":"text","text": system_prompt}]},
+                {"role":"user","content":[{"type":"text","text": state_text}]}  # Reset history with actual game state
             ]
             self.battle_prompt_history = None
-        
-        # Log dialog/battle state
-        if dialog:
-            dialog_text = dialog.replace('\n', ' ')[:500]
-            logger.info(f"Dialog or battle active: {dialog_text}")
-            self.last_message = f"Dialog: {dialog_text}"
-            # Append the dialog as a user message so the LLM can see it
-            self.message_history.append({"role": "user", "content": [{"type": "text", "text": dialog_text}]})
-        
+            logger.info("Battle ended, resetting message history to overworld prompt.")
+
+        elif in_dialog:
+            # Entering or continuing a non-battle dialog; reset history to dialog prompt
+            if dialog_just_started:
+                self.dialog_prompt_history = [
+                    {"role": "system", "content": [{"type":"text","text": DIALOG_SYSTEM_PROMPT.strip()}]},
+                    {"role": "user", "content": [{"type":"text","text": dialog_text}]}  
+                ]
+            self.message_history = self.dialog_prompt_history
+        elif dialog_just_finished:
+            # Dialog ended, reset to overworld prompt and history
+            system_prompt = self._get_system_prompt()
+            state_text = self.format_game_state()
+            self.message_history = [
+                {"role":"system","content":[{"type":"text","text": system_prompt}]},
+                {"role":"user","content":[{"type":"text","text": state_text}]}  
+            ]
+            self.dialog_prompt_history = None
+            logger.info("Dialog ended, resetting message history to overworld prompt.")
+        else:
+            # Navigation state (non-battle, non-dialog): append game state to overworld history
+            try:
+                state_text = self.format_game_state()
+                self.message_history.append({"role": "user", "content": [{"type": "text", "text": state_text}]})
+            except Exception as e:
+                logger.error(f"Failed to append game state to overworld history: {e}", exc_info=True)
+
         # CRITICAL SYNCHRONIZATION UPDATE: Force emulator step for UI stability
         if force_render or in_battle:
             self.emulator.step()
@@ -1277,8 +1280,8 @@ class SimpleAgent:
             tools_to_use = self.xai_tools
             if in_battle:
                 tools_to_use = [t for t in self.xai_tools if t["function"]["name"] == "press_buttons"]
-            # elif dialog:
-            #     tools_to_use = [t for t in self.xai_tools if t["function"]["name"] == "exit_menu"]
+            elif self.currently_in_dialog:
+                tools_to_use = [t for t in self.xai_tools if t["function"]["name"] == "exit_menu"]
             # Log the LLM request messages for debugging
             try:
                 log_msg = json.dumps(self.message_history, indent=2)
@@ -1299,10 +1302,39 @@ class SimpleAgent:
                 temperature      = self.temperature,
                 max_tokens       = self.max_tokens,
             )
+            
+            # Grok response logging
+            logger.info("Reasoning Content:")
+            logger.info(completion.choices[0].message.reasoning_content)
+
+            logger.info("\nFinal Response:")
+            logger.info(completion.choices[0].message.content)
+
+            logger.info("\nNumber of completion tokens (input):")
+            logger.info(completion.usage.completion_tokens)
+
+            logger.info("\nNumber of reasoning tokens (input):")
+            logger.info(completion.usage.completion_tokens_details.reasoning_tokens)
+            
             # Log LLM raw response
             try:
                 msg = completion.choices[0].message
                 resp_content = msg.content or ""
+                # Capture Grok's chain-of-thought from API if available
+                try:
+                    reasoning = None
+                    if hasattr(msg, 'analysis'):
+                        reasoning = msg.analysis
+                    elif hasattr(msg, 'reasoning'):
+                        reasoning = msg.reasoning
+                    elif hasattr(msg, 'thoughts'):
+                        reasoning = msg.thoughts
+                    elif hasattr(msg, 'reasons'):
+                        reasoning = msg.reasons
+                    self.latest_grok_thought = reasoning or ""
+                except Exception as e:
+                    self.latest_grok_thought = ""
+                    logger.debug(f"Failed to capture Grok reasoning: {e}")
                 logger.info("LLM response content: %s", resp_content)
                 if hasattr(self, 'app') and getattr(self.app.state, 'grok_logger', None):
                     self.app.state.grok_logger.info("LLM response content: %s", resp_content)
@@ -1352,7 +1384,7 @@ class SimpleAgent:
                     call_obj = json.loads(raw)
                     if isinstance(call_obj, dict) and 'name' in call_obj:
                         func_name = call_obj['name']
-                        func_args = call_obj.get('arguments', {}) or {}
+                        func_args = call_obj.get('arguments', call_obj.get('input', {})) or {}
                         result_obj = self.process_tool_call(FakeToolCall(func_name, func_args, f"fallback_raw"))
                         logger.info(f"Fallback raw tool call '{func_name}' args: {func_args} -> result: {result_obj}")
                         self.message_history.append({
@@ -1371,7 +1403,7 @@ class SimpleAgent:
                         try:
                             call_obj = json.loads(fc_json)
                             func_name = call_obj.get("name")
-                            func_args = call_obj.get("arguments", {})
+                            func_args = call_obj.get("arguments", call_obj.get('input', {})) or {}
                             result_obj = self.process_tool_call(FakeToolCall(func_name, func_args, f"fallback_{idx}"))
                             logger.info(f"Fallback tool call '{func_name}' args: {func_args} -> result: {result_obj}")
                             self.message_history.append({
@@ -1422,6 +1454,8 @@ class SimpleAgent:
         
         # Update battle tracking for the next step
         self.was_in_battle = in_battle
+        # Update dialog tracking for the next step
+        self.was_in_dialog = in_dialog
         
         # # CRITICAL: Enforce minimum 3-second delay after any action
         # logger.info("Enforcing 3-second delay between actions")
@@ -1660,6 +1694,10 @@ class SimpleAgent:
             str: The last message from the agent, or a default message if none exists
         """
         return self.last_message if hasattr(self, 'last_message') else "No message available"
+
+    def get_latest_grok_thought(self) -> str:
+        """Get the latest chain-of-thought from Grok."""
+        return getattr(self, 'latest_grok_thought', "")
         
     def get_frame(self) -> bytes:
         """Get the current game frame as PNG bytes.
@@ -1711,7 +1749,7 @@ class SimpleAgent:
         """
         memory_adapter = MemoryAdapter(self.emulator)
         detailed_events = {
-            "ROUTE": ram_map.monitor_route_events(memory_adapter),
+            "ROUTES": ram_map.monitor_route_events(memory_adapter),
             "MISC": ram_map.monitor_misc_events(memory_adapter),
             "SILPH_CO": ram_map.monitor_silph_co_events(memory_adapter),
             "ROCK_TUNNEL": ram_map.monitor_rock_tunnel_events(memory_adapter),
@@ -1983,12 +2021,13 @@ class SimpleAgent:
             7: {"name": "FUCHSIA CITY", "description": "City with the fifth gym led by Koga (Poison-type) and Safari Zone"},
             8: {"name": "CINNABAR ISLAND", "description": "Island with the seventh gym led by Blaine (Fire-type) and Pokémon Mansion"},
             9: {"name": "INDIGO PLATEAU", "description": "Location of the Elite Four and Pokémon League Champion"},
-            10: {"name": "SAFFRON CITY", "description": "Central city with the sixth gym led by Sabrina (Psychic-type) and Silph Co."},
+            10: {"name": "SAFFRDON CITY", "description": "Central city with the sixth gym led by Sabrina (Psychic-type) and Silph Co."},
             # Routes
-            12: {"name": "ROUTE 1", "description": "Path connecting Pallet Town and Viridian City"},
-            13: {"name": "ROUTE 2", "description": "Path connecting Viridian City and Pewter City"},
-            14: {"name": "ROUTE 3", "description": "Path leading to Mt. Moon with several trainers"},
-            15: {"name": "ROUTE 4", "description": "Path connecting Mt. Moon and Cerulean City"},
+            12: {"name": "ROUTE 1", "description": "Travel north on Route 1 from Pallet Town to Viridian City"},
+            13: {"name": "ROUTE 2", "description": "Travel north on Route 2 from Viridian City to Pewter City"},
+            14: {"name": "ROUTE 3", "description": "Travel east on Route 3 from Pewter City to Mt Moon Route 3"},
+            59: {"name": "MT MOON ROUTE 3", "description": "Travel north on Mt Moon Route 3 from Route 3 to reach Mt Moon B1F"},
+            16: {"name": "ROUTE 4", "description": "Travel east on Route 4 from Cerulean City to Lavender Town"},
             16: {"name": "ROUTE 5", "description": "Path connecting Cerulean City and Saffron City"},
             17: {"name": "ROUTE 6", "description": "Path connecting Saffron City and Vermilion City"},
             18: {"name": "ROUTE 7", "description": "Path connecting Saffron City and Celadon City"},
@@ -2012,10 +2051,11 @@ class SimpleAgent:
             36: {"name": "ROUTE 25", "description": "Path leading to Bill's House"},
             # Important locations
             52: {"name": "VIRIDIAN FOREST", "description": "Forest maze with Bug-type Pokémon and trainers"},
-            59: {"name": "MT. MOON", "description": "Cave system with Zubat, Geodude, and Team Rocket members"},
-            60: {"name": "ROCK TUNNEL", "description": "Dark cave requiring Flash with strong wild Pokémon"},
-            61: {"name": "POKEMON TOWER", "description": "Tower filled with Ghost-type Pokémon and possessed trainers"},
-            84: {"name": "ROCKET HIDEOUT", "description": "Team Rocket's secret base under the Celadon Game Corner"},
+            59: {"name": "MT MOON", "description": "Cave system with Zubat, Geodude, and Team Rocket members"},
+            60: {"name": "MT MOON B1F", "description": "Dark cave requiring Flash with strong wild Pokémon"},
+            61: {"name": "MT MOON B2F", "description": "Dark cave requiring Flash with strong wild Pokémon"},
+            142: {"name": "POKEMON TOWER F1", "description": "Tower filled with Ghost-type Pokémon and possessed trainers"},
+            199: {"name": "ROCKET HIDEOUT B1F", "description": "Team Rocket's secret base under the Celadon Game Corner"},
             130: {"name": "SAFARI ZONE", "description": "Special area where you can catch rare Pokémon using Safari Balls"},
             138: {"name": "POKEMON MANSION", "description": "Abandoned mansion with Fire-type Pokémon and the Gym Key"},
             166: {"name": "SILPH CO.", "description": "Office building taken over by Team Rocket"},
@@ -2120,11 +2160,21 @@ class SimpleAgent:
                 recommendations.append("Return to Professor Oak to deliver his Parcel.")
         
         # SPECIFIC BADGE DETECTION: Recommend Mt. Moon if player has Boulder Badge
+        current_location = self.emulator.reader.read_location()
         if "BOULDER" in badges or (isinstance(badges, list) and "BOULDER" in badges):
             if "EVENT_BEAT_MT_MOON_EXIT_SUPER_NERD" not in completed_events:
-                recommendations.append("Navigate through Mt. Moon to reach Cerulean City.")
+                if current_location == "ROUTE 3":
+                    recommendations.append("Navigate east to reach 'Mt Moon Route 3'.")
+                elif current_location == "MT MOON ROUTE 3":
+                    recommendations.append("Navigate north to reach 'Mt Moon B1F'.")
+                elif current_location == "MT MOON B1F":
+                    recommendations.append("Navigate up and left to reach 'Mt Moon B2F'.")
+                elif current_location == "MT MOON B2F":
+                    recommendations.append("Navigate up and left to exit Mt Moon.")
+                else:
+                    recommendations.append("You need to exit Pewter City eastward and take Route 3 to reach 'Mt Moon Route 3'.")
             else:
-                recommendations.append("Head to Cerulean City to challenge Misty at the Gym.")
+                recommendations.append("You need to beat Brock at the first gym in Pewter City to advance. Find your way to Pewter City!")
         
         # Add existing gym progression logic...
         # [Additional recommendation code would continue here]
@@ -2136,3 +2186,67 @@ class SimpleAgent:
     def currently_in_dialog(self) -> bool:
         """Return True if agent is in a dialog or menu (but not battle)."""
         return self.is_in_non_navigation_state() and not getattr(self, 'currently_in_battle', False)
+
+    def _execute_tool(self, tool_call):
+        """Execute a tool by name using the implementations in agent.tools"""
+        tool_name = tool_call.name
+        kwargs = getattr(tool_call, 'arguments', None) or getattr(tool_call, 'input', {})
+        # Route tool execution to emulator
+        if tool_name == 'press_buttons':
+            buttons = kwargs.get('buttons', [])
+            wait = kwargs.get('wait', True)
+            return self.emulator.press_buttons(buttons, wait)
+        elif tool_name == 'navigate_to':
+            glob_y = kwargs.get('glob_y')
+            glob_x = kwargs.get('glob_x')
+            # Reset fallback scheduling when attempting on-screen navigation
+            self.return_scheduled = False
+            self.nav_wait_counter = 0
+            # Try A* pathfinding to the target
+            status, path = self.emulator.find_path(glob_y, glob_x)
+            if path is not None:
+                if path:
+                    # Execute each step along the path
+                    for direction in path:
+                        self.emulator.press_buttons([direction], True)
+                    return {
+                        'type': 'tool_result',
+                        'id': tool_call.id,
+                        'tool_use_id': tool_call.id,
+                        'content': [{'type': 'text', 'text': f'Navigated {len(path)} steps: {path}'}],
+                    }
+                else:
+                    # Already at target
+                    return {
+                        'type': 'tool_result',
+                        'id': tool_call.id,
+                        'tool_use_id': tool_call.id,
+                        'content': [{'type': 'text', 'text': 'Already at the target location.'}],
+                    }
+            # Off-path fallback: schedule return to path with delay
+            if not self.return_scheduled:
+                self.return_scheduled = True
+                self.nav_wait_counter = 2
+                return {
+                    'type': 'tool_result',
+                    'id': tool_call.id,
+                    'tool_use_id': tool_call.id,
+                    'content': [{'type': 'text', 'text': 'Off-path detected: returning to path in a few turns.'}],
+                }
+            # Countdown before returning to path
+            self.nav_wait_counter -= 1
+            if self.nav_wait_counter > 0:
+                return {
+                    'type': 'tool_result',
+                    'id': tool_call.id,
+                    'tool_use_id': tool_call.id,
+                    'content': [{'type': 'text', 'text': f'Waiting {self.nav_wait_counter} turns before returning to path.'}],
+                }
+            # Time to return to the nearest path point
+            self.return_scheduled = False
+            return self.nav.bounds_check_tool(tool_call)
+        elif tool_name == 'exit_menu':
+            # Press B to exit current menu or dialog
+            return self.emulator.press_buttons(['b'], True)
+        else:
+            raise ValueError(f"Unknown tool: {tool_name}")

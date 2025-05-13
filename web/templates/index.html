@@ -63,11 +63,10 @@
 
         .container {
             display: grid;
-            grid-template-columns: 2fr 1.5fr;
-            grid-template-rows: 1fr 120px;
+            grid-template-columns: 2fr 1fr 1.5fr;
             grid-template-areas:
-                "game chat"
-                "team team";
+                "game actions chat"
+                "team team team";
             gap: 1rem;
             padding: 1rem;
             height: calc(100vh - 4rem);
@@ -108,11 +107,10 @@
         /* Overlay ASCII collision map atop canvas */
         #collision-map-overlay {
             position: absolute;
-            top: 400;
+            bottom: 0;
             left: 0;
             width: 100%;
-            /* Match canvas container dimensions */
-            height: 100%;
+            max-height: 30%;
             margin: 0;
             font-family: monospace;
             font-size: 0.8rem;
@@ -121,7 +119,7 @@
             background: rgba(0, 0, 0, 0.2);
             white-space: pre;
             pointer-events: none;
-            overflow: hidden;
+            overflow-y: auto;
         }
 
         /* Hide old collision-container */
@@ -190,6 +188,12 @@
         .message .content {
             color: var(--chat-text);
             line-height: 1.8;
+        }
+
+        /* Style for Grok's inner thoughts */
+        .message.thought {
+            background-color: rgba(255, 255, 255, 0.05);
+            font-style: italic;
         }
 
         /* Make preformatted text readable */
@@ -307,7 +311,7 @@
 
         #collision-map {
             position: absolute;
-            top: 0;
+            top: 300;
             left: 0;
             margin: 0;
             font-size: 0.5rem;
@@ -534,6 +538,104 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+
+        /* Pane for Grok's Tool Calls beneath the emulator screen */
+        .toolcalls-window {
+            width: 100%;
+            padding: 0.5rem;
+            margin-top: 1rem;
+            background-color: var(--chat-bg);
+            border-top: 4px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            max-height: 950px;
+            overflow: hidden;
+        }
+        .toolcalls-header {
+            padding: 0.5rem;
+            border-bottom: 2px solid var(--border-color);
+            background: var(--header-gradient);
+        }
+        .toolcalls-header h2 {
+            font-size: 1rem;
+            color: var(--pokemon-yellow);
+            margin: 0;
+        }
+        .toolcalls-messages {
+            flex: 1;
+            padding: 1rem;
+            overflow-y: auto;
+            font-size: 0.9rem;
+            color: var(--chat-text);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* Progress Bar styling */
+        .progress-bar-container {
+            position: relative;
+            width: 100%;
+            height: 1rem;
+            background-color: var(--border-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            margin-top: 0.5rem;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background-color: var(--pokemon-yellow);
+            width: 0%;
+            border-radius: 4px 0 0 4px;
+            transition: width 0.3s ease;
+        }
+        .progress-bar-text {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            text-align: center;
+            font-size: 0.75rem;
+            line-height: 1rem;
+            color: var(--chat-text);
+        }
+
+        /* Agent Actions pane styling */
+        .actions-window {
+            grid-area: actions;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--chat-bg);
+            border: 4px solid var(--border-color);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .actions-window .actions-header {
+            padding: 1rem;
+            border-bottom: 4px solid var(--border-color);
+            background: var(--header-gradient);
+        }
+
+        .actions-window .actions-header h2 {
+            font-size: 1.2rem;
+            color: var(--pokemon-yellow);
+            text-shadow: 1px 1px #000;
+        }
+
+        .actions-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        .actions-messages::-webkit-scrollbar {
+            display: none;
+        }
     </style>
 </head>
 
@@ -562,12 +664,25 @@
         <div class="game-window">
             <div id="screen-container">
                 <canvas id="game-screen" width="160" height="144"></canvas>
-                <pre id="collision-map-overlay"></pre>
+                <div id="progress-bar-container" class="progress-bar-container"></div>
                 <pre id="debug-output"
                     style="background: rgba(0,0,0,0.7); color: var(--chat-text); font-family: monospace; font-size: 0.7rem; max-height: 100px; overflow-y: auto; width: 640px; margin-top: 8px;"></pre>
             </div>
-        </div>
 
+            <!-- Pane for Grok's Tool Calls beneath the emulator screen -->
+            <div class="toolcalls-window">
+                <div class="toolcalls-header">
+                    <h2>Grok's Tool Calls</h2>
+                </div>
+                <div class="toolcalls-messages" id="toolcalls-messages"></div>
+            </div>
+        </div>
+        <div class="actions-window">
+            <div class="actions-header">
+                <h2>Agent Actions</h2>
+            </div>
+            <div class="actions-messages" id="actions-messages"></div>
+        </div>
         <div class="chat-window">
             <div class="chat-header">
                 <h2>Grok's Thoughts</h2>
@@ -598,6 +713,7 @@
         let lastFrameUrl = null; // Store the last frame for redraws
 
         const chatMessages = document.getElementById('chat-messages');
+        const actionsMessages = document.getElementById('actions-messages');
         const gameScreen = document.getElementById('game-screen');
         const ctx = gameScreen.getContext('2d');
         const debugOutput = document.getElementById('debug-output');
@@ -781,23 +897,49 @@
                             }
                         }
 
-                        // Append text message to chat
-                        if (data.message) {
-                            const messageDiv = document.createElement('div');
-                            messageDiv.className = 'message';
+                        // Display Grok's inner thoughts if available
+                        if (data.grok_thought) {
+                            const thoughtDiv = document.createElement('div');
+                            thoughtDiv.className = 'message thought';
                             const timeSpan = document.createElement('span');
                             timeSpan.className = 'timestamp';
                             timeSpan.textContent = new Date().toLocaleTimeString();
-                            const pre = document.createElement('pre');
-                            pre.className = 'content';
-                            pre.textContent = data.message; // Assuming message is plain text
-                            messageDiv.appendChild(timeSpan);
-                            messageDiv.appendChild(pre);
-                            chatMessages.appendChild(messageDiv);
-                            chatMessages.scrollTop = chatMessages.scrollHeight; // Auto-scroll
-                            // Mirror the latest message under the game screen
-                            if (debugOutput) {
-                                debugOutput.textContent = data.message;
+                            thoughtDiv.appendChild(timeSpan);
+                            const preThought = document.createElement('pre');
+                            preThought.className = 'content';
+                            preThought.textContent = data.grok_thought;
+                            thoughtDiv.appendChild(preThought);
+                            chatMessages.appendChild(thoughtDiv);
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+                        // Route messages: tool calls vs Grok's thoughts
+                        if (data.message) {
+                            const msg = data.message;
+                            if (msg.startsWith('{') || msg.startsWith('Fallback invoked') || msg.startsWith('Grok invoked')) {
+                                // Show tool calls in the tool-call pane beneath the emulator
+                                const toolContainer = document.getElementById('toolcalls-messages');
+                                const callDiv = document.createElement('div');
+                                callDiv.className = 'tool-call';
+                                callDiv.textContent = msg;
+                                toolContainer.appendChild(callDiv);
+                            } else {
+                                // Show Grok's actual thought in the chat pane
+                                const messageDiv = document.createElement('div');
+                                messageDiv.className = 'message';
+                                const timeSpan = document.createElement('span');
+                                timeSpan.className = 'timestamp';
+                                timeSpan.textContent = new Date().toLocaleTimeString();
+                                const pre = document.createElement('pre');
+                                pre.className = 'content';
+                                pre.textContent = msg;
+                                messageDiv.appendChild(timeSpan);
+                                messageDiv.appendChild(pre);
+                                chatMessages.appendChild(messageDiv);
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                                // Mirror the thought under the game screen for quick dev view
+                                if (debugOutput) {
+                                    debugOutput.textContent = msg;
+                                }
                             }
                         }
 
@@ -806,11 +948,41 @@
                             updateTeamDisplay(data.party);
                         }
 
-                        // Update collision map and info
-                        if (data.collision_map) {
-                            console.log("[Collision ASCII Map]", data.collision_map);
-                            document.getElementById('collision-map-overlay').textContent = data.collision_map;
+                        // Update progress bar for next goal
+                        if (data.progress_bar) {
+                            const progressContainer = document.getElementById('progress-bar-container');
+                            if (progressContainer) {
+                                progressContainer.innerHTML = '';
+                                const fillDiv = document.createElement('div');
+                                fillDiv.className = 'progress-bar-fill';
+                                fillDiv.style.width = `${data.progress_bar.percent}%`;
+                                progressContainer.appendChild(fillDiv);
+                                const textDiv = document.createElement('div');
+                                textDiv.className = 'progress-bar-text';
+                                textDiv.textContent = `${data.progress_bar.goal}: ${data.progress_bar.percent}%`;
+                                progressContainer.appendChild(textDiv);
+                            }
                         }
+                    }
+                    // Handle tool result messages
+                    else if (data.type === 'tool_result') {
+                        console.log('Tool result received:', data.content);
+                        // Display agent actions in the actions pane
+                        const items = Array.isArray(data.content)
+                            ? data.content
+                            : (data.content.content || []);
+                        items.forEach(item => {
+                            if (item.type === 'text') {
+                                const messageDiv = document.createElement('div');
+                                messageDiv.className = 'message';
+                                const pre = document.createElement('pre');
+                                pre.className = 'content';
+                                pre.textContent = item.text;
+                                messageDiv.appendChild(pre);
+                                actionsMessages.appendChild(messageDiv);
+                            }
+                        });
+                        actionsMessages.scrollTop = actionsMessages.scrollHeight;
                     }
                 } catch (e) {
                     console.error("Error processing WebSocket message:", e);
@@ -1189,6 +1361,16 @@
                 teamContainer.appendChild(card);
             });
         }
+
+        // Manual navigation helper: call nav(y, x) in the browser console to navigate to global coordinates
+        window.nav = function (gy, gx) {
+            console.log(`Console navigation request to global coords (${gy}, ${gx})`);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'navigate_to_coords', glob_y: gy, glob_x: gx }));
+            } else {
+                console.warn('WebSocket is not connected');
+            }
+        };
 
     </script>
 </body>

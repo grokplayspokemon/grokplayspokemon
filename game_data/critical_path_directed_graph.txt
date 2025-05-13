@@ -1,0 +1,281 @@
+# Pokémon Red/Blue/Yellow: Critical Path Directed Graph
+
+This directed graph represents the mandatory path a player must take through all locations to become the Pokémon Champion in the original Pokémon Red, Blue, and Yellow games, assuming Charmander as the starter.
+
+## Legend
+- **Towns/Cities**: Population centers with various services
+- **Routes**: Paths connecting locations
+- **Dungeons/Buildings**: Special areas that must be traversed
+- **Gyms**: Locations where gym badges are earned (marked with 🏆)
+- **Key Items**: Important items needed for progression (marked with 🔑)
+- **HMs**: Hidden Machines required for navigation (marked with 📜)
+- **Pokémon**: Important Pokémon acquisitions (marked with ⭐)
+- **Direction**: Cardinal directions of travel (N, S, E, W)
+
+## Critical Path Directed Graph
+
+```
+Pallet Town (Professor Oak's Lab - Get Charmander ⭐)
+    ↓ (Exit North)
+Route 1 (Travel North)
+    ↓ (Enter South)
+Viridian City (Pokémart - Get Oak's Parcel 🔑)
+    ↓ (Exit South)
+Route 1 (Travel South)
+    ↓ (Enter North)
+Pallet Town (Deliver Parcel, get Pokédex)
+    ↓ (Exit North)
+Route 1 (Travel North)
+    ↓ (Enter South)
+Viridian City
+    ↓ (Exit North)
+Route 2 (North Section - Travel North)
+    ↓ (Enter South)
+Viridian Forest (Travel North through maze)
+    ↓ (Exit North)
+Route 2 (South Section - Travel North)
+    ↓ (Enter South)
+Pewter City 🏆 (Boulder Badge - Brock)
+    ↓ (Exit East)
+Route 3 (Travel East)
+    ↓ (Enter West)
+Mt Moon Route 3 (Travel North)
+    Make sure to stop at the Poke Center before entering Mt Moon! Enter Poke Center North.
+    ↓ (Enter Mt Moon North)
+Mt. Moon (Navigate through all three floors)
+    ↓ (Exit East)
+Route 4 (Travel East)
+    ↓ (Enter West)
+Cerulean City 🏆 (Cascade Badge - Misty)
+    ↓ (Visit Bike Shop - Cannot afford bike yet)
+    ↓ (Exit North)
+Route 24 (Travel North)
+    ↓ (Enter South)
+Route 25 (Travel East to Bill's House - Get S.S. Anne Ticket 🔑)
+    ↓ (Exit West)
+Route 24 (Travel South)
+    ↓ (Enter North)
+Cerulean City
+    ↓ (Exit South)
+Route 5 (Travel South)
+    ↓ (Saffron City Guards block entry at checkpoint - Need Drink)
+    ↓ (Enter Underground Path)
+Underground Path (Route 5-6) (Travel South)
+    ↓ (Exit Underground Path)
+Route 6 (Travel South)
+    ↓ (Enter North)
+Vermilion City
+    ↓ (Enter East pier)
+S.S. Anne (Get Cut HM 📜 - Teach to Charmander)
+    ↓ (Exit S.S. Anne)
+Vermilion City 🏆 (Thunder Badge - Lt. Surge)
+    ↓ (Exit East)
+Route 11 (Travel East to Diglett's Cave, optional shortcut)
+    ↓ (Optional: Enter Diglett's Cave)
+    ↓ (Optional: Exit Diglett's Cave to Route 2)
+    ↓ (If not taking Diglett's Cave, return West to Vermilion)
+    ↓ (Exit North)
+Route 6 (Travel North)
+    ↓ (Enter Underground Path)
+Underground Path (Route 5-6) (Travel North)
+    ↓ (Exit Underground Path)
+Route 5 (Travel North)
+    ↓ (Enter South)
+Cerulean City 
+    ↓ (Visit Route 2 to get Flash HM05)
+    ↓ (Return to Vermilion City)
+    ↓ (Exit East from Vermilion)
+Route 11 (Travel East to Diglett's Cave)
+    ↓ (Enter Diglett's Cave)
+Diglett's Cave (Travel through the cave)
+    ↓ (Exit Diglett's Cave to Route 2)
+Route 2 (Visit southern gatehouse)
+    ↓ (Talk to Professor Oak's Aide - must have caught 10 Pokémon)
+    ↓ (Receive Flash HM05 📜 - teach to Charmander if desired)
+    ↓ (Return through Diglett's Cave)
+    ↓ (Return to Cerulean City)
+    ↓ (Exit East)
+Route 9 (Travel East)
+    ↓ (Enter West)
+Route 10 (Travel South)
+    ↓ (Enter North)
+Rock Tunnel (Navigate through - Flash TM 📜 is optional but helpful)
+   [Note: Flash is a TM (TM28), not an HM in Gen 1. Charmander can learn it]
+    ↓ (Exit South)
+Route 10 (Southern section - Travel South)
+    ↓ (Enter North)
+Lavender Town (Pokémon Tower blocked by ghost, need Silph Scope or Poké Doll)
+    ↓ (Exit West)
+Route 8 (Travel West)
+    ↓ (Saffron City Guards block entry at checkpoint - Need Drink)
+    ↓ (Continue West)
+    ↓ (Enter East)
+Route 7 (Travel West)
+    ↓ (Enter East)
+Celadon City (Get Bike Voucher 🔑 from Pokémon Fan Club Chairman)
+    ↓ (Visit Celadon Department Store)
+    ↓ (Buy Poké Doll 🔑 for Pokémon Tower ghost bypass)
+    ↓ (Buy Drink 🔑 from vending machine)
+    ↓ (Exit South to visit Gym)
+Celadon City 🏆 (Rainbow Badge - Erika)
+    ↓ (Visit Game Corner in northwest)
+Celadon Game Corner → Rocket Hideout (Get Silph Scope 🔑)
+    ↓ (Return to Celadon City center)
+    ↓ (Exit East)
+Route 7 (Travel East)
+    ↓ (Enter West)
+Route 8 (Travel East)
+    ↓ (Enter West)
+Lavender Town (Head north to Pokémon Tower)
+    ↓ (Enter Pokémon Tower)
+Pokémon Tower (Use Poké Doll to bypass Marowak ghost, rescue Mr. Fuji)
+    ↓ (Exit Pokémon Tower)
+Lavender Town (Mr. Fuji gives Poké Flute 🔑)
+    ↓ (Exit West)
+Route 8 (Travel West)
+    ↓ (Enter East)
+Route 7 (Travel West)
+    ↓ (Enter East)
+Celadon City
+    ↓ (Visit house west of Celadon Mansion)
+Celadon City (Obtain Fly HM02 📜 from man in house)
+    ↓ (Teach Fly to Charizard if Charmander has evolved)
+    ↓ (Exit East)
+Route 7 (Travel East)
+    ↓ (Enter West)
+Route 8 (Travel East to checkpoint)
+    ↓
+[Two possible paths to Saffron City]
+    ↓
+Path A:                                           Path B:
+Give Drink 🔑 to Saffron City Guard          OR    Use guard bypass glitch*
+    ↓                                               ↓
+Enter Saffron City from Route 8                    Enter Saffron City
+
+* Guard Bypass Glitch: Enter the Route 8 gatehouse from Route 8. Position yourself 
+directly left of the guard. Save the game. Soft reset (A+B+Start+Select). When the 
+game reloads, you'll be standing on the right side of the guard, allowing access to 
+Saffron City without giving a Drink.
+
+Saffron City
+    ↓ (Head to Silph Co. building)
+Silph Co. (Navigate all floors, defeat Team Rocket and Giovanni, receive Lapras ⭐)
+    ↓ (Exit Silph Co.)
+Saffron City 🏆 (Marsh Badge - Sabrina)
+    ↓ (Exit to either Route 8 or Route 7 to head to Celadon City)
+    ↓ (Travel to Cerulean City via Route 7→Celadon→Route 16→Route 5→Cerulean)
+    ↓ (Enter Bike Shop)
+Cerulean City (Use Bike Voucher to get Bicycle 🔑)
+    ↓ (Return to Celadon City via Route 5→Underground Path→Route 6→Vermilion→Route 11→Diglett's Cave→Route 2→Pewter→Route 3→Mt. Moon→Route 4→Cerulean→Route 5→Route 7→Celadon)
+
+[Two possible paths to reach Fuchsia City - must use Poké Flute 🔑 to wake Snorlax]
+    ↓
+Path A:                                       Path B:
+Celadon City (Exit West)                     Celadon City (Head East to Saffron)
+    ↓                                            ↓
+Route 16 (Use Poké Flute on Snorlax)       Saffron City (Exit South)
+    ↓                                            ↓
+Route 16 (Travel West past Snorlax)        Route 6 (Travel South)
+    ↓                                            ↓
+Route 17 (Cycling Road - Travel South)     Vermilion City (Exit East)
+   [Bicycle 🔑 required]                        ↓
+    ↓                                            Route 11 (Travel East)
+Route 18 (Travel East)                           ↓
+    ↓                                            Route 12 (Use Poké Flute on Snorlax)
+Fuchsia City 🏆 (Enter West)                    ↓
+                                              Route 12 (Travel South)
+                                                  ↓
+                                              Route 13 (Travel East)
+                                                  ↓
+                                              Route 14 (Travel South)
+                                                  ↓
+                                              Route 15 (Travel West)
+                                                  ↓
+                                              Fuchsia City 🏆 (Enter East)
+    ↓ (Enter Safari Zone from north gate)
+Safari Zone (Navigate to center area to get Surf HM 📜 and Strength HM 📜)
+    ↓ (Exit Safari Zone)
+Fuchsia City
+    ↓ (Teach Surf to Lapras ⭐ - obtained in Silph Co.)
+    ↓ (Teach Strength to Lapras ⭐ or Charmeleon/Charizard)
+    ↓ (Exit South)
+Route 19 (Travel South, using Surf over water)
+    ↓ (Enter North)
+Route 20 (Travel East, using Surf over water)
+    ↓ (Enter West)
+Seafoam Islands (Navigate through, must use Strength to move boulders in some versions)
+    ↓ (Exit East)
+Route 20 (Travel East)
+    ↓ (Enter West)
+Cinnabar Island 🏆 (Volcano Badge - Blaine)
+    ↓ (Exit North)
+Route 21 (Travel North using Surf over water)
+    ↓ (Enter South)
+Pallet Town
+    ↓ (Exit North)
+Route 1 (Travel North)
+    ↓ (Enter South)
+Viridian City 🏆 (Earth Badge - Giovanni)
+    ↓ (Exit West)
+Route 22 (Travel West)
+    ↓ (Enter East)
+Route 23 (Travel North, show all 8 badges to pass guards)
+    ↓ (Enter South)
+Victory Road (Navigate through, use Strength to move boulders)
+    ↓ (Exit North)
+Indigo Plateau → Elite Four & Champion
+```
+
+## Elite Four Progression (Final Challenge)
+```
+Elite Four Lorelei (Ice/Water types)
+    ↓
+Elite Four Bruno (Fighting types)
+    ↓
+Elite Four Agatha (Ghost/Poison types)
+    ↓
+Elite Four Lance (Dragon types)
+    ↓
+Champion (Rival)
+```
+
+## Key Items Required for Progression
+1. **Oak's Parcel** 🔑: Required to get Pokédex and progress
+2. **S.S. Anne Ticket** 🔑: Required to board S.S. Anne and get Cut HM
+3. **Bike Voucher** 🔑: Required to get Bicycle (speeds travel significantly)
+4. **Bicycle** 🔑: Required to traverse Cycling Road (unless using glitches)
+5. **Silph Scope** 🔑: Required to properly navigate Pokémon Tower (unless using Poké Doll)
+6. **Poké Doll** 🔑: Alternative to Silph Scope for Marowak ghost (exploit)
+7. **Drink** 🔑: Required to enter Saffron City (unless using bypass glitch)
+8. **Poké Flute** 🔑: Required to wake Snorlax blocking Routes 12/16
+
+## HMs/TMs Required for Progression
+1. **Cut (HM01)** 📜: Required to clear bushes blocking paths
+2. **Fly (HM02)** 📜: Not technically required but extremely useful for navigation between cities
+3. **Surf (HM03)** 📜: Required to cross water (Routes 19, 20, 21)
+4. **Strength (HM04)** 📜: Required to move boulders in Victory Road
+5. **Flash (HM05)** 📜: Helpful but not mandatory for Rock Tunnel
+
+## Notes
+- This graph assumes Charmander as the starter Pokémon, which can learn Cut and Flash.
+- In Generation 1, Flash is HM05, not TM28 as in later generations.
+- Lapras (obtained in Silph Co.) is used for Surf and Strength.
+- The Poké Doll exploit bypasses the need to obtain the Silph Scope before rescuing Mr. Fuji.
+- There are two possible paths to Fuchsia City - either path requires waking Snorlax with the Poké Flute.
+- Snorlax blocks both Routes 12 and 16 until woken with the Poké Flute.
+- The Bicycle significantly speeds up travel but is mandatory for Cycling Road (Route 17).
+- To get into Saffron City, you need to either give a Drink to the guard or use the bypass glitch.
+- All 8 gym badges are required to pass the guards on Route 23 to Victory Road.
+- Strength is mandatory for moving boulders in Victory Road.
+
+## Notes
+- This graph assumes Charmander as the starter Pokémon, which can learn Cut and Flash.
+- In Gen 1, Flash is TM28, not an HM as in later generations.
+- Lapras (obtained in Silph Co.) is used for Surf and Strength.
+- The Poké Doll exploit bypasses the need to obtain the Silph Scope before rescuing Mr. Fuji.
+- There are two possible paths to Fuchsia City - either path requires waking Snorlax with the Poké Flute.
+- Snorlax blocks both Routes 12 and 16 until woken with the Poké Flute.
+- The Bicycle significantly speeds up travel but is mandatory for Cycling Road (Route 17).
+- To get into Saffron City, you need to either give a Drink to the guard or use the bypass glitch.
+- All 8 gym badges are required to pass the guards on Route 23 to Victory Road.
+- Strength is mandatory for moving boulders in Victory Road.

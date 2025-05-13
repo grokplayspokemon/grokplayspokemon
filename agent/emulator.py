@@ -1,5 +1,7 @@
 # emulator.py
 import logging
+
+from game_data import ram_map
 logger = logging.getLogger(__name__)
 
 import io
@@ -22,6 +24,7 @@ from pyboy import PyBoy
 from game_data.constants import WARP_DICT, MAP_ID_REF, MAP_DICT
 from config import SAVE_STATE_DIR
 from game_data.global_map import GLOBAL_MAP_SHAPE, local_to_global
+from agent.memory_reader import *
 
 # Event tracking constants
 EVENT_FLAGS_START = 0xD747
@@ -65,7 +68,8 @@ class Emulator:
                 self.pyboy = PyBoy(rom_path, sound=sound, cgb=False, symbols="pokered.sym")
 
         self.reader = PokemonRedReader(self.pyboy.memory) # Initialize reader once
-
+        self.game = Game(self.pyboy)
+        
         self.seen_npcs: Set[Tuple[int, int, int]] = set()  # (map_id, grid_row, grid_col)
         self._npc_track_distance: int | None = None  # default: track all
 
@@ -293,6 +297,11 @@ class Emulator:
             self.step_counter += 1
             logger.info(f"press_buttons():Step counter: {self.step_counter}")
 
+            # Validate for active dialog: break if dialog active
+            if self.get_active_dialog():
+                logger.info("press_buttons(): Active dialog detected, breaking further button presses")
+                break
+
             # -------- manual-input tracking -----------
             cur = self.get_standard_coords()
             if cur and cur != (0,0,0):
@@ -334,6 +343,34 @@ class Emulator:
         reader = PokemonRedReader(self.pyboy.memory)
         dialog = reader.read_dialog()
         return dialog if dialog else None
+    
+    def get_memory_value(self, addr):
+        if isinstance(addr, str):
+            _, addr = self.pyboy.symbol_lookup(addr)
+        return self.pyboy.memory[addr]
+    
+    def is_in_battle(self) -> bool:
+        """
+        Returns True if the player is in a battle.
+        """
+        # breakpoint()
+        # print(f"emulator.py: battle type: {self.game.battle.get_battle_type()}")
+        # print(f"emulator.py: self.game.battle.in_battle: {self.game.battle.in_battle}")
+        # print(f"emulator.py custom battle check: {self.get_memory_value(0xD057)}")
+        # print(f"emulator.py music_trainerbattle: {self.get_memory_value('Music_TrainerBattle')}")
+        # print(f"emulator.py music_wildbattle: {self.get_memory_value('Music_WildBattle')}")
+        # print(f"emulator.py music_defeatedwildmon: {self.get_memory_value('Music_DefeatedWildMon')}")
+        # print(f"emulator.py music_defeatedtrainer: {self.get_memory_value('Music_DefeatedTrainer')}")
+        # print(f"emulator.py self.game.battle.is_in_pre_battle(): {self.game.battle.is_in_pre_battle()}")
+        # D057
+        # 0 not in battle
+        # 1 wild battle
+        # 2 trainer battle
+        # -1 lost battle
+        if self.get_memory_value(0xD057) > 0:
+            return True
+        else:
+            return False
 
     def get_location(self):
         """
@@ -506,15 +543,19 @@ class Emulator:
                     glob_x = glob_x_p + rel_grid_col
                     
                     ent = ent_id = None
-                    if (c, r) in warp_cells or (c, r) in approach_cells:
+                    # Label the player's current grid cell explicitly
+                    if r == pr and c == pc:
+                        ent = "Player"
+                    elif (c, r) in warp_cells or (c, r) in approach_cells:
                         ent = "Warp"
-                    elif (c,r) in npc_cells:
+                    elif (c, r) in npc_cells:
                         ent = "NPC"
-                    elif (c,r) in sign_cells:
+                    elif (c, r) in sign_cells:
                         ent = "Sign"
-
+                    # Override walkability: NPCs block movement
+                    walkable_flag = bool(ds9x10[r, c] > 0.5) and ent != "NPC"
                     row.append({"x": glob_x, "y": glob_y, "global_x": glob_x, "global_y": glob_y,
-                                "walkable": bool(ds9x10[r, c] > 0.5),
+                                "walkable": walkable_flag,
                                 "entity": ent, "entity_id": ent_id})
                 grid.append(row)
 
@@ -618,7 +659,7 @@ class Emulator:
                 # Log a warning if unexpected data is found
                 logger.warning(f"Skipping sprite_info with invalid grid coordinates: {sprite_info}");
 
-        logger.debug(f"get_npcs_in_range returned {len(npcs)} items: {npcs}")
+        # logger.debug(f"get_npcs_in_range returned {len(npcs)} items: {npcs}")
         return npcs
 
     def update_seen_npcs(self, max_distance: int | None = None) -> int:
@@ -635,9 +676,9 @@ class Emulator:
             # Explicitly get NPCs in the dictionary format for the 9x10 grid
             # and iterate over the detailed dictionaries
             npc_list = self.get_npcs_in_range(max_distance, grid_type='9x10')
-            logger.debug(f"update_seen_npcs received {len(npc_list)} items from get_npcs_in_range.")
+            # logger.debug(f"update_seen_npcs received {len(npc_list)} items from get_npcs_in_range.")
             for i, npc_data in enumerate(npc_list):
-                logger.debug(f"Processing item {i} in update_seen_npcs: type={type(npc_data)}, data={npc_data}")
+                # logger.debug(f"Processing item {i} in update_seen_npcs: type={type(npc_data)}, data={npc_data}")
                 # Ensure npc_data is a dictionary before processing
                 if not isinstance(npc_data, dict):
                     logger.warning(f"Skipping unexpected data format in get_npcs_in_range: {npc_data}")
@@ -705,8 +746,20 @@ class Emulator:
         """
         reader = PokemonRedReader(self.pyboy.memory)
         x_loc, y_loc = reader.read_coordinates() # reader likely returns (x, y)
-        return (y_loc, x_loc, self.read_m("wCurMap")) # Return as (y, x, map_id)
-    
+        return (y_loc, x_loc, self.read_m("wCurMap")) # Return as (y, x), map_id
+
+    def get_global_coords(self):
+        """
+        Returns the player's current global coordinates as (global_x, global_y).
+        """
+        coords = self.get_standard_coords()
+        if coords is None:
+            return 0, 0
+        y_loc, x_loc, map_id = coords
+        # local_to_global returns (global_y, global_x)
+        gy, gx = local_to_global(y_loc, x_loc, map_id)
+        return gx, gy
+
     def update_seen_coords(self):
         """Updates the dictionary tracking visited coordinates per tileset."""
         try:
@@ -791,10 +844,10 @@ class Emulator:
                     })
 
         # Debugging output
-        if debug:
-            print(f"DEBUG: On-screen sprites ({len(on_screen_sprites)}):")
-            for npc_info in on_screen_sprites:
-                print(f"  Sprite Index: {npc_info['sprite_index']}, Map ID: {npc_info['map_id']}, Grid Pos: ({npc_info['grid_row']}, {npc_info['grid_col']})")
+        # if debug:
+            # print(f"DEBUG: On-screen sprites ({len(on_screen_sprites)}):")
+            # for npc_info in on_screen_sprites:
+                # print(f"  Sprite Index: {npc_info['sprite_index']}, Map ID: {npc_info['map_id']}, Grid Pos: ({npc_info['grid_row']}, {npc_info['grid_col']})")
 
         return on_screen_sprites
 
@@ -841,30 +894,27 @@ class Emulator:
         # based on the player's current local (x,y,map_id) and grid position.
         
         # *** THIS CONVERSION LOGIC NEEDS REVIEW AND CORRECTION BASED ON ACTUAL GAME MECHANICS ***
-        # As a temporary measure, let's try to find the grid cell whose *global* coordinates are closest to the target.
-        # This requires iterating through all 9x10 grid cells and calculating their global coordinates.
-        min_dist = float('inf')
-        target_grid_node = None
-
-        for r_grid in range(9):
-             for c_grid in range(10):
-                  cell_data = collision_map_data["collision_map"][r_grid][c_grid]
-                  cell_glob_x = cell_data.get("global_x")
-                  cell_glob_y = cell_data.get("global_y")
-
-                  if cell_glob_x is not None and cell_glob_y is not None:
-                       dist = abs(cell_glob_y - target_glob_y) + abs(cell_glob_x - target_glob_x)
-                       if dist < min_dist:
-                            min_dist = dist
-                            target_grid_node = (r_grid, c_grid)
-
-        if target_grid_node is None:
-             logger.error(f"find_path: Could not find a corresponding grid cell for global target ({target_glob_y}, {target_glob_x})")
-             return f"Failure: Target global coordinates ({target_glob_y}, {target_glob_x}) are not visible or accessible in the current view.", None
-
-        end_node = target_grid_node # Use the found grid node as the end node
-
-        logger.info(f"find_path: Converted global target ({target_glob_y}, {target_glob_x}) to grid target ({end_node[0]}, {end_node[1]})")
+        # Replace placeholder conversion with direct mapping based on player's position
+        pr, pc = start_node
+        rel_grid_row = target_glob_y - glob_y_p
+        rel_grid_col = target_glob_x - glob_x_p
+        end_row = pr + rel_grid_row
+        end_col = pc + rel_grid_col
+        end_node = (end_row, end_col)
+        logger.info(f"find_path: Converted global target ({target_glob_y}, {target_glob_x}) to grid target ({end_row}, {end_col})")
+        if not (0 <= end_row < 9 and 0 <= end_col < 10):
+            return f"Invalid target coordinates (computed grid target {end_node} out of bounds)", None
+        
+        # Valid end node against collision map and NPC blocking
+        cell = collision_map_data["collision_map"][end_row][end_col]
+        if not cell.get("walkable", False) or cell.get("entity") == "NPC":
+            logger.info(f"find_path: collision_map check: Target cell walkable={cell.get('walkable')} entity={cell.get('entity')}")
+            return f"Target ({end_node}) is blocked by a wall or NPC.", None
+        
+        # Debug input values for A* pathfinding
+        if end_node == (4, 4):
+            return "Cannot navigate to yourself.", None
+        logger.debug(f"find_path: start_node={start_node}, player_global=({glob_y_p},{glob_x_p}), target_global=({target_glob_y},{target_glob_x}), end_node={end_node}")
 
         # Validate target position (on 9x10 grid)
         if not (0 <= end_node[0] < 9 and 0 <= end_node[1] < 10):
@@ -876,6 +926,8 @@ class Emulator:
         came_from = {} # node -> previous_node
         g_score = {start_node: 0} # node -> cost from start
         f_score = {start_node: heuristic(start_node, end_node)} # node -> g_score + heuristic
+        # Debug A* initialization state
+        logger.debug(f"find_path init A*: start_node={start_node}, end_node={end_node}, g_score={g_score}, f_score={f_score}")
 
         closest_point = start_node
         min_heuristic = heuristic(start_node, end_node)
@@ -883,6 +935,7 @@ class Emulator:
 
         while open_set:
             current_f, current_node = heapq.heappop(open_set)
+            logger.debug(f"find_path A* loop: pop current_node={current_node}, f={current_f}, g={g_score.get(current_node)}")
 
             # Optimization: If we pop a node already processed with a lower f_score, skip
             if current_f > f_score.get(current_node, float('inf')):
@@ -900,46 +953,54 @@ class Emulator:
                  break # Exit loop, path found
 
             # Explore neighbors (up, down, left, right on 9x10 grid)
-            for dr, dc, move in [( -1, 0, "up"), ( 1, 0, "down"), ( 0,-1, "left"), ( 0, 1, "right")]:
+            for dr, dc, move in [(-1, 0, "up"), (1, 0, "down"), (0, -1, "left"), (0, 1, "right")]:
+                # Debug neighbor evaluation start
+                logger.debug(f"find_path: evaluating neighbor from {current_node} move={move} -> ({current_node[0]+dr},{current_node[1]+dc})")
                 neighbor_node = (current_node[0] + dr, current_node[1] + dc)
                 neighbor_r, neighbor_c = neighbor_node
 
-                # 1. Check Grid Bounds (9x10)
+                # Check grid bounds
+                logger.debug(f"find_path: neighbor {neighbor_node} in bounds? {0 <= neighbor_r < 9 and 0 <= neighbor_c < 10}")
                 if not (0 <= neighbor_r < 9 and 0 <= neighbor_c < 10):
                     continue
 
-                # --- Check Walkability (find_path's internal logic) ---
-                # a. Basic Terrain Collision (downsampled)
-                if collision_map_data["collision_map"][neighbor_r][neighbor_c]["walkable"]:
-                    # Allow moving onto a walkable tile
-                    tentative_g_score = g_score.get(current_node, float('inf')) + 1
-
-                    if tentative_g_score < g_score.get(neighbor_node, float('inf')):
-                        # Found a better path to neighbor
+                # Check walkability and block NPC-occupied cells
+                cell = collision_map_data["collision_map"][neighbor_r][neighbor_c]
+                walkable_flag = cell.get("walkable", False)
+                entity = cell.get("entity")
+                logger.debug(f"find_path: neighbor {neighbor_node} walkable? {walkable_flag} entity={entity}")
+                walkable = walkable_flag and entity != "NPC"
+                if walkable:
+                    tentative = g_score.get(current_node, float('inf')) + 1
+                    logger.debug(f"find_path: tentative g_score for {neighbor_node} = {tentative} (current g_score={g_score.get(current_node)})")
+                    if tentative < g_score.get(neighbor_node, float('inf')):
+                        logger.debug(f"find_path: updating path to {neighbor_node}, old g={g_score.get(neighbor_node)}, new g={tentative}")
                         came_from[neighbor_node] = current_node
-                        g_score[neighbor_node] = tentative_g_score
-                        f_score[neighbor_node] = tentative_g_score + heuristic(neighbor_node, end_node)
+                        g_score[neighbor_node] = tentative
+                        f_score[neighbor_node] = tentative + heuristic(neighbor_node, end_node)
                         heapq.heappush(open_set, (f_score[neighbor_node], neighbor_node))
                 else:
-                    # Blocked tile, check if it's the final target
+                    # Skip blocked neighbors unless it is the end_node (handled later)
                     if neighbor_node != end_node:
                         continue
 
-                # --- End Walkability Check ---
-
+        # Log A* completion status
+        logger.debug(f"find_path A* finished: found_path={found_path}, closest_point={closest_point}")
         # --- Path Reconstruction & Status ---
         if found_path:
             # Reconstruct path from end_node
             path = []
             temp = end_node
             while temp in came_from:
-                prev = came_from[temp]
-                if prev[0] < temp[0]: path.append("down")
-                elif prev[0] > temp[0]: path.append("up")
-                elif prev[1] < temp[1]: path.append("right")
-                else: path.append("left")
-                temp = prev
+                  prev = came_from[temp]
+                  if prev[0] < temp[0]: path.append("down")
+                  elif prev[0] > temp[0]: path.append("up")
+                  elif prev[1] < temp[1]: path.append("right")
+                  else: path.append("left")
+                  temp = prev
             path.reverse()
+            # Log reconstructed path
+            logger.debug(f"find_path: path reconstructed={path}")
 
             # Check if target was a wall/sprite (potentially intended)
             is_target_wall = collision_map_data["collision_map"][end_node[0]][end_node[1]]["walkable"] == False
@@ -952,7 +1013,7 @@ class Emulator:
                  )
             else:
                  return (f"Success: Found path to target at ({end_node[0]}, {end_node[1]}).", path)
-
+         
         else:
             # Path not found to target, try path to closest reachable point
             if closest_point != start_node:
@@ -1014,6 +1075,7 @@ class Emulator:
             
     def step(self):
         """Advance one frame and update all trackers (auto‑loop mode)."""
+        
         try:
             prev = self.prev_coordinates
             self.tick(24)                                # one frame
@@ -1297,8 +1359,8 @@ class Emulator:
             line = []
             for c, cell in enumerate(row):
                 if r == pr and c == pc:
-                    sym = arrow_map.get(player_dir, "?")
-                    line.append(sym)
+                    # Represent the player position with 'P'
+                    line.append('P')
                 elif cell.get("entity") == "NPC":
                     line.append("N")
                 elif cell.get("entity") == "Warp":

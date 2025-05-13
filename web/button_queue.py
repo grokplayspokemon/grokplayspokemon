@@ -26,6 +26,16 @@ async def process_next_button(source, agent, send_game_updates):
     # DEBUG: log retrieval
     logging.getLogger(__name__).info(f"process_next_button: dequeueing button {button} from {source}")
 
+    # If a dialog/menu is active and this is a directional press, skip it
+    try:
+        # Skip directional inputs only during non-battle dialogs/menus
+        if agent.emulator.get_active_dialog() and not agent.emulator.is_in_battle() and button in ["up", "down", "left", "right"]:
+            logging.getLogger(__name__).info(f"process_next_button: Skipping directional button '{button}' during non-battle dialog")
+            queue.task_done()
+            return
+    except Exception as e:
+        logging.getLogger(__name__).error(f"process_next_button: Error checking dialog state: {e}")
+
     # Actually press via the original
     t_orig_press([button], True)
 

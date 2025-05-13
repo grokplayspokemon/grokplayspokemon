@@ -48,7 +48,7 @@ AVAILABLE_TOOLS = [
     {
         "name": "navigate_to",
         "type": "function",
-        "description": "Automatically navigate to a position on the map grid. Use only global coordinates, which are displayed for you, and follow a (glob_y, glob_x) convention.",
+        "description": "Follow predefined navigation path bounds from nav.py; stays within path or returns to the nearest valid point if off path.",
         "input_schema": navigate_to_schema,
     },
     # {

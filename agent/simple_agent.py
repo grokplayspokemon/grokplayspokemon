@@ -15,7 +15,7 @@ import time
 import random
 from pathlib import Path
 
-from agent.prompts import SYSTEM_PROMPT, SUMMARY_PROMPT, BATTLE_SYSTEM_PROMPT, DIALOG_SYSTEM_PROMPT, OVERWORLD_NAVIGATION_FAILURE_PROMPT
+from agent.prompts import SYSTEM_PROMPT, SUMMARY_PROMPT, BATTLE_SYSTEM_PROMPT, DIALOG_SYSTEM_PROMPT, OVERWORLD_NAVIGATION_PROMPT, OVERWORLD_NAVIGATION_FAILURE_PROMPT, ASK_FRIEND_SYSTEM_PROMPT
 from agent.tools import AVAILABLE_TOOLS
 from agent.emulator import Emulator
 from game_data.nav import Nav
@@ -25,6 +25,7 @@ from bin.red_pyboy_manager import PyBoyManager
 from openai import OpenAI
 import game_data.ram_map_leanke as ram_map
 from game_data.global_map import MAP_DATA, MAP_ROW_OFFSET, MAP_COL_OFFSET
+from agent.path_planner import planner
 
        
 def build_xai_toolspec():
@@ -152,6 +153,11 @@ class SimpleAgent:
         self.last_move_list: list[str] = []
         self.last_chosen_move_index: int | None = None
         self.last_chosen_move_name: str | None = None
+        self.last_battle_dialog = None
+        self.battle_just_finished = False
+        # Track battle turn count and history
+        self.battle_turn_count = 0
+        self.battle_turn_history: list[str] = []
         
         # New: Menu and stuck detection tracking
         self.last_location = None
@@ -299,7 +305,7 @@ class SimpleAgent:
         # logger.debug(f"[Tool Decision] Selected {tool_name} based on {selection_reason}")
 
         # Check for battles first - highest priority
-        if self.might_be_battle() and self.is_in_non_navigation_state():
+        if self.emulator.is_in_battle() and self.is_in_non_navigation_state():
             pass
         #     # If in battle, prioritize handle_battle
         #     logger.info("[Tool Selection] Battle detected: using handle_battle tool")
@@ -557,6 +563,59 @@ class SimpleAgent:
        
         return "\n".join(state_parts)
     
+    def format_battle_state(self) -> str:
+        """
+        Format battle-specific state with explicit dialog capture for LLM processing.
+        This ensures the battle dialog text is prominently included in the prompt.
+        """
+        state_parts = ["## CURRENT BATTLE STATE ##"]
+        
+        # CRITICAL: Capture and prominently display the current dialog text
+        if self.battle_just_finished:
+            state_parts.append("BATTLE JUST FINISHED. YOU ARE NOW IN THE OVERWORLD.")
+            return "\n".join(state_parts)
+        
+        dialog = self.emulator.get_active_dialog()
+        if dialog:
+            dialog_text = dialog.replace('\n', ' ')[:500] if dialog else ""
+            state_parts.append(f"BATTLE DIALOG: {dialog_text}")
+        else:
+            state_parts.append("BATTLE DIALOG: None visible")
+        
+        # Add standard game state information
+        state_parts.append("\nBATTLE STATUS:")
+        state_parts.append(f"- Current Location: {self.emulator.reader.read_location()}")
+        
+        # Add party information
+        try:
+            party_data = self.emulator.reader.read_party_pokemon()
+            if party_data and len(party_data) > 0:
+                active_pokemon = party_data[0]  # First Pokemon is active
+                state_parts.append(f"- Active Pokémon: {active_pokemon.species_name}, Level {active_pokemon.level}")
+                state_parts.append(f"- HP: {active_pokemon.current_hp}/{active_pokemon.max_hp}")
+                
+                # Display available moves with PP
+                state_parts.append("\nAVAILABLE MOVES:")
+                for i, move_name in enumerate(active_pokemon.moves):
+                    if i < len(active_pokemon.move_pp):
+                        pp = active_pokemon.move_pp[i]
+                        max_pp = getattr(active_pokemon, 'move_max_pp', [25, 25, 25, 25])[i] if hasattr(active_pokemon, 'move_max_pp') else 25
+                        state_parts.append(f"- {move_name}: {pp}/{max_pp} PP")
+                    else:
+                        state_parts.append(f"- {move_name}: PP unknown")
+        except Exception as e:
+            state_parts.append(f"- Error reading party data: {e}")
+        
+        # Include cursor position information if available
+        try:
+            if dialog and "►" in dialog:
+                cursor_line = next((line for line in dialog.split('\n') if "►" in line), "")
+                state_parts.append(f"\nCURSOR POSITION: {cursor_line}")
+        except Exception:
+            pass
+            
+        return "\n".join(state_parts)
+    
     def format_game_state(self) -> str:
         """
         Format the current game state in a way that's optimized for LLM processing.
@@ -709,37 +768,6 @@ class SimpleAgent:
             
         # For now, just check dialog with enhanced detection
         return False
-        
-    def might_be_battle(self):
-        """Determine if the agent is currently in a battle using the game state."""
-        # Use the definitive game state variable to check for battle status.
-        return self.game.battle._in_battle_state()
-        
-    # def navigate_to_move(self, current_index, target_index):
-    #     """Execute precise cursor movement with complete state rendering"""
-    #     logger.info(f"[BattleAI] Cursor at position {current_index}, navigating to target position {target_index}")
-        
-    #     # Determine navigation path
-    #     steps = target_index - current_index
-        
-    #     if steps == 0:
-    #         return  # Already at target position
-        
-    #     # Execute movement with frame rendering
-    #     button = "down" if steps > 0 else "up"
-    #     for i in range(abs(steps)):
-    #         # Press directional button
-    #         current_position = current_index + (i if steps > 0 else -i)
-    #         target_position = current_position + (1 if steps > 0 else -1)
-    #         logger.info(f"[BattleAI] Moving cursor {button.upper()} from position {current_position} to {target_position}")
-            
-    #         # Execute button press with complete state synchronization
-    #         self.emulator.press_buttons([button], False)  # Set wait=False for controlled timing
-    #         self.emulator.tick(10)  # Short tick for button registration
-    #         self.emulator.step()   # CRITICAL: Complete full emulator step
-            
-    #         # Ensure frame rendering completes
-    #         time.sleep(0.3)
     
     def update_npc_interaction_reward(self, npc_id, map_id):
         """Track NPC interactions and calculate penalties."""
@@ -879,93 +907,48 @@ class SimpleAgent:
         dialog = self.emulator.get_active_dialog()
         # Normalize dialog text for prompt
         dialog_text = dialog.replace('\n', ' ')[:500] if dialog else ""
-        in_battle = self.might_be_battle()
+        in_battle = self.emulator.is_in_battle()
         
         # Provide grok with current state
         game_state = self.game.process_game_states()
         logger.info(f"Game state: {game_state}")
         
         # CRITICAL: maintain battle state across the entire encounter
-        # If we were in battle previously or critical hit appears in dialog, we're still in battle
-        if (self.was_in_battle or 
-            (dialog and any(x in dialog.lower() for x in ["critical hit", "super effective", "not very effective", "used", "fainted"]))):
-            in_battle = True
-            logger.info("Continuing battle state based on previous state or battle message")
-        
+
         # Check if a battle just finished
-        battle_just_finished = self.was_in_battle and not in_battle
+        self.battle_just_finished = self.was_in_battle and not in_battle
         # Determine dialog state transitions
         in_dialog = dialog is not None and not in_battle
         dialog_just_started = in_dialog and not self.was_in_dialog
         dialog_just_finished = self.was_in_dialog and not in_dialog
-        
-        # Switch message history for battle, dialog, and navigation
+
         if in_battle:
-            # Initialize battle history on entry
+            # New battle starting: reset turn count and history
             if not self.was_in_battle:
-                # Setup battle system prompt
-                self.battle_prompt_history = [
-                    {"role": "system", "content": [{"type":"text","text": BATTLE_SYSTEM_PROMPT.strip()}]}
-                ]
-                # Build battle details for LLM
-                try:
-                    # Player stats
-                    party_data = self.red_reader.memory.reader.read_party_pokemon()
-                    print(f"party_data: {party_data}")
-                    if party_data:
-                        player = party_data[0]
-                        player_hp = player.current_hp
-                        player_max = player.max_hp
-                        moves = player.moves
-                    else:
-                        player_hp = 0
-                        player_max = 0
-                        moves = []
-                    # Enemy stats
-                    enemy_info = self.game.battle.get_enemy_fighting_pokemon_dict()
-                    enemy_hp = enemy_info['hp_avail']
-                    enemy_max = enemy_info['hp_total']
-                    t1 = enemy_info.get('type_1')
-                    t2 = enemy_info.get('type_2')
-                    primary = PokemonType(t1)
-                    secondary = PokemonType(t2) if t2 not in (None, 0) else None
-                    types_str = primary.name + (f"/{secondary.name}" if secondary else "")
-                    details = (
-                        f"Battle Details:\n"
-                        f"Player HP: {player_hp}/{player_max}\n"
-                        f"Enemy HP: {enemy_hp}/{enemy_max} ({types_str})\n"
-                        f"Available moves: {', '.join(moves)}"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to gather battle details: {e}", exc_info=True)
-                    details = "Battle Details unavailable."
-                    
-                try:
-                    enemy_types = self.red_reader.memory.reader.read_enemy_current_pokemon_types()
-                    details += f"\nEnemy types: {enemy_types}"
-                except Exception as e:
-                    logger.error(f"Failed to gather enemy types: {e}", exc_info=True)
-                    details += "\nEnemy types unavailable."
-
-                self.battle_prompt_history.append({"role":"user","content":[{"type":"text","text": details} ]})
-            # Use battle history for LLM
-            self.message_history = self.battle_prompt_history
-            # Log dialog/battle state when in battle
-            if dialog:
-                dialog_text = dialog.replace('\\n', ' ')[:500]
-                logger.info(f"Dialog or battle active: {dialog_text}")
-                self.last_message = f"Dialog: {dialog_text}"
-                # Append the dialog to battle history
-                self.message_history.append({"role": "user", "content": [{"type": "text", "text": dialog_text}]})
-
-            # Append current game state to battle history
+                self.battle_turn_count = 0
+                self.battle_turn_history = []
+            # Reset message history to only battle prompt and current state
             try:
-                state_text = self.format_game_state()
-                self.message_history.append({"role": "user", "content": [{"type": "text", "text": state_text}]})
+                # CRITICAL CHANGE: Use battle-specific formatter that captures dialog text
+                battle_state_text = self.format_battle_state()
             except Exception as e:
-                logger.error(f"Failed to append game state to battle history: {e}", exc_info=True)
-
-        elif battle_just_finished:
+                logger.error(f"Error formatting battle state: {e}")
+                battle_state_text = f"IN BATTLE at {self.emulator.reader.read_location()}"
+                
+            # Initialize battle message history with explicit dialog capture
+            self.message_history = [
+                {"role":"system","content":[{"type":"text","text": BATTLE_SYSTEM_PROMPT.strip()}]},
+                {"role":"user","content":[{"type":"text","text": battle_state_text}]}  
+            ]
+            current_dialog = self.emulator.get_active_dialog()
+            if current_dialog:
+                self.last_battle_dialog = current_dialog
+                self.message_history.append({"role":"user","content":[{"type":"text","text": current_dialog}]})
+            # Include last battle moves history (up to 10 turns)
+            if self.battle_turn_history:
+                history_text = f"Previous {len(self.battle_turn_history)} turns: " + ", ".join(self.battle_turn_history)
+                self.message_history.append({"role":"user","content":[{"type":"text","text": history_text}]})
+        elif self.battle_just_finished:
             # Battle just ended, reset to normal system prompt and reset history with current game state
             system_prompt = self._get_system_prompt()
             # Immediately add current game state instead of empty message
@@ -975,7 +958,12 @@ class SimpleAgent:
                 {"role":"user","content":[{"type":"text","text": state_text}]}  # Reset history with actual game state
             ]
             self.battle_prompt_history = None
-            logger.info("Battle ended, resetting message history to overworld prompt.")
+            self.last_battle_dialog = None
+            self.battle_just_finished = False
+            # Reset battle turn tracking after battle end
+            self.battle_turn_count = 0
+            self.battle_turn_history = []
+            logger.info("Battle just finished, resetting message history to overworld prompt.")
 
         elif in_dialog:
             # Entering or continuing a non-battle dialog; reset history to dialog prompt
@@ -1061,92 +1049,112 @@ class SimpleAgent:
             return
 
         try:
-            # Determine system prompt based on unstucking mode and failure threshold
+            # Determine system prompt based on unstucking mode, battle/dialog, and critical path
             if self.unstucking_mode or (not in_battle and not in_dialog and self.consecutive_nav_failures >= self.failure_threshold):
                 self.system_prompt = OVERWORLD_NAVIGATION_FAILURE_PROMPT
+            elif in_battle:
+                self.system_prompt = BATTLE_SYSTEM_PROMPT
+            elif in_dialog:
+                self.system_prompt = DIALOG_SYSTEM_PROMPT
+            elif not in_battle and not in_dialog:
+                # Overworld navigation: include next critical path step
+                try:
+                    current_loc = self.emulator.reader.read_location()
+                    _, action, next_zone = planner.get_next_step(current_loc)
+                    logger.warning(f"simple_agent.py: step(): path planner: Next action: {action} -> {next_zone}")
+                except Exception:
+                    action, next_zone = (None, None)
+                self.system_prompt = OVERWORLD_NAVIGATION_PROMPT.format(
+                    action=action or 'explore',
+                    next_zone=next_zone or 'unknown'
+                )
             else:
+                # Fallback to default system prompt
                 self.system_prompt = SYSTEM_PROMPT
+            # Inject the updated system prompt
+            self.message_history.insert(0, {"role":"system","content":[{"type":"text","text": self.system_prompt.strip()}]})
             # Sanitize history to remove duplicates and enforce structure
             self.sanitize_message_history()
             # Append available walkable global coordinates for Grok to choose from
-            try:
-                # Gather all walkable screen cells and calculate travel options
-                collision_data = self.emulator.get_collision_map()
-                grid = collision_data.get("collision_map", [])
-                pos = collision_data.get("grid_position", {})
-                pr, pc = pos.get("row"), pos.get("col")
-                # Barrier detection: restrict moves beyond direct neighbor blockers on current screen
-                allow_up = pr > 0 and grid[pr-1][pc].get("walkable")
-                allow_down = pr < len(grid)-1 and grid[pr+1][pc].get("walkable")
-                allow_left = pc > 0 and grid[pr][pc-1].get("walkable")
-                allow_right = pc < len(grid[0])-1 and grid[pr][pc+1].get("walkable")
-                current = self.emulator.get_standard_coords()  # (y, x, map_id)
-                available = []
-                if current and pr is not None and pc is not None:
-                    y0, x0, _ = current
-                    for r, row in enumerate(grid):
-                        for c, cell in enumerate(row):
-                            if cell.get("walkable"):
-                                dr = r - pr
-                                dc = c - pc
-                                # Exclude cells blocked by continuous wall barriers on current screen
-                                if dr < 0 and not allow_up:
-                                    continue
-                                if dr > 0 and not allow_down:
-                                    continue
-                                if dc < 0 and not allow_left:
-                                    continue
-                                if dc > 0 and not allow_right:
-                                    continue
-                                local_y = y0 + dr
-                                local_x = x0 + dc
-                                glob_y = cell.get("global_y")
-                                glob_x = cell.get("global_x")
-                                moves = abs(dr) + abs(dc)
-                                buttons = []
-                                if dr < 0:
-                                    buttons += ["up"] * abs(dr)
-                                elif dr > 0:
-                                    buttons += ["down"] * dr
-                                if dc < 0:
-                                    buttons += ["left"] * abs(dc)
-                                elif dc > 0:
-                                    buttons += ["right"] * dc
-                                available.append({
-                                    "local": [local_y, local_x],
-                                    "global": [glob_y, glob_x],
-                                    "moves": moves,
-                                    "buttons": buttons
-                                })
-                # Prescreen navigation targets: only include ones with a valid A* path
-                filtered_available = []
-                for option in available:
-                    gy, gx = option.get("global", [None, None])
-                    # Attempt pathfinding to this target
-                    status, path = self.emulator.find_path(gy, gx)
-                    # Include only if a non-empty path was found
-                    if path:
-                        filtered_available.append(option)
-                # Summary of filtering
-                filtered_out = len(available) - len(filtered_available)
-                logger.warning(f"paths precomputed: {filtered_out} tiles filtered")
-                # Send summary and valid options to Grok
-                self.message_history.append({
-                    "role": "user",
-                    "content": [{"type": "text", "text": json.dumps({
-                        "valid_paths": len(filtered_available),
-                        "invalid_paths": filtered_out,
-                        "consecutive_failures": self.consecutive_nav_failures,
-                        "available_moves": filtered_available
-                    })}]
-                })
-                # Notify Grok of consecutive navigation failures
-                self.message_history.append({
-                    "role": "user",
-                    "content": [{"type": "text", "text": f"You have failed navigate_to {self.consecutive_nav_failures} consecutive times."}]
-                })
-            except Exception as e:
-                logger.error(f"Failed to append available moves for LLM: {e}")
+            if not in_battle:
+                try:
+                    # Gather all walkable screen cells and calculate travel options
+                    collision_data = self.emulator.get_collision_map()
+                    grid = collision_data.get("collision_map", [])
+                    pos = collision_data.get("grid_position", {})
+                    pr, pc = pos.get("row"), pos.get("col")
+                    # Barrier detection: restrict moves beyond direct neighbor blockers on current screen
+                    allow_up = pr > 0 and grid[pr-1][pc].get("walkable")
+                    allow_down = pr < len(grid)-1 and grid[pr+1][pc].get("walkable")
+                    allow_left = pc > 0 and grid[pr][pc-1].get("walkable")
+                    allow_right = pc < len(grid[0])-1 and grid[pr][pc+1].get("walkable")
+                    current = self.emulator.get_standard_coords()  # (y, x, map_id)
+                    available = []
+                    if current and pr is not None and pc is not None:
+                        y0, x0, _ = current
+                        for r, row in enumerate(grid):
+                            for c, cell in enumerate(row):
+                                if cell.get("walkable"):
+                                    dr = r - pr
+                                    dc = c - pc
+                                    # Exclude cells blocked by continuous wall barriers on current screen
+                                    if dr < 0 and not allow_up:
+                                        continue
+                                    if dr > 0 and not allow_down:
+                                        continue
+                                    if dc < 0 and not allow_left:
+                                        continue
+                                    if dc > 0 and not allow_right:
+                                        continue
+                                    local_y = y0 + dr
+                                    local_x = x0 + dc
+                                    glob_y = cell.get("global_y")
+                                    glob_x = cell.get("global_x")
+                                    moves = abs(dr) + abs(dc)
+                                    buttons = []
+                                    if dr < 0:
+                                        buttons += ["up"] * abs(dr)
+                                    elif dr > 0:
+                                        buttons += ["down"] * dr
+                                    if dc < 0:
+                                        buttons += ["left"] * abs(dc)
+                                    elif dc > 0:
+                                        buttons += ["right"] * dc
+                                    available.append({
+                                        "local": [local_y, local_x],
+                                        "global": [glob_y, glob_x],
+                                        "moves": moves,
+                                        "buttons": buttons
+                                    })
+                    # Prescreen navigation targets: only include ones with a valid A* path
+                    filtered_available = []
+                    for option in available:
+                        gy, gx = option.get("global", [None, None])
+                        # Attempt pathfinding to this target
+                        status, path = self.emulator.find_path(gy, gx)
+                        # Include only if a non-empty path was found
+                        if path:
+                            filtered_available.append(option)
+                    # Summary of filtering
+                    filtered_out = len(available) - len(filtered_available)
+                    logger.warning(f"paths precomputed: {filtered_out} tiles filtered")
+                    # Send summary and valid options to Grok
+                    self.message_history.append({
+                        "role": "user",
+                        "content": [{"type": "text", "text": json.dumps({
+                            "valid_paths": len(filtered_available),
+                            "invalid_paths": filtered_out,
+                            "consecutive_failures": self.consecutive_nav_failures,
+                            "available_moves": filtered_available
+                        })}]
+                    })
+                    # Notify Grok of consecutive navigation failures
+                    self.message_history.append({
+                        "role": "user",
+                        "content": [{"type": "text", "text": f"You have failed navigate_to {self.consecutive_nav_failures} consecutive times."}]
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to append available moves for LLM: {e}")
             # Initialize LLM client
             client_kwargs = {"api_key": self.xai_api_key}
             if getattr(self, 'llm_provider', None) == 'grok':
@@ -1154,7 +1162,8 @@ class SimpleAgent:
             # Restrict tools based on battle or dialog state
             tools_to_use = self.xai_tools
             if in_battle:
-                tools_to_use = [t for t in self.xai_tools if t["function"]["name"] == "press_buttons"]
+                # Restrict tools in battle to manual presses, exit, or asking for advice
+                tools_to_use = [t for t in self.xai_tools if t["function"]["name"] in ("press_buttons", "exit_menu", "ask_friend")]
             # Note: do not restrict tools in dialog state so navigation and button presses remain available
             # Log the LLM request messages for debugging
             try:
@@ -1257,6 +1266,13 @@ class SimpleAgent:
                     "tool_call_id": tc.id,
                     "content": json.dumps(result_obj),
                 })
+                # Track battle turns history upon handle_battle
+                if func_name == "handle_battle":
+                    self.battle_turn_count += 1
+                    move = self.last_chosen_move_name or "<unknown>"
+                    self.battle_turn_history.append(move)
+                    if len(self.battle_turn_history) > 10:
+                        self.battle_turn_history.pop(0)
             # Determine last_message: show invoked tools or assistant content
             if tool_calls:
                 tool_details = []
@@ -2108,6 +2124,25 @@ class SimpleAgent:
         if tool_name == 'press_buttons':
             buttons = kwargs.get('buttons', [])
             wait = kwargs.get('wait', True)
+            # Prevent walking onto fully blacklisted tiles for single direction presses
+            if len(buttons) == 1 and buttons[0] in ('up', 'down', 'left', 'right'):
+                current = self.emulator.get_standard_coords()
+                if current:
+                    ly, lx, mid = current
+                    dir_map = {'up':(-1,0), 'down':(1,0), 'left':(0,-1), 'right':(0,1)}
+                    dy, dx = dir_map[buttons[0]]
+                    new_ly, new_lx = ly + dy, lx + dx
+                    try:
+                        new_gy, new_gx = self.emulator.local_to_global(new_ly, new_lx, mid)
+                        if (new_gy, new_gx) in self.blacklisted_positions:
+                            return {
+                                'type': 'tool_result',
+                                'id': tool_call.id,
+                                'tool_use_id': tool_call.id,
+                                'content': [{'type': 'text', 'text': f'Press blocked: tile ({new_gy}, {new_gx}) is blacklisted.'}]
+                            }
+                    except Exception:
+                        pass
             return self.emulator.press_buttons(buttons, wait)
         elif tool_name == 'navigate_to':
             # Debug: log tool call arguments
@@ -2151,6 +2186,17 @@ class SimpleAgent:
                     logger.debug(f"[navigate_to] move_delta for normalized direction '{direction_lower}': {move_delta}")
                     if move_delta:
                         dy, dx = move_delta
+                        # Prevent navigation onto fully blacklisted tiles: check immediate neighbor
+                        step_local_y = local_y + dy
+                        step_local_x = local_x + dx
+                        step_glob_y, step_glob_x = self.emulator.local_to_global(step_local_y, step_local_x, map_id)
+                        if (step_glob_y, step_glob_x) in self.blacklisted_positions:
+                            return {
+                                'type': 'tool_result',
+                                'id': tool_call.id,
+                                'tool_use_id': tool_call.id,
+                                'content': [{'type': 'text', 'text': f"Navigation failed: tile ({step_glob_y}, {step_glob_x}) is blacklisted."}]
+                            }
                         target_found = False
                         # Try primary direction up to 4 tiles away
                         for dist in [4, 3, 2, 1]:
@@ -2398,20 +2444,42 @@ class SimpleAgent:
                 ],
             }
         elif tool_name == 'ask_friend':
-            # Invoke a helper Grok agent on the current game state
+            # Invoke a helper Grok agent on the current game state with full context
             question = kwargs.get('question')
-            helper_system = "You are Helper Grok, an unaffiliated Grok agent. You have the following game state and a question. Provide clear, concise advice."
-            helper_messages = [
-                {"role": "system", "content": [{"type": "text", "text": helper_system}]},
-                {"role": "user", "content": [{"type": "text", "text": self.format_game_state()}]},
-                {"role": "user", "content": [{"type": "text", "text": question}]}
-            ]
-            # Build LLM client
+            # Build helper messages starting with the comprehensive system prompt
+            helper_messages = [{
+                "role": "system",
+                "content": [{"type": "text", "text": ASK_FRIEND_SYSTEM_PROMPT.strip()}]
+            }]
+            # Append full conversation history (system, user, assistant, and tool messages)
+            for m in self.message_history:
+                role = m.get("role")
+                if role == "tool":
+                    role = "assistant"
+                text = "".join(seg.get("text", "") for seg in m.get("content", []))
+                helper_messages.append({"role": role, "content": [{"type": "text", "text": text}]})
+            # Include Grok's last chain-of-thought reasoning
+            if getattr(self, 'latest_grok_thought', None):
+                helper_messages.append({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": f"Last chain-of-thought: {self.latest_grok_thought}"}]
+                })
+            # Include recent battle turn history if any
+            if getattr(self, 'battle_turn_history', None):
+                helper_messages.append({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": f"Battle turn history (last {len(self.battle_turn_history)} moves): {', '.join(self.battle_turn_history)}"}]
+                })
+            # Include current formatted game state
+            helper_messages.append({"role": "user", "content": [{"type": "text", "text": self.format_game_state()}]})
+            # Include the question from Grok
+            helper_messages.append({"role": "user", "content": [{"type": "text", "text": question}]})
+            # Build LLM client for helper agent
             client_kwargs = {"api_key": self.xai_api_key}
             if self.llm_provider == "grok":
                 client_kwargs["base_url"] = os.getenv("XAI_API_BASE", "https://api.x.ai/v1")
             client = OpenAI(**client_kwargs)
-            # Ask the helper agent
+            # Ask the helper agent with full context
             helper_completion = client.chat.completions.create(
                 model=self.model_name,
                 reasoning_effort="low",
@@ -2525,4 +2593,10 @@ class SimpleAgent:
             logger.info(f"low_tech_unstuck: Moved to new tile {current_tile}")
         # Update last seen tile
         self.last_tile = current_tile
+
+        # If tile has two or more blacklisted directions, mark it fully blacklisted
+        if len(self.blacklisted_tiles[current_tile]) >= 2 and current_tile not in self.blacklisted_positions:
+            logger.info(f"low_tech_unstuck: Tile {current_tile} has blacklisted directions {self.blacklisted_tiles[current_tile]} and is now fully blacklisted.")
+            self.blacklisted_positions.add(current_tile)
+            self.blacklisted_targets.add(current_tile)
 

@@ -30,19 +30,6 @@ class EmptyRequest(BaseModel):
     """No input required for this tool."""
     pass
 empty_schema = EmptyRequest.model_json_schema()
-
-# Define schema for battle handling tool
-class HandleBattleRequest(BaseModel):
-    buttons: List[Literal["a", "b", "start", "select", "up", "down", "left", "right"]] = Field(
-        description="List of buttons to press in sequence during battle."
-    )
-    wait: Optional[bool] = Field(
-        default=True,
-        description="Whether to wait after pressing each button."
-    )
-handle_battle_schema = HandleBattleRequest.model_json_schema()
-
-# Generate JSON schemas from the Pydantic models
 press_buttons_schema = PressButtonsRequest.model_json_schema()
 navigate_to_schema = NavigateToRequest.model_json_schema()
 
@@ -70,12 +57,6 @@ AVAILABLE_TOOLS = [
         "type": "function",
         "description": "Exit any active menu, dialog, or battle sequence by pressing B repeatedly. Use this when stuck in menus or dialog sequences.",
         "input_schema": empty_schema,
-    },
-    {
-        "name": "handle_battle",
-        "type": "function",
-        "description": "Handle a battle situation by first attempting to exit any dialog (if it's just an NPC conversation), then if dialog persists (meaning it's a trainer battle), select 'Fight' and repeatedly use attacks. Use this whenever dialog cannot be exited with the exit_menu tool.",
-        "input_schema": handle_battle_schema,
     },
     {
         "name": "ask_friend",

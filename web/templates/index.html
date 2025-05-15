@@ -10,49 +10,40 @@
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
         :root {
-            /* Core visual grammar */
-            --background-color: #000000;
-            --background-subtle: #0a0a0a;
-            --panel-background: rgba(10, 10, 10, 0.8);
+            /* Core visual grammar - Unified Theme */
+            --background-color: #0a0a12;
+            --background-subtle: #111122;
+            --panel-background: rgba(15, 15, 30, 0.8);
             --accent-primary: #ffffff;
             --accent-secondary: #dddddd;
             --accent-tertiary: #aaaaaa;
             --text-primary: #ffffff;
             --text-secondary: #dddddd;
             --text-tertiary: #aaaaaa;
-            --border-color: rgba(255, 255, 255, 0.2);
-            --header-gradient: linear-gradient(90deg, #000000, #1a1a1a, #000000);
-            --panel-gradient: linear-gradient(180deg, rgba(10, 10, 10, 0.9), rgba(0, 0, 0, 0.9));
+            --border-color: rgba(100, 130, 255, 0.2);
             
-            /* Enhanced Pokemon-themed colors */
-            --energy-gradient: linear-gradient(90deg, #3D7DCA, #4F90D5, #3D7DCA); /* Pokemon blue gradient */
-            --hp-green-gradient: linear-gradient(90deg, #2DD164, #37F37C, #2DD164); /* Pokemon HP green */
-            --hp-yellow-gradient: linear-gradient(90deg, #FCCE4B, #FDD85D, #FCCE4B); /* Pokemon HP yellow */
-            --hp-red-gradient: linear-gradient(90deg, #FB5B5D, #FF7375, #FB5B5D); /* Pokemon HP red */
-            --exp-blue-gradient: linear-gradient(90deg, #5EBDFC, #70C7FD, #5EBDFC); /* Pokemon EXP blue */
+            /* Unified header gradient */
+            --header-gradient: linear-gradient(90deg, rgba(30, 30, 60, 0.8), rgba(60, 60, 100, 0.8), rgba(30, 30, 60, 0.8));
+            --panel-gradient: linear-gradient(180deg, rgba(25, 25, 50, 0.9), rgba(10, 10, 25, 0.9));
             
-            /* Specific colors for type indicators */
-            --fire-gradient: linear-gradient(90deg, #FB5B5D, #FF7375, #FB5B5D); /* Fire type red */
-            --water-gradient: linear-gradient(90deg, #3D7DCA, #4F90D5, #3D7DCA); /* Water type blue */
-            --electric-gradient: linear-gradient(90deg, #FCCE4B, #FDD85D, #FCCE4B); /* Electric type yellow */
-            --normal-gradient: linear-gradient(90deg, #9099A1, #A8B0B9, #9099A1); /* Normal type gray */
-            --psychic-gradient: linear-gradient(90deg, #FF6675, #FE8395, #FF6675); /* Psychic type pink */
-            --ghost-gradient: linear-gradient(90deg, #4B6AB3, #5D7BC5, #4B6AB3); /* Ghost type purple */
+            /* Pokemon-themed colors */
+            --energy-gradient: linear-gradient(90deg, #3D7DCA, #4F90D5, #3D7DCA);
+            --hp-green-gradient: linear-gradient(90deg, #2DD164, #37F37C, #2DD164);
+            --hp-yellow-gradient: linear-gradient(90deg, #FCCE4B, #FDD85D, #FCCE4B);
+            --hp-red-gradient: linear-gradient(90deg, #FB5B5D, #FF7375, #FB5B5D);
+            --exp-blue-gradient: linear-gradient(90deg, #5EBDFC, #70C7FD, #5EBDFC);
             
-            /* Text effects */
-            --glow-effect: 0 0 5px rgba(255, 255, 255, 0.5), 0 0 10px rgba(255, 255, 255, 0.3);
+            /* Font sizes - INCREASED by 10px */
+            --font-size-xlarge: clamp(2.5rem, 3.5vw, 3.2rem);
+            --font-size-large: clamp(2.2rem, 3vw, 2.8rem); 
+            --font-size-medium: clamp(1.9rem, 2.5vw, 2.4rem);
+            --font-size-normal: clamp(1.8rem, 2.2vw, 2.1rem);
+            --font-size-small: clamp(1.7rem, 2vw, 1.9rem);
+            --font-size-tiny: clamp(1.6rem, 1.9vw, 1.8rem);
+            
+            /* Effects */
+            --glow-effect: 0 0 5px rgba(100, 130, 255, 0.5), 0 0 10px rgba(100, 130, 255, 0.3);
             --text-stroke: -0.5px -0.5px 0 rgba(0, 0, 0, 0.7), 0.5px -0.5px 0 rgba(0, 0, 0, 0.7), -0.5px 0.5px 0 rgba(0, 0, 0, 0.7), 0.5px 0.5px 0 rgba(0, 0, 0, 0.7);
-            
-            /* Grid and other UI elements */
-            --grid-color: rgba(255, 255, 255, 0.2);
-            
-            /* Enhanced Font sizes - INCREASED for viewability */
-            --font-size-xlarge: clamp(1.8rem, 3vw, 2.5rem);
-            --font-size-large: clamp(1.4rem, 2.2vw, 2rem);
-            --font-size-medium: clamp(1.1rem, 1.7vw, 1.6rem);
-            --font-size-normal: clamp(0.9rem, 1.4vw, 1.3rem);
-            --font-size-small: clamp(0.8rem, 1.2vw, 1.1rem);
-            --font-size-tiny: clamp(0.7rem, 1vw, 0.9rem);
         }
 
         /* Animation keyframes */
@@ -72,8 +63,8 @@
         }
 
         @keyframes glow {
-            0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.3)); }
-            50% { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.5)); }
+            0%, 100% { filter: drop-shadow(0 0 2px rgba(100, 130, 255, 0.3)); }
+            50% { filter: drop-shadow(0 0 5px rgba(100, 130, 255, 0.5)); }
         }
 
         @keyframes barPulse {
@@ -85,6 +76,10 @@
         @keyframes segmentFlicker {
             0%, 100% { opacity: 0.9; }
             50% { opacity: 1; }
+        }
+        
+        @keyframes titleShine {
+            to { background-position: 200% center; }
         }
 
         * {
@@ -108,7 +103,7 @@
             text-shadow: var(--glow-effect);
         }
 
-        /* Enhanced background with subtle grid */
+        /* Enhanced background with ethereal shader effect */
         body::before {
             content: "";
             position: fixed;
@@ -117,9 +112,11 @@
             width: 100%;
             height: 100%;
             background-image: 
-                linear-gradient(90deg, transparent 49px, rgba(255,255,255,0.03) 49px, rgba(255,255,255,0.03) 51px, transparent 51px),
-                linear-gradient(0deg, transparent 49px, rgba(255,255,255,0.03) 49px, rgba(255,255,255,0.03) 51px, transparent 51px);
-            background-size: 50px 50px;
+                radial-gradient(circle at 25% 25%, rgba(100, 130, 255, 0.05) 0%, transparent 50%),
+                radial-gradient(circle at 75% 75%, rgba(100, 130, 255, 0.05) 0%, transparent 50%),
+                linear-gradient(45deg, transparent 49px, rgba(100, 130, 255, 0.02) 49px, rgba(100, 130, 255, 0.02) 51px, transparent 51px),
+                linear-gradient(135deg, transparent 49px, rgba(100, 130, 255, 0.02) 49px, rgba(100, 130, 255, 0.02) 51px, transparent 51px);
+            background-size: 100% 100%, 100% 100%, 50px 50px, 50px 50px;
             pointer-events: none;
             z-index: -1;
         }
@@ -133,8 +130,8 @@
             width: 100%;
             height: 100%;
             background-image: 
-                radial-gradient(circle at 200px 400px, rgba(255,255,255,0.15) 0%, transparent 30%),
-                radial-gradient(circle at 1000px 400px, rgba(255,255,255,0.15) 0%, transparent 30%);
+                radial-gradient(circle at 20% 40%, rgba(100, 130, 255, 0.1) 0%, transparent 30%),
+                radial-gradient(circle at 80% 40%, rgba(100, 130, 255, 0.1) 0%, transparent 30%);
             animation: pulse 10s infinite;
             pointer-events: none;
             z-index: -1;
@@ -147,7 +144,7 @@
             left: 0;
             width: 100%;
             height: 2px;
-            background-color: rgba(255, 255, 255, 0.03);
+            background-color: rgba(100, 130, 255, 0.1);
             pointer-events: none;
             z-index: 9999;
             animation: scanline 4s linear infinite;
@@ -175,60 +172,70 @@
             transform: translate(-50%, -50%);
             width: 800px;
             height: 800px;
-            opacity: 0.03;
+            opacity: 0.02;
             pointer-events: none;
             z-index: -1;
         }
 
         .grok-logo-path {
             fill: none;
-            stroke: #ffffff;
+            stroke: #aab6ff;
             stroke-width: 1.5;
         }
 
         .header {
-            background: var(--header-gradient);
-            padding: 1rem 1.5rem;
-            border-bottom: 1px solid var(--border-color);
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            background-image: linear-gradient(45deg, #1a1a3a, #2a2a5a, #3a3a7a, #2a2a5a, #1a1a3a);
+            padding: 0.5rem 1.2rem;
+            border-bottom: 2px solid var(--border-color);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.7);
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: center;
             position: relative;
             z-index: 10;
-            min-height: 70px;
+            min-height: 55px;
             height: auto;
+            animation: titleBackground 20s infinite linear;
+            overflow: hidden;
+        }
+
+        @keyframes titleBackground {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
         }
 
         .header h1 {
             color: var(--text-primary);
             font-size: var(--font-size-xlarge);
-            text-shadow: var(--glow-effect);
-            letter-spacing: 2px;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.8), 0 0 10px rgba(100, 130, 255, 0.5), 0 0 20px rgba(100, 130, 255, 0.3);
+            letter-spacing: 3px;
             font-weight: 800;
             text-align: center;
-            flex: 1;
-            animation: glow 4s infinite;
             text-transform: uppercase;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            padding: 5px 15px;
-            border-radius: 5px;
-            background: rgba(0, 0, 0, 0.3);
+            background: linear-gradient(to right, #5d7aff, #4361EE, #a2abff, #4361EE, #5d7aff);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: titleShine 5s linear infinite;
+            padding: 8px 15px;
+            position: relative;
+            z-index: 3;
         }
 
-        /* Main container grid layout - MODIFIED */
+        /* MODIFIED: Main container grid layout - Swapped positions as requested */
         .container {
             display: grid;
             grid-template-columns: minmax(220px, 1fr) minmax(600px, 3fr) minmax(220px, 1fr);
-            grid-template-rows: auto 1fr auto minmax(40px, auto);
+            grid-template-rows: auto auto auto minmax(40px, auto);
             grid-template-areas:
-                "stats game-window action-history"
-                "performance game-window action-history"
-                "mission-params cognitive tool-calls"
+                "stats game-window tool-calls"
+                "performance game-window tool-calls"
+                "mission-params cognitive action-history"
                 "system-status team-status system-indicators";
-            gap: 8px;
-            padding: 8px;
-            height: calc(100vh - 70px);
+            gap: 4px;
+            padding: 4px;
+            height: calc(100vh - 55px);
             overflow: hidden;
             position: relative;
             z-index: 1;
@@ -237,14 +244,16 @@
         /* Enhanced Panel styling with shader effects */
         .panel {
             background: var(--panel-gradient);
-            border: 2px solid var(--border-color);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.7);
+            border: 1px solid var(--border-color);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
             overflow: hidden;
             position: relative;
-            border-radius: 3px;
+            border-radius: 2px;
+            display: flex;
+            flex-direction: column;
         }
 
-        /* Panel grid lines */
+        /* Panel ethereal shader effect */
         .panel::before {
             content: "";
             position: absolute;
@@ -252,8 +261,9 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 50 50' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='50' height='50' fill='%23000000' fill-opacity='0.5'/%3E%3Crect width='1' height='50' fill='%23ffffff' fill-opacity='0.02'/%3E%3Crect width='50' height='1' fill='%23ffffff' fill-opacity='0.02'/%3E%3C/svg%3E");
-            background-size: 50px 50px;
+            background-image: 
+                radial-gradient(circle at 30% 30%, rgba(100, 130, 255, 0.05) 0%, transparent 60%),
+                radial-gradient(circle at 70% 70%, rgba(100, 130, 255, 0.05) 0%, transparent 60%);
             pointer-events: none;
             z-index: 1;
         }
@@ -266,36 +276,39 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 50%, transparent 50%);
+            background-image: linear-gradient(to bottom, rgba(100, 130, 255, 0.02) 50%, transparent 50%);
             background-size: 100% 2px;
             pointer-events: none;
             z-index: 2;
         }
 
-        /* Enhanced Panel sections */
+        /* MODIFIED: Panel headers with INCREASED text size */
         .panel-header {
-            padding: 12px;
-            border-bottom: 2px solid var(--border-color);
-            background: var(--header-gradient);
+            padding: 6px 10px;
+            border-bottom: 1px solid var(--border-color);
             position: relative;
             z-index: 3;
-            font-size: var(--font-size-large);
-            font-weight: 600;
+            font-size: var(--font-size-medium);
+            font-weight: 500;
             color: var(--text-primary);
             text-align: center;
             text-shadow: var(--glow-effect);
             text-transform: uppercase;
             letter-spacing: 1px;
+            min-height: 35px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: var(--header-gradient);
         }
 
         .panel-content {
-            padding: 12px;
+            padding: 8px;
             position: relative;
             z-index: 3;
             overflow-y: auto;
             scrollbar-width: none;
             -ms-overflow-style: none;
-            height: calc(100% - 48px);
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -310,31 +323,25 @@
         /* Stream Statistics Module */
         .stream-statistics {
             grid-area: stats;
-            min-height: 160px;
-            height: auto;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .stream-statistics .panel-content {
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }
-
-        /* Cognitive Processes Module - MODIFIED */
-        .cognitive-processes {
-            grid-area: cognitive;
-            min-height: 310px;
+            min-height: 200px;
             height: 100%;
             display: flex;
             flex-direction: column;
         }
 
-        /* Tool Calls Module - MODIFIED */
+        /* MODIFIED: Grok's Thinking (previously Cognitive Processes) */
+        .cognitive-processes {
+            grid-area: cognitive;
+            min-height: 250px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* MODIFIED: Tool Calls Module */
         .tool-calls-panel {
             grid-area: tool-calls;
-            min-height: 310px;
+            min-height: 250px;
             height: 100%;
             display: flex;
             flex-direction: column;
@@ -343,21 +350,25 @@
         /* Mission Parameters Module */
         .mission-parameters {
             grid-area: mission-params;
-            min-height: 240px;
+            min-height: 320px;
+            height: 100%;
             height: auto;
             flex: 1;
             display: flex;
             flex-direction: column;
         }
 
-        /* Game Window */
+        /* MODIFIED: Game Window */
         .game-window {
             grid-area: game-window;
             display: flex;
             flex-direction: column;
             height: 100%;
+            position: relative;
+            z-index: 5;
         }
 
+        /* MODIFIED: Better fitted game display */
         .game-display {
             flex: 1;
             display: flex;
@@ -365,29 +376,30 @@
             align-items: center;
             justify-content: center;
             position: relative;
-            padding: 5px;
+            padding: 10px;
             min-height: 460px;
+            overflow: visible;
         }
 
-        /* Game screen with Grok overlay */
+        /* MODIFIED: Game screen properly contained with FIXED dimensions */
         #screen-container {
             position: relative;
             border: 2px solid var(--border-color);
             background-color: #000;
-            display: inline-block;
             margin: 0 auto;
-            max-width: 680px;
-            width: 100%;
-            aspect-ratio: 10/9; /* GameBoy aspect ratio - 160:144 simplified */
-            z-index: 3;
-            box-shadow: 0 0 20px rgba(61, 125, 202, 0.4);
+            display: flex;
+            height: 100%;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            box-shadow: 0 0 20px rgba(100, 130, 255, 0.3);
         }
 
         #game-screen {
             image-rendering: pixelated;
-            width: 100%;
-            height: 100%;
-            z-index: 4;
+            width: 130%;
+            height: 130%;
+            z-index: 15;
         }
 
         /* Game screen grok logo watermark */
@@ -409,25 +421,17 @@
 
         /* Tool Calls Section */
         .tool-calls {
-            padding: 10px;
+            padding: 8px;
             margin-top: 0;
             border-top: 0;
-            background: rgba(0, 0, 0, 0.3);
-            height: calc(100% - 48px);
+            background: rgba(10, 15, 35, 0.3);
             overflow-y: auto;
             font-family: 'Courier New', monospace;
-            font-size: 14px;
+            font-size: 13px;
+            flex: 1;
         }
 
-        .tool-calls-header {
-            color: var(--text-primary);
-            margin-bottom: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            text-shadow: 0px 0px 5px rgba(255, 255, 255, 0.3);
-        }
-
-        /* Action History Module - MODIFIED */
+        /* MODIFIED: Action History Module */
         .action-history {
             grid-area: action-history;
             height: 100%;
@@ -435,21 +439,25 @@
             flex-direction: column;
         }
 
-        /* Performance Metrics Module */
+        /* Performance Metrics Module - ELIMINATED GAP */
         .performance-metrics {
             grid-area: performance;
-            height: 260px;
+            height: 280px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 0;
         }
 
         /* Pokemon-style segmented bar for metrics */
         .metric-bar-container {
             width: 100%;
-            height: 20px;
-            background-color: rgba(0, 0, 0, 0.7);
-            margin: 10px 0;
+            height: 16px;
+            background-color: rgba(0, 0, 0, 0.5);
+            margin: 5px 0;
             position: relative;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 3px;
+            border: 1px solid rgba(100, 130, 255, 0.3);
+            border-radius: 2px;
             overflow: hidden;
             box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
         }
@@ -499,20 +507,14 @@
             display: flex;
             justify-content: space-between;
             font-size: var(--font-size-small);
-            margin-bottom: 5px;
+            margin-bottom: 2px;
             font-weight: bold;
-        }
-
-        /* Datastream Module */
-        .datastream {
-            grid-area: datastream;
-            height: 240px;
         }
 
         .message {
             font-family: 'Press Start 2P', 'Arial', monospace;
             font-size: var(--font-size-small);
-            margin-bottom: 8px;
+            margin-bottom: 6px;
             color: var(--text-secondary);
             text-shadow: var(--glow-effect);
             letter-spacing: 0.5px;
@@ -524,41 +526,46 @@
         }
 
         .stats-data .message {
-            margin-bottom: 10px;
-            font-size: var(--font-size-medium);
+            margin-bottom: 8px;
+            font-size: var(--font-size-small);
         }
 
-        /* Team Status Module */
+        /* MODIFIED: Team Status Module - increased height for proper content display */
         .team-status {
             grid-area: team-status;
             display: flex;
             flex-direction: column;
-            min-height: 240px;
             height: auto;
             flex: 1;
+            max-height: 220px;
         }
 
         .team-container {
             display: grid;
             grid-template-columns: repeat(6, 1fr);
             grid-template-rows: 1fr;
-            gap: 10px;
-            padding: 10px;
+            gap: 5px;
+            padding: 5px;
             flex: 1;
-            min-height: 200px;
+            min-height: 180px;
+            max-height: 200px;
+            overflow: hidden;
         }
 
         .pokemon-card {
-            background-color: rgba(0, 0, 0, 0.7);
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            border-radius: 5px;
-            padding: 10px;
+            background-color: rgba(10, 15, 35, 0.7);
+            border: 1px solid rgba(100, 130, 255, 0.2);
+            border-radius: 3px;
+            padding: 5px;
             position: relative;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             text-align: center;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+            min-height: 140px;
+            max-height: 150px;
+            overflow: hidden;
         }
 
         .pokemon-card.empty {
@@ -566,28 +573,29 @@
         }
 
         .pokemon-sprite {
-            width: 64px;
-            height: 64px;
-            margin: 0 auto 5px auto;
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 3px auto;
             image-rendering: pixelated;
-            filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.3));
+            filter: drop-shadow(0 0 2px rgba(100, 130, 255, 0.3));
         }
 
         .pokemon-name {
             font-family: 'Press Start 2P', 'Arial', sans-serif;
-            font-size: var(--font-size-small);
+            font-size: 9px;
             font-weight: 600;
             color: var(--text-primary);
-            margin-bottom: 5px;
+            margin-bottom: 2px;
             text-shadow: var(--glow-effect);
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 0px;
+            line-height: 1.2;
         }
 
         .pokemon-status {
-            font-size: var(--font-size-tiny);
+            font-size: 8px;
             color: var(--accent-secondary);
-            margin-bottom: 5px;
+            margin-bottom: 2px;
         }
         
         .pokemon-status .poisoned {
@@ -602,15 +610,15 @@
             text-shadow: var(--glow-effect);
         }
 
-        /* HP bar styling - THE MODEL FOR ALL STATUS BARS */
+        /* HP bar styling */
         .hp-bar-container {
             width: 100%;
-            height: 15px;
-            background-color: rgba(0, 0, 0, 0.7);
-            margin: 10px 0;
-            border-radius: 3px;
+            height: 10px;
+            background-color: rgba(0, 0, 0, 0.5);
+            margin: 5px 0;
+            border-radius: 2px;
             overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.3);
+            border: 1px solid rgba(100, 130, 255, 0.3);
             box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
         }
 
@@ -655,9 +663,10 @@
         }
         
         .hp-text {
-            font-size: var(--font-size-small);
+            font-size: 8px;
             color: var(--text-tertiary);
             text-align: center;
+            margin-top: 1px;
         }
 
         .pokemon-type {
@@ -684,7 +693,7 @@
             position: relative;
             background: var(--exp-blue-gradient);
             animation: barPulse 2s infinite;
-            border: 1px solid rgba(255, 255, 255, 0.3);
+            border: 1px solid rgba(100, 130, 255, 0.3);
             box-shadow: 0 0 10px rgba(94, 189, 252, 0.4);
         }
 
@@ -712,7 +721,7 @@
 
         .system-status-text {
             font-family: 'Press Start 2P', 'Arial', monospace;
-            font-size: var(--font-size-medium);
+            font-size: var(--font-size-small);
             color: var(--text-primary);
             padding: 8px;
             text-shadow: var(--glow-effect);
@@ -734,7 +743,7 @@
 
         .system-indicator {
             font-family: 'Press Start 2P', 'Arial', monospace;
-            font-size: var(--font-size-small);
+            font-size: var(--font-size-tiny);
             color: var(--text-tertiary);
             text-shadow: var(--glow-effect);
             white-space: nowrap;
@@ -746,22 +755,24 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
         }
 
         .status-text {
             font-family: 'Press Start 2P', 'Courier New', monospace;
-            font-size: 14px;
+            font-size: 22px;
             color: var(--text-secondary);
         }
 
         .control-button {
             background-color: var(--background-subtle);
             color: var(--text-primary);
-            border: 2px solid var(--border-color);
-            border-radius: 3px;
+            border: 1px solid var(--border-color);
+            border-radius: 2px;
             padding: 8px 12px;
             font-family: 'Press Start 2P', 'Arial', sans-serif;
-            font-size: 12px;
+            font-size: 20px;
             cursor: pointer;
             transition: all 0.2s;
             text-transform: uppercase;
@@ -769,8 +780,8 @@
         }
 
         .control-button:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-            box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+            background-color: rgba(100, 130, 255, 0.1);
+            box-shadow: 0 0 8px rgba(100, 130, 255, 0.3);
         }
 
         .control-button.green {
@@ -785,35 +796,35 @@
             box-shadow: 0 0 10px rgba(255, 68, 68, 0.3);
         }
 
-        /* Chat and cognitive display - MODIFIED with larger text */
+        /* Chat and cognitive display */
         .chat-output {
             height: 100%;
             overflow-y: auto;
             font-family: 'Press Start 2P', 'Courier New', monospace;
-            font-size: var(--font-size-medium);
+            font-size: var(--font-size-small);
             color: var(--text-secondary);
         }
 
         .thought-bubble {
-            background-color: rgba(0, 0, 0, 0.4);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 3px;
-            padding: 10px;
-            margin-bottom: 12px;
-            font-size: var(--font-size-medium);
+            background-color: rgba(10, 15, 35, 0.4);
+            border: 1px solid rgba(100, 130, 255, 0.2);
+            border-radius: 2px;
+            padding: 8px;
+            margin-bottom: 10px;
+            font-size: var(--font-size-small);
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
         }
 
-        /* Progress Bar - Enhanced to match Pokemon HP bars */
+        /* Progress Bar */
         .progress-bar-container {
             width: 100%;
-            height: 20px;
-            background-color: rgba(0, 0, 0, 0.7);
+            height: 18px;
+            background-color: rgba(0, 0, 0, 0.5);
             margin-top: 8px;
             position: relative;
-            border-radius: 3px;
+            border-radius: 2px;
             overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.3);
+            border: 1px solid rgba(100, 130, 255, 0.3);
             box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
         }
 
@@ -858,7 +869,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: var(--font-size-small);
+            font-size: var(--font-size-tiny);
             color: var(--text-primary);
             z-index: 1;
             text-shadow: 0px 0px 2px rgba(0, 0, 0, 1);
@@ -867,28 +878,28 @@
 
         /* Input area for development mode */
         #delay-input {
-            background-color: rgba(0, 0, 0, 0.5);
+            background-color: rgba(10, 15, 35, 0.5);
             color: var(--text-primary);
-            border: 2px solid var(--border-color);
-            border-radius: 3px;
-            padding: 5px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 2px;
+            padding: 3px 6px;
             font-family: 'Press Start 2P', 'Courier New', monospace;
-            font-size: 14px;
-            width: 80px;
+            font-size: 12px;
+            width: 60px;
             text-align: center;
         }
 
         /* Debug output */
         #debug-output {
             width: 100%;
-            max-height: 100px;
+            max-height: 80px;
             overflow-y: auto;
-            margin-top: 10px;
-            padding: 5px;
+            margin-top: 8px;
+            padding: 4px;
             font-family: 'Courier New', monospace;
-            font-size: 10px;
+            font-size: 9px;
             color: var(--text-tertiary);
-            background-color: rgba(0, 0, 0, 0.5);
+            background-color: rgba(10, 15, 35, 0.5);
             border: 1px solid var(--border-color);
         }
     </style>
@@ -986,13 +997,13 @@
                     <button class="control-button red" id="stop-button" onclick="stopAgent()" style="display: none;">Stop</button>
                     <input type="file" id="save-state-input" style="display: none" accept=".state">
                     <button class="control-button" id="load-state-button" onclick="document.getElementById('save-state-input').click()">Load Save</button>
-                    <div style="margin-top: 10px;">
-                        <label for="delay-input" style="font-size: 14px;">DELAY (S):</label>
+                    <div style="margin-top: 8px;">
+                        <label for="delay-input" style="font-size: 12px;">DELAY (S):</label>
                         <input id="delay-input" type="number" min="0" step="0.1" value="0" />
                     </div>
                 </div>
                 
-                <div class="mission-goals" style="margin-top: 15px;">
+                <div class="mission-goals" style="margin-top: 10px;">
                     <div class="message">PRIMARY: DO NOT GET STUCK</div>
                     <div class="metric-bar-container">
                         <div class="metric-bar" style="width: 70%;"></div>
@@ -1005,14 +1016,14 @@
                 </div>
 
                                 
-                <div class="system-status" style="margin-top: 15px;">
+                <div class="system-status" style="margin-top: 10px;">
                     <div class="metric-bar-container">
                         <div class="metric-bar" style="width: 100%;"></div>
                     </div>
                     <div class="message">CURRENT ZONE PROGRESS</div>
                 </div>
                 
-                <div class="navigation-system" style="margin-top: 15px;">
+                <div class="navigation-system" style="margin-top: 10px;">
                     <div class="message">NAVIGATION SYSTEM</div>
                     <div class="message" style="color: var(--text-tertiary);">CURRENT: <span id="current-location">Somewhere...</span></div>
                     <div class="message" style="color: var(--text-tertiary);">TARGET: <span id="target-location">Do things</span></div>
@@ -1020,14 +1031,14 @@
                 </div>
                 
                 <!-- Progress Bar moved from game display to mission parameters -->
-                <div id="progress-bar-container" class="progress-bar-container" style="margin-top: 15px;">
+                <div id="progress-bar-container" class="progress-bar-container" style="margin-top: 10px;">
                     <div class="progress-bar-fill" id="progress-bar-fill"></div>
                     <div class="progress-bar-text" id="progress-bar-text">Loading...</div>
                 </div>
             </div>
         </section>
 
-        <!-- Game Window -->
+        <!-- MODIFIED: Game Window (now in middle) -->
         <section class="game-window panel">
             <div class="panel-header">GAME DISPLAY</div>
             <div class="game-display">
@@ -1038,7 +1049,15 @@
             </div>
         </section>
 
-        <!-- Action History Module -->
+        <!-- MODIFIED: Tool Calls Module (now on right) -->
+        <section class="tool-calls-panel panel">
+            <div class="panel-header">GROK'S TOOL CALLS</div>
+            <div class="tool-calls">
+                <div id="toolcalls-messages"></div>
+            </div>
+        </section>
+
+        <!-- MODIFIED: Action History Module (now in middle bottom) -->
         <section class="action-history panel">
             <div class="panel-header">ACTION HISTORY</div>
             <div class="panel-content">
@@ -1048,21 +1067,13 @@
             </div>
         </section>
 
-        <!-- Cognitive Processes Module - RENAMED to GROK'S THINKING -->
+        <!-- MODIFIED: Cognitive Processes Module (now on right bottom) -->
         <section class="cognitive-processes panel">
             <div class="panel-header">GROK'S THINKING</div>
             <div class="panel-content">
                 <div class="chat-output" id="chat-messages">
                     <!-- Grok's thoughts will be populated here dynamically -->
                 </div>
-            </div>
-        </section>
-
-        <!-- Tool Calls Module -->
-        <section class="tool-calls-panel panel">
-            <div class="panel-header">GROK'S TOOL CALLS</div>
-            <div class="tool-calls">
-                <div id="toolcalls-messages"></div>
             </div>
         </section>
 
@@ -1090,11 +1101,6 @@
             </div>
         </section>
 
-        <!-- System Status Bar -->
-        <section class="system-status panel">
-            <div class="system-status-bar"></div>
-            <div class="system-status-text">QUANTUM SYSTEMS: NOMINAL</div>
-        </section>
 
         <!-- System Indicators -->
         <section class="system-indicators panel">
@@ -1105,6 +1111,7 @@
         </section>
     </main>
 
+    <!-- JavaScript code remains the same -->
     <script>
         console.log('Grok Plays Pokemon interface initialized');
         let devMode = false;

@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grok Plays Pokemon</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --pokemon-yellow: #FFCB05;
+            --pokemon-blue: #003A70;
+            --chat-bg: #1a1a1a;
+            --chat-text: #9e9e9e;
+            --border-color: #2a2a2a;
+            --header-gradient: linear-gradient(45deg, #1a1a1a, #2a2a2a);
+            --status-border: #3a3a3a;
+            --grid-color: rgba(255, 255, 255, 0.2);
+            /* Grid line color */
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Press Start 2P', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            background-color: #000000;
+            background-image: linear-gradient(45deg, #0a0a0a 25%, transparent 25%),
+                linear-gradient(-45deg, #0a0a0a 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #0a0a0a 75%),
+                linear-gradient(-45deg, transparent 75%, #0a0a0a 75%);
+            background-size: 20px 20px;
+            color: var(--chat-text);
+            height: 100vh;
+            overflow: hidden;
+            /* prevent page scrollbars */
+            display: flex;
+            flex-direction: column;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: var(--header-gradient);
+            padding: 1rem;
+            border-bottom: 4px solid var(--pokemon-yellow);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header h1 {
+            color: var(--pokemon-yellow);
+            font-size: 1.2rem;
+            text-shadow: 2px 2px #000;
+            letter-spacing: 1px;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1.5fr;
+            grid-template-areas:
+                "game actions chat"
+                "team team team";
+            gap: 1rem;
+            padding: 1rem;
+            height: calc(100vh - 4rem);
+            overflow: hidden;
+            /* prevent overflow of grid */
+        }
+
+        .game-window {
+            grid-area: game;
+            background-color: var(--chat-bg);
+            border: 4px solid var(--border-color);
+            overflow: hidden;
+            position: relative;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            /* Center children horizontally */
+            justify-content: flex-start;
+            /* Stack from top */
+        }
+
+        /* Container for scaled canvas and overlay */
+        #screen-container {
+            position: relative;
+            display: inline-block;
+            /* Shrink-wrap to canvas size */
+            /* Intrinsic canvas size controls container dimensions */
+        }
+
+        /* Scale canvas to fill container, preserving pixel art */
+        #game-screen {
+            image-rendering: pixelated;
+            width: 640px;
+            height: 576px;
+        }
+
+        /* Overlay ASCII collision map atop canvas */
+        #collision-map-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            max-height: 30%;
+            margin: 0;
+            font-family: monospace;
+            font-size: 0.8rem;
+            line-height: 1rem;
+            color: var(--chat-text);
+            background: rgba(0, 0, 0, 0.2);
+            white-space: pre;
+            pointer-events: none;
+            overflow-y: auto;
+        }
+
+        /* Hide old collision-container */
+        #collision-container {
+            display: none !important;
+        }
+
+        .chat-window {
+            height: 100%;
+            /* constrain to grid cell height */
+            overflow: hidden;
+            /* hide any overflow at window level */
+            grid-area: chat;
+            background-color: var(--chat-bg);
+            border: 4px solid var(--border-color);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .chat-header {
+            padding: 1rem;
+            border-bottom: 4px solid var(--border-color);
+            background: var(--header-gradient);
+        }
+
+        .chat-header h2 {
+            font-size: 1.2rem;
+            color: var(--pokemon-yellow);
+            text-shadow: 1px 1px #000;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            scrollbar-width: none;
+            /* hide scrollbar in Firefox */
+            -ms-overflow-style: none;
+            /* hide scrollbar in IE 10+ */
+        }
+
+        .chat-messages::-webkit-scrollbar {
+            display: none;
+            /* hide scrollbar in Chrome, Safari, Edge */
+        }
+
+        .message {
+            margin-bottom: 1.5rem;
+            word-wrap: break-word;
+            font-size: 1rem;
+            padding: 0.8rem;
+            background-color: rgba(255, 255, 255, 0.02);
+            border-radius: 4px;
+            border: 2px solid var(--border-color);
+        }
+
+        .message .timestamp {
+            color: var(--pokemon-yellow);
+            font-size: 0.6rem;
+            margin-right: 0.5rem;
+            opacity: 0.7;
+        }
+
+        .message .content {
+            color: var(--chat-text);
+            line-height: 1.8;
+        }
+
+        /* Style for Grok's inner thoughts */
+        .message.thought {
+            background-color: rgba(255, 255, 255, 0.05);
+            font-style: italic;
+        }
+
+        /* Make preformatted text readable */
+        .message pre {
+            white-space: pre-wrap;
+            /* Since CSS 2.1 */
+            white-space: -moz-pre-wrap;
+            /* Mozilla, since 1999 */
+            white-space: -pre-wrap;
+            /* Opera 4-6 */
+            white-space: -o-pre-wrap;
+            /* Opera 7 */
+            word-wrap: break-word;
+            /* Internet Explorer 5.5+ */
+            background-color: rgba(0, 0, 0, 0.2);
+            padding: 5px;
+            border-radius: 3px;
+            font-size: 0.9rem;
+        }
+
+        .status {
+            background-color: rgba(0, 0, 0, 0.9);
+            color: var(--chat-text);
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            border: 2px solid var(--status-border);
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .run-button {
+            background-color: var(--pokemon-yellow);
+            color: var(--pokemon-blue);
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .run-button.red {
+            background-color: #ff4444;
+            color: white;
+        }
+
+        .run-button.purple {
+            background-color: #9b59b6;
+            color: white;
+        }
+
+        .run-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Share styling for dev toggle */
+        .dev-toggle-button {
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .dev-toggle-button.red {
+            background-color: #ff4444;
+            color: white;
+        }
+
+        .dev-toggle-button.green {
+            background-color: #00cc00;
+            /* Brighter green */
+            color: black;
+            /* Better contrast */
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--chat-bg);
+            border: 2px solid var(--border-color);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3a3a3a;
+        }
+
+        /* Added collision map CSS */
+        #collision-container {
+            display: none;
+        }
+
+        #collision-container h3 {
+            margin: 0 0 0.5rem 0;
+            color: var(--pokemon-yellow);
+            font-size: 1.5rem;
+            text-shadow: 1px 1px #000;
+            text-align: center;
+        }
+
+        #collision-map {
+            position: absolute;
+            top: 300;
+            left: 0;
+            margin: 0;
+            font-size: 0.5rem;
+            line-height: 0.5rem;
+            color: var(--chat-text);
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        #collision-info {
+            display: inline-block;
+            text-align: center;
+            vertical-align: top;
+            margin-left: 2rem;
+        }
+
+        /* Collision info items */
+        #player-facing,
+        #recent-moves,
+        #warp-list {
+            font-size: 1rem;
+            margin: 0.5rem 0;
+        }
+
+        .team-window {
+            grid-area: team;
+            background-color: var(--chat-bg);
+            border: 4px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.5rem;
+            color: var(--chat-text);
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            height: 120px;
+            /* constrain to grid row height */
+            display: flex;
+            flex-direction: column;
+        }
+
+        .team-window h2 {
+            font-size: 1rem;
+            color: var(--pokemon-yellow);
+            margin-bottom: 0.5rem;
+        }
+
+        .team-container {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 0.5rem;
+            overflow-x: auto;
+            /* enable horizontal scrolling if needed */
+            overflow-y: hidden;
+            height: 80px;
+            /* original height */
+            scrollbar-width: none;
+            /* hide scrollbar in Firefox */
+            -ms-overflow-style: none;
+            /* hide scrollbar in IE 10+ */
+        }
+
+        .team-container::-webkit-scrollbar {
+            display: none;
+            /* hide scrollbar in Chrome, Safari, Edge */
+        }
+
+        .pokemon-card {
+            flex: 0 0 140px;
+            background-color: rgba(0, 0, 0, 0.3);
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+            padding: 0.3rem;
+            font-size: 0.6rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pokemon-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.2rem;
+        }
+
+        .pokemon-name {
+            font-weight: bold;
+            color: var(--pokemon-yellow);
+        }
+
+        .pokemon-level {
+            color: white;
+        }
+
+        .pokemon-hp {
+            margin-bottom: 0.2rem;
+            height: 8px;
+            background-color: #444;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .hp-bar {
+            height: 100%;
+            background-color: #4caf50;
+            width: 100%;
+        }
+
+        .hp-bar.low {
+            background-color: #f44336;
+        }
+
+        .hp-bar.medium {
+            background-color: #ff9800;
+        }
+
+        .pokemon-types {
+            display: flex;
+            gap: 0.2rem;
+            margin-top: 0.2rem;
+        }
+
+        .type-pill {
+            padding: 0.1rem 0.3rem;
+            border-radius: 10px;
+            font-size: 0.5rem;
+            text-transform: uppercase;
+        }
+
+        /* Type colors */
+        .type-normal {
+            background-color: #A8A878;
+            color: black;
+        }
+
+        .type-fighting {
+            background-color: #C03028;
+            color: white;
+        }
+
+        .type-flying {
+            background-color: #A890F0;
+            color: black;
+        }
+
+        .type-poison {
+            background-color: #A040A0;
+            color: white;
+        }
+
+        .type-ground {
+            background-color: #E0C068;
+            color: black;
+        }
+
+        .type-rock {
+            background-color: #B8A038;
+            color: black;
+        }
+
+        .type-bug {
+            background-color: #A8B820;
+            color: black;
+        }
+
+        .type-ghost {
+            background-color: #705898;
+            color: white;
+        }
+
+        .type-steel {
+            background-color: #B8B8D0;
+            color: black;
+        }
+
+        .type-fire {
+            background-color: #F08030;
+            color: white;
+        }
+
+        .type-water {
+            background-color: #6890F0;
+            color: white;
+        }
+
+        .type-grass {
+            background-color: #78C850;
+            color: black;
+        }
+
+        .type-electric {
+            background-color: #F8D030;
+            color: black;
+        }
+
+        .type-psychic {
+            background-color: #F85888;
+            color: white;
+        }
+
+        .type-ice {
+            background-color: #98D8D8;
+            color: black;
+        }
+
+        .type-dragon {
+            background-color: #7038F8;
+            color: white;
+        }
+
+        .type-dark {
+            background-color: #705848;
+            color: white;
+        }
+
+        .type-fairy {
+            background-color: #EE99AC;
+            color: black;
+        }
+
+        /* Species label styling */
+        .pokemon-species {
+            font-size: 0.6rem;
+            color: var(--pokemon-yellow);
+            text-align: center;
+            margin-bottom: 0.2rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Pane for Grok's Tool Calls beneath the emulator screen */
+        .toolcalls-window {
+            width: 100%;
+            padding: 0.5rem;
+            margin-top: 1rem;
+            background-color: var(--chat-bg);
+            border-top: 4px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            max-height: 950px;
+            overflow: hidden;
+        }
+        .toolcalls-header {
+            padding: 0.5rem;
+            border-bottom: 2px solid var(--border-color);
+            background: var(--header-gradient);
+        }
+        .toolcalls-header h2 {
+            font-size: 1rem;
+            color: var(--pokemon-yellow);
+            margin: 0;
+        }
+        .toolcalls-messages {
+            flex: 1;
+            padding: 1rem;
+            overflow-y: auto;
+            font-size: 0.9rem;
+            color: var(--chat-text);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* Progress Bar styling */
+        .progress-bar-container {
+            position: relative;
+            width: 100%;
+            height: 1rem;
+            background-color: var(--border-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            margin-top: 0.5rem;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background-color: var(--pokemon-yellow);
+            width: 0%;
+            border-radius: 4px 0 0 4px;
+            transition: width 0.3s ease;
+        }
+        .progress-bar-text {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            text-align: center;
+            font-size: 0.75rem;
+            line-height: 1rem;
+            color: var(--chat-text);
+        }
+
+        /* Agent Actions pane styling */
+        .actions-window {
+            grid-area: actions;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--chat-bg);
+            border: 4px solid var(--border-color);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .actions-window .actions-header {
+            padding: 1rem;
+            border-bottom: 4px solid var(--border-color);
+            background: var(--header-gradient);
+        }
+
+        .actions-window .actions-header h2 {
+            font-size: 1.2rem;
+            color: var(--pokemon-yellow);
+            text-shadow: 1px 1px #000;
+        }
+
+        .actions-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        .actions-messages::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* Unified header styles */
+        .toolcalls-header h2,
+        .actions-header h2,
+        .chat-header h2 {
+            font-size: 1rem;
+            color: var(--pokemon-yellow);
+            margin: 0;
+            font-family: 'Press Start 2P', cursive;
+        }
+        /* Enlarge main title */
+        header.header h1 {
+            font-size: 2rem;
+            font-family: 'Press Start 2P', cursive;
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <h1>Grok Plays Pokemon</h1>
+        <div class="status">
+            <span id="connectionStatus" class="status-text">Stopped</span>
+            <button class="dev-toggle-button red" id="dev-toggle" onclick="toggleDevControl()">Dev Control: OFF</button>
+            <button class="run-button" id="run-button" onclick="toggleAgent()">Run</button>
+            <button class="run-button red" id="stop-button" onclick="stopAgent()" style="display: none;">Stop</button>
+            <input type="file" id="save-state-input" style="display: none" accept=".state">
+            <button class="run-button" id="load-state-button"
+                onclick="document.getElementById('save-state-input').click()">Load Save</button>
+            <label for="delay-input" style="margin-left:1rem; color: var(--chat-text); font-size:0.7rem;">Delay
+                (s):</label>
+            <input id="delay-input" type="number" min="0" step="0.1" value="2.0"
+                style="width:4rem; font-size:0.7rem; margin-left:0.5rem;" />
+            <button id="connectButton" onclick="connectWebSocket()">Connect</button>
+            <button id="disconnectButton" onclick="disconnectWebSocket()">Disconnect</button>
+            <button id="refreshButton" onclick="connectWebSocket()">Refresh</button>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="game-window">
+            <div id="screen-container">
+                <canvas id="game-screen" width="160" height="144"></canvas>
+                <div id="progress-bar-container" class="progress-bar-container"></div>
+                <pre id="debug-output"
+                    style="background: rgba(0,0,0,0.7); color: var(--chat-text); font-family: monospace; font-size: 0.7rem; max-height: 100px; overflow-y: auto; width: 640px; margin-top: 8px;"></pre>
+            </div>
+
+            <!-- Pane for Grok's Tool Calls beneath the emulator screen -->
+            <div class="toolcalls-window">
+                <div class="toolcalls-header">
+                    <h2>Grok's Tool Calls</h2>
+                </div>
+                <div class="toolcalls-messages" id="toolcalls-messages"></div>
+            </div>
+        </div>
+        <div class="actions-window">
+            <div class="actions-header">
+                <h2>Grok's Actions</h2>
+            </div>
+            <div class="actions-messages" id="actions-messages"></div>
+        </div>
+        <div class="chat-window">
+            <div class="chat-header">
+                <h2>Grok's Thoughts</h2>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+            </div>
+        </div>
+
+        <div class="team-window">
+            <h2>Current Team</h2>
+            <div class="team-container" id="team-container">
+                <div class="pokemon-card placeholder">No Pokémon data available</div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        console.log('Index.html script loaded');
+        let devMode = false;
+        let ws;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 20; // Limit attempts
+        const initialReconnectDelay = 1000; // 1 second
+        let currentReconnectDelay = initialReconnectDelay;
+        let reconnectTimeoutId;
+        let isAgentRunning = false;
+        let isAgentPaused = false;
+        let lastFrameUrl = null; // Store the last frame for redraws
+
+        const chatMessages = document.getElementById('chat-messages');
+        const actionsMessages = document.getElementById('actions-messages');
+        const gameScreen = document.getElementById('game-screen');
+        const ctx = gameScreen.getContext('2d');
+        const debugOutput = document.getElementById('debug-output');
+
+        // --- Grid Drawing Function ---
+        function drawGrid() {
+            if (!devMode || !gameScreen.width || !gameScreen.height) return; // Only draw if dev mode is ON and canvas has dimensions
+
+            const numRows = 9;
+            const numCols = 10;
+            const cellWidth = gameScreen.width / numCols;
+            const cellHeight = gameScreen.height / numRows;
+
+            ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid-color').trim() || 'rgba(255, 255, 255, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+
+            // Draw vertical lines
+            for (let i = 1; i < numCols; i++) {
+                ctx.moveTo(i * cellWidth, 0);
+                ctx.lineTo(i * cellWidth, gameScreen.height);
+            }
+
+            // Draw horizontal lines
+            for (let i = 1; i < numRows; i++) {
+                ctx.moveTo(0, i * cellHeight);
+                ctx.lineTo(gameScreen.width, i * cellHeight);
+            }
+
+            ctx.stroke();
+        }
+
+        // --- Redraw Canvas Helper ---
+        function redrawCanvas() {
+            ctx.clearRect(0, 0, gameScreen.width, gameScreen.height); // Clear canvas first
+            if (lastFrameUrl) {
+                const img = new Image();
+                img.onload = () => {
+                    ctx.drawImage(img, 0, 0, gameScreen.width, gameScreen.height);
+                    drawGrid(); // Draw grid if devMode is ON
+                };
+                img.src = lastFrameUrl;
+            } else {
+                // If no frame yet, just draw grid if needed
+                drawGrid();
+            }
+        }
+
+        // --- Dev Control Toggle ---
+        async function toggleDevControl() {
+            const btn = document.getElementById('dev-toggle');
+            const targetPause = !devMode;
+            const endpoint = targetPause ? '/pause' : '/start';
+            try {
+                const res = await fetch(endpoint, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    devMode = targetPause;
+                    // Update button UI
+                    if (devMode) {
+                        btn.textContent = 'Dev Control: ON';
+                        btn.classList.remove('red'); btn.classList.add('green');
+                    } else {
+                        btn.textContent = 'Dev Control: OFF';
+                        btn.classList.remove('green'); btn.classList.add('red');
+                    }
+                    // Update status text
+                    const statusText = document.querySelector('.status-text');
+                    statusText.textContent = devMode ? 'Paused' : 'Running';
+                    isAgentPaused = devMode;
+                    console.log(`Dev Control ${devMode ? 'activated' : 'deactivated'}:`, data);
+                } else {
+                    console.error('Failed to toggle Dev control:', data);
+                }
+            } catch (err) {
+                console.error('Error toggling Dev control:', err);
+            }
+            redrawCanvas();
+        }
+
+        // --- WebSocket Handling ---
+        function connectWebSocket() {
+            if (ws && ws.readyState !== WebSocket.CLOSED) {
+                console.log("WebSocket already connected or connecting.");
+                return; // Prevent multiple connections
+            }
+
+            const port = window.location.port || "80"; // Default to 80 if port is not in location
+
+            // Use the correct host based on the environment
+            const host = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+                ? "localhost" // Use localhost for local development
+                : window.location.hostname; // Use the actual hostname for other environments
+
+            const wsUrl = `ws://${host}:${port}/ws`;
+            console.log(`Attempting to connect WebSocket to ${wsUrl}...`);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function (event) {
+                console.log("WebSocket connected:", event);
+                reconnectAttempts = 0; // Reset attempts on successful connection
+                currentReconnectDelay = initialReconnectDelay; // Reset delay
+                clearTimeout(reconnectTimeoutId); // Clear any pending reconnect
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                document.getElementById('connectionStatus').style.color = 'green';
+                checkAgentStatus(); // Check status when connection is established
+                // Preserve existing pause state across reconnect (no auto-pause fetch)
+                // Send initial delay setting to server
+                const delayInput = document.getElementById('delay-input');
+                if (delayInput && ws.readyState === WebSocket.OPEN) {
+                    const initialDelay = parseFloat(delayInput.value);
+                    console.log(`Sending initial delay: ${initialDelay}s`);
+                    ws.send(JSON.stringify({ type: 'set_delay', delay: initialDelay }));
+                }
+            };
+
+            ws.onmessage = function (event) {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    // Check if the message type is 'update'
+                    if (data.type === 'update') {
+                        console.log(`Update event with timestamp ${data.timestamp || 'none'}`);
+
+                        // CRITICAL SYNCHRONIZATION UPDATE: Add frame processing acknowledgment
+                        const processingStartTime = performance.now();
+
+                        // Update game frame (draw onto canvas)
+                        if (data.frame) {
+                            // Assuming data.frame is a base64-encoded PNG
+                            const img = new Image();
+                            img.onload = () => {
+                                ctx.clearRect(0, 0, gameScreen.width, gameScreen.height);
+                                ctx.drawImage(img, 0, 0, gameScreen.width, gameScreen.height);
+                                drawGrid(); // Draw grid if devMode is ON
+
+                                // Store frame for redrawing
+                                lastFrameUrl = img.src;
+
+                                // CRITICAL SYNCHRONIZATION UPDATE: Send acknowledgment after render completes
+                                if (data.require_ack && ws.readyState === WebSocket.OPEN) {
+                                    const processingTime = performance.now() - processingStartTime;
+                                    ws.send(JSON.stringify({
+                                        type: 'frame_ack',
+                                        timestamp: data.timestamp,
+                                        sync_id: data.sync_id,
+                                        processing_time: processingTime
+                                    }));
+                                }
+                            };
+
+                            img.onerror = (err) => {
+                                console.error(`Error loading base64 image frame: ${err}`);
+                                redrawCanvas();
+
+                                // Send error acknowledgment within error handler scope
+                                if (data.require_ack && ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({
+                                        type: 'frame_error',
+                                        timestamp: data.timestamp,
+                                        sync_id: data.sync_id,
+                                        error: String(err)
+                                    }));
+                                }
+                            };
+
+                            img.src = 'data:image/png;base64,' + data.frame;
+                        } else {
+                            // If no frame, just redraw grid if needed on current canvas content
+                            redrawCanvas();
+
+                            // Send acknowledgment even without frame
+                            if (data.require_ack && ws.readyState === WebSocket.OPEN) {
+                                const processingTime = performance.now() - processingStartTime;
+                                ws.send(JSON.stringify({
+                                    type: 'update_ack',
+                                    timestamp: data.timestamp,
+                                    sync_id: data.sync_id,
+                                    processing_time: processingTime
+                                }));
+                            }
+                        }
+
+                        // Route messages: Tool Calls and Thoughts
+                        if (data.message) {
+                            const raw = data.message.trim();
+                            // Ignore internal invocation logs
+                            if (raw.startsWith('Grok invoked') || raw.startsWith('Fallback invoked')) {
+                                // no-op (internal logs)
+                            }
+                            // Pure JSON tool call: display in the Tool Calls pane
+                            else if (raw.startsWith('{') && raw.endsWith('}')) {
+                                const toolContainer = document.getElementById('toolcalls-messages');
+                                const callDiv = document.createElement('div');
+                                callDiv.className = 'tool-call';
+                                callDiv.textContent = raw;
+                                toolContainer.appendChild(callDiv);
+                            } else {
+                                // Extract rationale and any JSON function call
+                                const match = raw.match(/^([\s\S]*?)\s*(\{.*\})$/);
+                                let rationale = raw;
+                                let jsonCall = null;
+                                if (match) {
+                                    rationale = match[1].trim();
+                                    jsonCall = match[2];
+                                }
+                                // Append rationale to Grok's Thoughts pane
+                                const thoughtDiv = document.createElement('div');
+                                thoughtDiv.className = 'message';
+                                const timeSpan = document.createElement('span');
+                                timeSpan.className = 'timestamp';
+                                timeSpan.textContent = new Date().toLocaleTimeString();
+                                thoughtDiv.appendChild(timeSpan);
+                                const pre = document.createElement('pre');
+                                pre.className = 'content';
+                                pre.textContent = rationale;
+                                thoughtDiv.appendChild(pre);
+                                chatMessages.appendChild(thoughtDiv);
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                                // If there's a JSON call, display it in the Tool Calls pane
+                                if (jsonCall) {
+                                    const toolContainer = document.getElementById('toolcalls-messages');
+                                    const callDiv = document.createElement('div');
+                                    callDiv.className = 'tool-call';
+                                    callDiv.textContent = jsonCall;
+                                    toolContainer.appendChild(callDiv);
+                                }
+                            }
+                        }
+
+                        // Update party display if party data included
+                        if (data.party) {
+                            updateTeamDisplay(data.party);
+                        }
+
+                        // Update progress bar for next goal
+                        if (data.progress_bar) {
+                            const progressContainer = document.getElementById('progress-bar-container');
+                            if (progressContainer) {
+                                progressContainer.innerHTML = '';
+                                const fillDiv = document.createElement('div');
+                                fillDiv.className = 'progress-bar-fill';
+                                fillDiv.style.width = `${data.progress_bar.percent}%`;
+                                progressContainer.appendChild(fillDiv);
+                                const textDiv = document.createElement('div');
+                                textDiv.className = 'progress-bar-text';
+                                textDiv.textContent = `${data.progress_bar.goal}: ${data.progress_bar.percent}%`;
+                                progressContainer.appendChild(textDiv);
+                            }
+                        }
+                    }
+                    // Handle tool result messages
+                    else if (data.type === 'tool_result') {
+                        console.log('Tool result received:', data.content);
+                        // Display agent actions in the actions pane
+                        let items = [];
+                        if (Array.isArray(data.content)) {
+                            items = data.content;
+                        } else if (data.content && Array.isArray(data.content.content)) {
+                            items = data.content.content;
+                        } else if (data.content && typeof data.content === 'string') {
+                            items = [{ type: 'text', text: data.content }];
+                        } else {
+                            console.warn('Received tool_result with no content to display', data.content);
+                            items = [];
+                        }
+                        items.forEach(item => {
+                            if (item.type === 'text') {
+                                const messageDiv = document.createElement('div');
+                                messageDiv.className = 'message';
+                                const pre = document.createElement('pre');
+                                pre.className = 'content';
+                                pre.textContent = item.text;
+                                messageDiv.appendChild(pre);
+                                actionsMessages.appendChild(messageDiv);
+                            }
+                        });
+                        actionsMessages.scrollTop = actionsMessages.scrollHeight;
+                    }
+                } catch (e) {
+                    console.error("Error processing WebSocket message:", e);
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'message error-message'; // Use a class for errors
+                    const timeSpan = document.createElement('span');
+                    timeSpan.className = 'timestamp';
+                    timeSpan.textContent = new Date().toLocaleTimeString();
+                    const pre = document.createElement('pre');
+                    pre.className = 'content';
+                    pre.textContent = `Error parsing/processing message: ${e}\nRaw data: ${event.data}`; // Show raw data on error
+                    messageDiv.appendChild(timeSpan);
+                    messageDiv.appendChild(pre);
+                    chatMessages.appendChild(messageDiv);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+            };
+
+            ws.onerror = function (event) {
+                console.error("WebSocket error:", event);
+                document.getElementById('connectionStatus').textContent = 'Error';
+                document.getElementById('connectionStatus').style.color = 'red';
+            };
+
+            ws.onclose = function (event) {
+                console.log("WebSocket closed:", event);
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                document.getElementById('connectionStatus').style.color = 'orange';
+
+                // Attempt to reconnect
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectTimeoutId = setTimeout(connectWebSocket, currentReconnectDelay);
+                    console.log(`Attempting reconnect in ${currentReconnectDelay}ms (Attempt ${reconnectAttempts + 1})`);
+                    reconnectAttempts++;
+                    // Increase delay exponentially, with a cap
+                    currentReconnectDelay = Math.min(currentReconnectDelay * 2, 30000); // Max 30 seconds
+                } else {
+                    console.warn("Max reconnect attempts reached.");
+                    document.getElementById('connectionStatus').textContent = 'Failed to Connect';
+                    document.getElementById('connectionStatus').style.color = 'red';
+                }
+            };
+        }
+
+        // Helper function to escape HTML for safe display
+        function escapeHTML(str) {
+            const div = document.createElement('div');
+            div.appendChild(document.createTextNode(str));
+            return div.innerHTML;
+        }
+
+        // --- Agent Control Functions ---
+        document.getElementById('save-state-input').addEventListener('change', async function (e) {
+            if (!e.target.files.length) return;
+
+            const file = e.target.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const statusText = document.querySelector('.status-text');
+            try {
+                const response = await fetch('/upload-save-state', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (data.status === 'success') {
+                    statusText.textContent = 'Save state loaded';
+                    // Request a fresh frame after loading state
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'refresh_frame' }));
+                    }
+                } else {
+                    statusText.textContent = 'Error: ' + data.message;
+                }
+            } catch (error) {
+                console.error('Error uploading save state:', error);
+                statusText.textContent = 'Error uploading save state';
+            }
+            e.target.value = ''; // Clear the input
+        });
+
+        async function toggleAgent() {
+            const runButton = document.getElementById('run-button');
+            const stopButton = document.getElementById('stop-button');
+            const loadStateButton = document.getElementById('load-state-button');
+            const statusText = document.querySelector('.status-text');
+
+            if (!isAgentRunning) {
+                runButton.disabled = true;
+                try {
+                    const response = await fetch('/start', { method: 'POST' });
+                    const data = await response.json();
+
+                    if (data.status === 'success') {
+                        isAgentRunning = true;
+                        isAgentPaused = false;
+                        statusText.textContent = 'Running';
+                        runButton.style.display = 'none';
+                        stopButton.style.display = 'inline';
+                        loadStateButton.style.display = 'none';
+                    } else {
+                        statusText.textContent = 'Error: ' + data.message;
+                        runButton.disabled = false;
+                    }
+                } catch (error) {
+                    console.error('Error starting agent:', error);
+                    statusText.textContent = 'Error starting agent';
+                    runButton.disabled = false;
+                }
+            }
+        }
+
+        async function stopAgent() {
+            const runButton = document.getElementById('run-button');
+            const stopButton = document.getElementById('stop-button');
+            const loadStateButton = document.getElementById('load-state-button');
+            const statusText = document.querySelector('.status-text');
+
+            try {
+                const response = await fetch('/stop', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    isAgentRunning = false;
+                    isAgentPaused = false;
+                    statusText.textContent = 'Stopped';
+                    runButton.disabled = false;
+                    runButton.style.display = 'inline';
+                    stopButton.style.display = 'none';
+                    loadStateButton.style.display = 'inline';
+                } else {
+                    statusText.textContent = 'Error: ' + data.message;
+                }
+            } catch (error) {
+                console.error('Error stopping agent:', error);
+                statusText.textContent = 'Error stopping agent';
+            }
+        }
+
+        async function checkAgentStatus() {
+            try {
+                const response = await fetch('/status');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status} `);
+                }
+                const data = await response.json();
+
+                const statusText = document.querySelector('.status-text');
+                const devBtn = document.getElementById('dev-toggle');
+                const runButton = document.getElementById('run-button');
+                const stopButton = document.getElementById('stop-button');
+                const loadStateButton = document.getElementById('load-state-button');
+
+                // Determine running and paused state
+                isAgentRunning = data.status === 'running' || data.status === 'paused';
+                isAgentPaused = data.status === 'paused';
+
+                // Sync dev toggle UI
+                if (isAgentPaused) {
+                    devBtn.textContent = 'Dev Control: ON';
+                    devBtn.classList.remove('red'); devBtn.classList.add('green');
+                    devMode = true;
+                } else {
+                    devBtn.textContent = 'Dev Control: OFF';
+                    devBtn.classList.remove('green'); devBtn.classList.add('red');
+                    devMode = false;
+                }
+                // Update UI based on fetched run status
+                if (isAgentRunning) {
+                    statusText.textContent = isAgentPaused ? 'Paused' : 'Running';
+                    runButton.style.display = 'none';
+                    stopButton.style.display = 'inline';
+                    loadStateButton.style.display = 'none';
+                    runButton.disabled = true;
+                } else {
+                    statusText.textContent = data.status === 'stopped' ? 'Stopped' : `Status: ${data.status}`;
+                    runButton.disabled = false;
+                    runButton.style.display = 'inline';
+                    stopButton.style.display = 'none';
+                    loadStateButton.style.display = 'inline';
+                }
+
+            } catch (error) {
+                console.error('Error checking agent status:', error);
+                // Optionally update status text to indicate an error fetching status
+                const statusText = document.querySelector('.status-text');
+                if (statusText) statusText.textContent = 'Status Error';
+            }
+        }
+
+        // --- Initial Setup ---
+        // Using fixed canvas size; auto-resize disabled
+        // Window resize listener and resizeCanvas removed to preserve display dimensions
+        connectWebSocket(); // Initial WebSocket connection
+
+        // Send periodic ping to keep connection alive
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000);
+
+        // Check agent status periodically
+        setInterval(checkAgentStatus, 5000);
+
+        // --- Input Handlers ---
+        // Capture keyboard events in Dev Mode
+        document.addEventListener("keydown", (e) => {
+            if (!devMode || !isAgentPaused) return; // Only allow dev input if dev mode ON AND agent is PAUSED
+            let btn = null;
+            switch (e.code) {
+                case "KeyA": btn = "a"; break;
+                case "KeyS": btn = "b"; break;
+                case "Enter": btn = "start"; break;
+                case "Backspace": btn = "select"; break; // Often Backspace for Select
+                case "ArrowUp": btn = "up"; break;
+                case "ArrowDown": btn = "down"; break;
+                case "ArrowLeft": btn = "left"; break;
+                case "ArrowRight": btn = "right"; break;
+            }
+            if (btn) {
+                e.preventDefault(); // Prevent default browser action (e.g., scrolling)
+                console.log("Dev Key pressed:", btn);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "input", button: btn }));
+                }
+            }
+        });
+
+        // Listen for clicks in Dev mode for navigation
+        gameScreen.addEventListener('click', e => {
+            // Only allow navigation clicks if dev mode ON AND agent is PAUSED
+            if (!devMode || !isAgentPaused || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            const rect = gameScreen.getBoundingClientRect();
+            // Calculate click position relative to the canvas rendering area
+            const scaleX = gameScreen.width / rect.width;
+            const scaleY = gameScreen.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            // Calculate grid cell based on 9 rows, 10 columns
+            const numRows = 9;
+            const numCols = 10;
+            const col = Math.floor(x / gameScreen.width * numCols);
+            const row = Math.floor(y / gameScreen.height * numRows);
+
+            // Ensure row/col are within bounds
+            if (row >= 0 && row < numRows && col >= 0 && col < numCols) {
+                console.log(`Requesting navigation to grid cell(${row}, ${col})`);
+                ws.send(JSON.stringify({ type: 'navigate', row, col }));
+            } else {
+                console.warn(`Calculated click outside grid bounds: (${row}, ${col})`);
+            }
+        });
+
+        // Handle delay input changes
+        document.getElementById('delay-input').addEventListener('change', function (e) {
+            const newDelay = parseFloat(e.target.value);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'set_delay', delay: newDelay }));
+            }
+        });
+
+        // Refresh button functionality
+        const refreshButton = document.getElementById('refreshButton');
+        if (refreshButton) {
+            refreshButton.addEventListener('click', function () {
+                console.log("Refresh button clicked. Closing WebSocket and attempting to reconnect.");
+                if (ws) {
+                    ws.close(); // Close current connection
+                }
+                reconnectAttempts = 0; // Reset attempts
+                currentReconnectDelay = initialReconnectDelay; // Reset delay
+                clearTimeout(reconnectTimeoutId); // Clear any pending reconnect
+                // Add a small delay before the first reconnect attempt after manual refresh
+                reconnectTimeoutId = setTimeout(connectWebSocket, 500); // Wait 500ms
+            });
+        }
+
+        // Parse party data from WebSocket and update UI
+        function updateTeamDisplay(partyData) {
+            const teamContainer = document.getElementById('team-container');
+            if (!teamContainer) return;
+
+            // Clear current team display
+            teamContainer.innerHTML = '';
+
+            if (!partyData || partyData.length === 0) {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'pokemon-card placeholder';
+                placeholder.textContent = 'No Pokémon data available';
+                teamContainer.appendChild(placeholder);
+                return;
+            }
+
+            // Create card for each Pokémon
+            partyData.forEach(pokemon => {
+                const card = document.createElement('div');
+                card.className = 'pokemon-card';
+
+                // Species label above entry
+                const speciesDiv = document.createElement('div');
+                speciesDiv.className = 'pokemon-species';
+                speciesDiv.textContent = pokemon.species;
+                card.appendChild(speciesDiv);
+
+                // Header with name and level
+                const header = document.createElement('div');
+                header.className = 'pokemon-header';
+
+                const name = document.createElement('div');
+                name.className = 'pokemon-name';
+                name.textContent = pokemon.nickname || pokemon.species;
+
+                const level = document.createElement('div');
+                level.className = 'pokemon-level';
+                level.textContent = `Lv.${pokemon.level}`;
+
+                header.appendChild(name);
+                header.appendChild(level);
+
+                // HP bar
+                const hpContainer = document.createElement('div');
+                hpContainer.className = 'pokemon-hp';
+
+                const hpBar = document.createElement('div');
+                hpBar.className = 'hp-bar';
+                const hpPercent = (pokemon.hp / pokemon.max_hp) * 100;
+                hpBar.style.width = `${hpPercent}%`;
+
+                if (hpPercent < 25) {
+                    hpBar.classList.add('low');
+                } else if (hpPercent < 50) {
+                    hpBar.classList.add('medium');
+                }
+
+                const hpText = document.createElement('div');
+                hpText.className = 'hp-text';
+                hpText.textContent = `HP: ${pokemon.hp}/${pokemon.max_hp}`;
+
+                hpContainer.appendChild(hpBar);
+
+                // Status/Type display
+                const statusDiv = document.createElement('div');
+                statusDiv.className = 'pokemon-status';
+                statusDiv.textContent = pokemon.status || 'OK';
+
+                // Type pills
+                const typesDiv = document.createElement('div');
+                typesDiv.className = 'pokemon-types';
+
+                if (pokemon.type1) {
+                    const type1Pill = document.createElement('span');
+                    type1Pill.className = `type-pill type-${pokemon.type1.toLowerCase()}`;
+                    type1Pill.textContent = pokemon.type1;
+                    typesDiv.appendChild(type1Pill);
+                }
+
+                if (pokemon.type2) {
+                    const type2Pill = document.createElement('span');
+                    type2Pill.className = `type-pill type-${pokemon.type2.toLowerCase()}`;
+                    type2Pill.textContent = pokemon.type2;
+                    typesDiv.appendChild(type2Pill);
+                }
+
+                // Assemble card
+                card.appendChild(header);
+                card.appendChild(hpContainer);
+                card.appendChild(hpText);
+                card.appendChild(statusDiv);
+                card.appendChild(typesDiv);
+
+                teamContainer.appendChild(card);
+            });
+        }
+
+        // Manual navigation helper: call nav(y, x) in the browser console to navigate to global coordinates
+        window.nav = function (gy, gx) {
+            console.log(`Console navigation request to global coords (${gy}, ${gx})`);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'navigate_to_coords', glob_y: gy, glob_x: gx }));
+            } else {
+                console.warn('WebSocket is not connected');
+            }
+        };
+
+    </script>
+</body>
+
+</html>

@@ -142,7 +142,18 @@ async def send_game_updates(frame_data: bytes, grok_message: str):
         else:
             message["message"] = grok_message
             logger.info(f"Adding message to update: {grok_message[:500]}...")
-        
+                    
+            # IMPORTANT ADDITION: Add battle dialog specific information when in battle
+            if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'emulator'):
+                try:
+                    dialog = app.state.agent.emulator.get_active_dialog()
+                    if dialog and hasattr(app.state.agent, 'might_be_battle') and app.state.agent.might_be_battle():
+                        # Add explicit battle dialog to the UI update
+                        message["battle_dialog"] = dialog
+                        logger.debug(f"Added battle dialog to update: {dialog[:200]}...")
+                except Exception as e:
+                    logger.error(f"Error adding battle dialog to update: {e}")
+                
         # Add Grok's latest thought if available
         if hasattr(app.state, 'agent') and hasattr(app.state.agent, 'get_latest_grok_thought'):
             grok_thought = app.state.agent.get_latest_grok_thought()

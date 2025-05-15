@@ -1495,6 +1495,16 @@ class PokemonRedReader:
         self.observation = obs
         return obs
 
+    def clear_dialog_buffer(self) -> None:
+        """Clear the dialog buffer to prevent stale dialog text."""
+        buffer_start = 0xC3A0
+        buffer_end = 0xC507
+        for addr in range(buffer_start, buffer_end + 1):
+            self.write_memory(addr, 0x7F)
+        for addr in range(buffer_start, buffer_end + 1):
+            print(f"buffer contents:{self.read_memory(addr)}")
+        print(f"Dialog buffer cleared from {buffer_start} to {buffer_end}")
+
 class GameState(IntEnum):
     FILTERED_INPUT = 0
     IN_BATTLE = 1

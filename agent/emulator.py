@@ -70,6 +70,9 @@ class Emulator:
         self.reader = PokemonRedReader(self.pyboy.memory) # Initialize reader once
         self.game = Game(self.pyboy)
         
+        # Expose global-coordinate conversion as an instance method
+        self.local_to_global = local_to_global
+        
         self.seen_npcs: Set[Tuple[int, int, int]] = set()  # (map_id, grid_row, grid_col)
         self._npc_track_distance: int | None = None  # default: track all
 

@@ -13,6 +13,8 @@ import config
 import glob
 from pathlib import Path
 from config import SAVE_STATE_DIR
+from logging import Formatter
+from logging import Handler
 
 # Use paths from config
 logs_dir = config.LOG_DIR
@@ -26,31 +28,28 @@ os.makedirs(os.path.join(run_log_dir, "frames"), exist_ok=True)
 run_save_state_dir = os.path.join(config.SAVE_STATE_DIR, f"run_{current_time}") # Use config save dir
 os.makedirs(run_save_state_dir, exist_ok=True)
 
-# # Set up logging using config level
-# logging.basicConfig(
-#     level=config.LOG_LEVEL,
-#     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-#     handlers=[
-#         logging.StreamHandler(),
-#         logging.FileHandler(os.path.join(run_log_dir, "game.log"))
-#     ],
-# )
+# Set up logging using config level
+logging.basicConfig(
+    level=config.LOG_LEVEL,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(os.path.join(run_log_dir, "game.log"), maxBytes=10*1024*1024, backupCount=5)
+    ],
+)
 
-# logger = logging.getLogger(__name__)
+# Also log to the static project root game.log for debugging with rotation
+static_log_path = os.path.join(os.path.dirname(__file__), "game.log")
+# Clear static project root game.log each run
+open(static_log_path, 'w').close()
+# Use RotatingFileHandler to prevent unbounded growth
+static_rotating_handler = RotatingFileHandler(static_log_path, maxBytes=5*1024*1024, backupCount=3)
+static_rotating_handler.setFormatter(Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+logging.getLogger().addHandler(static_rotating_handler)
 
-# Define log file path
-log_file_path = 'game.log'
-
-# Clear the log file
-open(log_file_path, 'w').close()
-
-# Configure logging
-logging.basicConfig(level=config.LOG_LEVEL,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[
-                        RotatingFileHandler(log_file_path, maxBytes=1024*1024*5, backupCount=5), # 5MB file size, 5 backup files
-                        logging.StreamHandler() # Also log to console
-                    ])
+# Silence verbose debug logging from HTTP and WebSocket libraries
+for noisy in ['httpcore', 'httpx', 'websockets']:
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ game_logger = logging.getLogger("game")
 # Create a main game logger that all components will use
 game_logger = logging.getLogger("game")
 game_logger.setLevel(config.LOG_LEVEL)
-game_handler = logging.FileHandler(os.path.join(run_log_dir, "game.log"))
+game_handler = RotatingFileHandler(os.path.join(run_log_dir, "game.log"), maxBytes=10*1024*1024, backupCount=5)
 game_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 game_logger.addHandler(game_handler)
 
@@ -71,6 +70,13 @@ game_logger.addHandler(console_handler)
 
 # Set up Grok's messages to go to the same log
 grok_logger = game_logger
+
+# Create separate Grok messages log file and handler
+grok_messages_path = os.path.join(run_log_dir, 'grok_messages.log')
+open(grok_messages_path, 'w').close()
+grok_messages_handler = RotatingFileHandler(grok_messages_path, maxBytes=5*1024*1024, backupCount=3)
+grok_messages_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+grok_logger.addHandler(grok_messages_handler)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -104,16 +110,32 @@ async def lifespan(app):
         logger.error(f"Failed to load save state: {e}")
         logger.warning("Continuing without loading save state.")
     
-    yield
-    # Shutdown: cleanup
-    if hasattr(app.state, 'agent_task') and app.state.agent_task:
-        app.state.agent_task.cancel()
+    try:
+        yield
+    except Exception as e:
+        # Save emulator state on crash
         try:
-            await app.state.agent_task
-        except asyncio.CancelledError:
-            pass
-    if hasattr(app.state, 'agent'):
-        app.state.agent.stop()
+            crash_path = app.state.agent.emulator.save_state("crash_save")
+            app.state.grok_logger.error(f"Saved crash state to {crash_path}")
+        except Exception as save_err:
+            app.state.grok_logger.error(f"Failed to save crash state: {save_err}")
+        raise
+    finally:
+        # Save emulator state on shutdown
+        try:
+            shutdown_path = app.state.agent.emulator.save_state("shutdown_save")
+            app.state.grok_logger.info(f"Saved shutdown state to {shutdown_path}")
+        except Exception as save_err2:
+            app.state.grok_logger.error(f"Failed to save shutdown state: {save_err2}")
+        # Shutdown: cleanup
+        if hasattr(app.state, 'agent_task') and app.state.agent_task:
+            app.state.agent_task.cancel()
+            try:
+                await app.state.agent_task
+            except asyncio.CancelledError:
+                pass
+        if hasattr(app.state, 'agent'):
+            app.state.agent.stop()
 
 app.router.lifespan_context = lifespan
 

@@ -1,6 +1,9 @@
 # app.py
 import logging
+# Enable debug logging for troubleshooting
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, status, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -56,6 +59,8 @@ class ConnectionManager:
         logger.info(f"WebSocket disconnected. Remaining connections: {len(self.active_connections)}")
 
     async def broadcast(self, message: str):
+        # DEBUG: log broadcast message for troubleshooting
+        logger.debug(f"Broadcasting message to {len(self.active_connections)} connections: {message[:100]}...")
         if not self.active_connections:
             logger.warning("No active connections to broadcast to")
             return
@@ -289,6 +294,8 @@ async def websocket_endpoint(websocket: WebSocket):
             # Receive a message with timeout; send ping on timeout to keep connection alive
             try:
                 raw = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                # DEBUG: log received raw message from WebSocket
+                logger.debug(f"WebSocket received raw message: {raw}")
             except asyncio.TimeoutError:
                 # Send ping to client to prevent idle timeout
                 try:
@@ -346,6 +353,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 # Handle navigation clicks in Dev Mode
                 elif mtype == "navigate" and getattr(app.state, 'is_paused', False) and hasattr(app.state, 'agent'):
+                    # DEBUG: log navigate command payload
+                    logger.debug(f"navigate payload: {msg}")
                     row = msg.get("row")
                     col = msg.get("col")
                     if row == 4 and col == 4:
@@ -353,11 +362,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_text(json.dumps({"type": "tool_result", "content": "Cannot navigate to yourself."}))
                         continue
                     logger.info(f"Dev mode: navigation request to grid cell ({row}, {col})")
+                    # DEBUG: log queue size before navigation
+                    logger.debug(f"Queue size before navigation: {queue.qsize()}")
                     try:
                         raw_map = app.state.agent.emulator.get_collision_map()
+                        # DEBUG: log collision_map dimensions
+                        logger.debug(f"Raw collision_map dims: rows {len(raw_map['collision_map'])}, cols {len(raw_map['collision_map'][0])}")
                         cell = raw_map["collision_map"][row][col]
                         target_y = cell.get("y")
                         target_x = cell.get("x")
+                        # DEBUG: log target coordinates obtained
+                        logger.debug(f"Cell target coords: y={target_y}, x={target_x}")
                         # Use agent's navigate_to tool for pathfinding
                         class FakeToolCall:
                             def __init__(self, name, input_data, call_id=None):
@@ -371,13 +386,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             FakeToolCall("navigate_to", {"glob_y": target_y, "glob_x": target_x}, str(uuid.uuid4()))
                         )
                         # Execute all enqueued button presses
-                        for _ in range(queue.qsize()):
-                            await process_next_button("Dev mode", app.state.agent, send_game_updates)
-                        # Send tool result message
-                        await websocket.send_text(json.dumps({
-                            "type": "tool_result",
-                            "content": result
-                        }))
+                        while not queue.empty():
+                            await process_next_button("Agent nav", app.state.agent, send_game_updates)
+                        # Broadcast tool result to all clients instead of direct send to avoid closed socket errors
+                        try:
+                            tool_msg = json.dumps({"type": "tool_result", "content": result})
+                            await manager.broadcast(tool_msg)
+                        except Exception as e:
+                            logger.warning(f"Failed to broadcast tool_result: {e}")
                         # Send updated frame
                         frame = app.state.agent.get_frame()
                         if frame:
@@ -386,14 +402,56 @@ async def websocket_endpoint(websocket: WebSocket):
                             target_y = cell.get("y")
                             target_x = cell.get("x")
                             await send_game_updates(frame, f"Dev mode: navigated to (glob_y: {target_y}, glob_x: {target_x}) (grid_y: {row}, grid_x: {col})")
+                        # DEBUG: log queue size after processing navigation
+                        logger.debug(f"Queue size after processing: {queue.qsize()}")
+                        # Acknowledge navigation to client to stop UI from flooding
+                        await websocket.send_text(json.dumps({"type": "ack", "navigate": {"row": row, "col": col}, "timestamp": int(time.time() * 1000)}))
                     except Exception as e:
                         logger.error(f"Error in dev mode navigation: {e}", exc_info=True)
 
-                # Allow manual coordinate navigation
+                # Handle manual directional navigation helper (goDir)
+                elif mtype == "navigate_to_dir" and getattr(app.state, 'is_paused', False) and hasattr(app.state, 'agent'):
+                    # DEBUG: log directional navigation request
+                    logger.debug(f"navigate_to_dir payload: {msg}")
+                    direction = msg.get("direction")
+                    logger.info(f"Dev mode: manual directional navigation request: {direction}")
+                    logger.debug(f"Queue size before manual direction navigation: {queue.qsize()}")
+                    try:
+                        # Use agent's navigate_to tool with directional argument
+                        class FakeToolCall:
+                            def __init__(self, name, input_data, call_id=None):
+                                self.name = name
+                                self.input = input_data
+                                self.arguments = input_data
+                                self.id = call_id
+                                self.type = "function"
+                        fcall = FakeToolCall("navigate_to", {"direction": direction}, str(uuid.uuid4()))
+                        result = app.state.agent.process_tool_call(fcall)
+                        # Execute enqueued button presses for the navigation
+                        while not queue.empty():
+                            await process_next_button("Agent directional nav", app.state.agent, send_game_updates)
+                        # Broadcast the tool result to clients
+                        tool_msg = json.dumps({"type": "tool_result", "content": result})
+                        await manager.broadcast(tool_msg)
+                        # Send updated frame reflecting the move
+                        frame = app.state.agent.get_frame()
+                        if frame:
+                            await send_game_updates(frame, f"Dev mode: navigated direction {direction}")
+                        logger.debug(f"Queue size after manual direction processing: {queue.qsize()}")
+                        # Acknowledge to the client
+                        await websocket.send_text(json.dumps({"type": "ack", "navigate_to_dir": {"direction": direction}, "timestamp": int(time.time() * 1000)}))
+                    except Exception as e:
+                        logger.error(f"Error in manual directional navigation: {e}", exc_info=True)
+
+                # Allow manual coordinate navigation via nav() helper
                 elif mtype == "navigate_to_coords" and getattr(app.state, 'is_paused', False) and hasattr(app.state, 'agent'):
+                    # DEBUG: log manual navigate_to_coords command payload
+                    logger.debug(f"navigate_to_coords payload: {msg}")
                     gy = msg.get("glob_y")
                     gx = msg.get("glob_x")
                     logger.info(f"Dev mode: manual navigation request to global coords ({gy}, {gx})")
+                    # DEBUG: log queue size before manual navigation
+                    logger.debug(f"Queue size before manual navigation: {queue.qsize()}")
                     try:
                         # Use agent's navigate_to tool for pathfinding
                         class FakeToolCall:
@@ -407,10 +465,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             FakeToolCall("navigate_to", {"glob_y": gy, "glob_x": gx}, str(uuid.uuid4()))
                         )
                         # Execute all enqueued button presses
-                        for _ in range(queue.qsize()):
-                            await process_next_button("Dev mode", app.state.agent, send_game_updates)
-                        # Send tool result and frame
-                        await websocket.send_text(json.dumps({"type": "tool_result", "content": result}))
+                        while not queue.empty():
+                            await process_next_button("Agent nav", app.state.agent, send_game_updates)
+                        # Broadcast manual tool result
+                        try:
+                            tool_msg = json.dumps({"type": "tool_result", "content": result})
+                            await manager.broadcast(tool_msg)
+                        except Exception as e:
+                            logger.warning(f"Failed to broadcast manual tool_result: {e}")
                         frame = app.state.agent.get_frame()
                         if frame:
                             try:
@@ -425,7 +487,14 @@ async def websocket_endpoint(websocket: WebSocket):
                                     "frame_format": "base64",
                                     "message": f"Dev mode: manual navigated to ({gy}, {gx})"
                                 }
-                                await websocket.send_text(json.dumps(update_msg))
+                                try:
+                                    await manager.broadcast(json.dumps(update_msg))
+                                except Exception as e:
+                                    logger.warning(f"Failed to broadcast fallback update_msg: {e}")
+                        # DEBUG: log queue size after manual processing
+                        logger.debug(f"Queue size after manual processing: {queue.qsize()}")
+                        # Acknowledge manual navigation to client
+                        await websocket.send_text(json.dumps({"type": "ack", "navigate_to_coords": {"glob_y": gy, "glob_x": gx}, "timestamp": int(time.time() * 1000)}))
                     except Exception as e:
                         logger.error(f"Error in manual navigation: {e}", exc_info=True)
 

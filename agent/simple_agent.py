@@ -10,11 +10,12 @@ import requests
 import time
 import uuid
 import re
+import ast
 import time
 import random
 from pathlib import Path
 
-from agent.prompts import SYSTEM_PROMPT, SUMMARY_PROMPT, BATTLE_SYSTEM_PROMPT, DIALOG_SYSTEM_PROMPT
+from agent.prompts import SYSTEM_PROMPT, SUMMARY_PROMPT, BATTLE_SYSTEM_PROMPT, DIALOG_SYSTEM_PROMPT, OVERWORLD_NAVIGATION_FAILURE_PROMPT
 from agent.tools import AVAILABLE_TOOLS
 from agent.emulator import Emulator
 from game_data.nav import Nav
@@ -25,9 +26,7 @@ from openai import OpenAI
 import game_data.ram_map_leanke as ram_map
 from game_data.global_map import MAP_DATA, MAP_ROW_OFFSET, MAP_COL_OFFSET
 
-
-
-        
+       
 def build_xai_toolspec():
     tool_specs = []
     for t in AVAILABLE_TOOLS:
@@ -88,6 +87,9 @@ class FakeToolCall:
 class SimpleAgent:
     def __init__(self, cfg, app=None):
         """Initialize the simple agent focused on exploration rewards."""
+        # suppress pathfinding logs to only warnings and above
+        logging.getLogger("agent.emulator").setLevel(logging.WARNING)
+        logging.getLogger("agent.memory_reader").setLevel(logging.WARNING)
         self.emulator = Emulator(cfg.rom_path, cfg.emulator_headless, cfg.emulator_sound)
         self.emulator.initialize()
         self.emulator.register_hooks()
@@ -162,7 +164,26 @@ class SimpleAgent:
         # Navigation fallback scheduling: if off path, wait before returning
         self.return_scheduled = False
         self.nav_wait_counter = 0
-        
+        # Blacklist for stuck positions where navigation repeatedly fails
+        self.blacklisted_positions = set()
+        # Blacklist for navigation targets that repeatedly fail
+        self.blacklisted_targets = set()
+        # Track consecutive navigation failures
+        self.consecutive_nav_failures = 0
+        # Unstucking mode tracking: activated after failure threshold, disabled on escape
+        self.unstucking_mode = False
+        self.unstuck_wall_direction = None
+        # Track which direction is blocked for forced unstuck routine
+        self.blocked_dir = None
+        self.unstuck_movements = 0
+        self.failure_threshold = 5
+        # Dev flag to force unstucking mode for testing
+        self.dev_force_unstuck = os.getenv("DEV_FORCE_UNSTUCK", "0") == "1"
+        # Store previous failure count for threshold detection
+        self.previous_nav_failures = 0
+        # Tile/direction blacklist
+        self.blacklisted_tiles = {}
+        self.last_tile: tuple[int, int] | None = None
         # System prompt
         self.system_prompt = SYSTEM_PROMPT
 
@@ -400,6 +421,7 @@ class SimpleAgent:
         prompt += "1. press_buttons(buttons: list[str], wait: bool) — Press emulator buttons (e.g., ['up'], ['b']).\n"
         prompt += "2. navigate_to(glob_y: int, glob_x: int) — Navigate to specified global coordinates.\n"
         prompt += "3. exit_menu() — Exit any open menu or dialog by pressing B.\n"
+        prompt += "4. ask_friend(question: str) — Ask an unaffiliated helper Grok agent for guidance when you are uncertain. Provide a clear question.\n"
         
         return prompt
 
@@ -605,6 +627,13 @@ class SimpleAgent:
         if not self.currently_in_battle:
             state_parts.append("\nCOLLISION MAP:")
             cmap = self.emulator.get_collision_map()
+            # Apply blacklisted positions/targets: mark them unwalkable
+            blacklist = getattr(self, 'blacklisted_positions', set()) | getattr(self, 'blacklisted_targets', set())
+            for row in cmap.get('collision_map', []):
+                for cell in row:
+                    coord = (cell.get('global_y'), cell.get('global_x'))
+                    if coord in blacklist:
+                        cell['walkable'] = False
             # print(f"format_game_state(): cmap: {cmap}")
             state_parts.append(self.emulator.format_collision_map_simple(cmap))
 
@@ -686,31 +715,31 @@ class SimpleAgent:
         # Use the definitive game state variable to check for battle status.
         return self.game.battle._in_battle_state()
         
-    def navigate_to_move(self, current_index, target_index):
-        """Execute precise cursor movement with complete state rendering"""
-        logger.info(f"[BattleAI] Cursor at position {current_index}, navigating to target position {target_index}")
+    # def navigate_to_move(self, current_index, target_index):
+    #     """Execute precise cursor movement with complete state rendering"""
+    #     logger.info(f"[BattleAI] Cursor at position {current_index}, navigating to target position {target_index}")
         
-        # Determine navigation path
-        steps = target_index - current_index
+    #     # Determine navigation path
+    #     steps = target_index - current_index
         
-        if steps == 0:
-            return  # Already at target position
+    #     if steps == 0:
+    #         return  # Already at target position
         
-        # Execute movement with frame rendering
-        button = "down" if steps > 0 else "up"
-        for i in range(abs(steps)):
-            # Press directional button
-            current_position = current_index + (i if steps > 0 else -i)
-            target_position = current_position + (1 if steps > 0 else -1)
-            logger.info(f"[BattleAI] Moving cursor {button.upper()} from position {current_position} to {target_position}")
+    #     # Execute movement with frame rendering
+    #     button = "down" if steps > 0 else "up"
+    #     for i in range(abs(steps)):
+    #         # Press directional button
+    #         current_position = current_index + (i if steps > 0 else -i)
+    #         target_position = current_position + (1 if steps > 0 else -1)
+    #         logger.info(f"[BattleAI] Moving cursor {button.upper()} from position {current_position} to {target_position}")
             
-            # Execute button press with complete state synchronization
-            self.emulator.press_buttons([button], False)  # Set wait=False for controlled timing
-            self.emulator.tick(5)  # Short tick for button registration
-            self.emulator.step()   # CRITICAL: Complete full emulator step
+    #         # Execute button press with complete state synchronization
+    #         self.emulator.press_buttons([button], False)  # Set wait=False for controlled timing
+    #         self.emulator.tick(10)  # Short tick for button registration
+    #         self.emulator.step()   # CRITICAL: Complete full emulator step
             
-            # Ensure frame rendering completes
-            time.sleep(0.3)
+    #         # Ensure frame rendering completes
+    #         time.sleep(0.3)
     
     def update_npc_interaction_reward(self, npc_id, map_id):
         """Track NPC interactions and calculate penalties."""
@@ -761,302 +790,16 @@ class SimpleAgent:
             result = self._execute_tool(tool_call)
             logger.debug(f"[Tool Result] {tool_call.name} returned: {str(result)[:200]}")  # Truncate long outputs
             return result
+            
         except Exception as e:
             logger.error(f"[Tool Error] Failed to execute {tool_call.name}: {str(e)}")
-            raise
-        
-        
-        # Record this tool use for tracking
-        self.completed_steps.append(tool_name)
-        logger.info(f"Processing tool call: {tool_name}")
-        
-        step_reward = 0.0
-
-        if tool_name == "press_buttons":
-            buttons = tool_input["buttons"]
-            wait = tool_input.get("wait", True)
-            logger.info(f"[Buttons] Pressing: {buttons} (wait={wait})")
-            
-            # Process button press
-            result = self.emulator.press_buttons(buttons, wait)
-            
-            # Get position after action and calculate reward
-            current_position = self.emulator.get_game_coords()
-            step_reward = self.calculate_step_reward(current_position)
-            
-            # Update episode reward
-            self.current_episode_reward += step_reward
-            self.episode_step += 1
-            
-            # Check for NPC interactions if action was 'a'
-            if 'a' in buttons:
-                # Check if we're facing an NPC
-                npc_interaction = self.detect_npc_interaction()
-                if npc_interaction:
-                    npc_id, map_id = npc_interaction
-                    npc_reward = self.update_npc_interaction_reward(npc_id, map_id)
-                    step_reward += npc_reward
-                    self.current_episode_reward += npc_reward
-                    
-            # Detect map change and record movement log
-            new_map = self.emulator.get_location()
-            if self.current_map is None:
-                self.current_map = new_map
-            elif new_map != self.current_map:
-                # Save the sequence of movements and clear log
-                self.map_stack.append((self.current_map, self.move_log.copy()))
-                self.move_log.clear()
-                self.current_map = new_map
-            
-            # Get game state from memory after the action
-            memory_info = self.emulator.get_state_from_memory()
-            
-            # Add reward information to memory info
-            reward_info = f"\nREWARD INFORMATION:\n"
-            reward_info += f"Step Reward: {step_reward:.2f}\n"
-            reward_info += f"Episode Reward: {self.current_episode_reward:.2f}\n"
-            reward_info += f"Episode Step: {self.episode_step}/30\n"
-            reward_info += f"Total Episodes: {self.episode_count}\n"
-            reward_info += f"Total Unique Tiles: {len(self.visited_tiles)}\n"
-            if self.episode_rewards:
-                reward_info += f"Previous Episode Rewards: {', '.join([f'{r:.2f}' for r in self.episode_rewards])}\n"
-            
-            # Add dialog/menu state information
-            if self.is_in_non_navigation_state():
-                reward_info += f"⚠️ DIALOG/MENU ACTIVE - No penalties applied\n"
-                # reward_info += f"Use exit_menu tool to clear dialogs/menus\n"
-                
-                # Check if it might be a battle (persistent dialog that doesn't clear)
-                if self.currently_in_battle:
-                    reward_info += f"⚠️ CURRENTLY IN BATTLE!\n"
-            
-            # Combine memory info with reward info
-            if memory_info:
-                memory_info += reward_info
-            else:
-                memory_info = reward_info
-            
-            # Log the memory state after the tool call
-            logger.info(f"[Memory State after action]")
-            logger.info(memory_info)
-            
-            # Return tool result with reward information - highlight reward prominently
             return {
                 "type": "tool_result",
                 "id": tool_call.id,
                 "tool_use_id": tool_call.id,
-                "content": [
-                    {"type": "text", "text": f"REWARD UPDATE: Step Reward: {step_reward:.2f} | Total: {self.current_episode_reward:.2f} | Step {self.episode_step}/30"},
-                    {"type": "text", "text": f"\nPressed buttons: {', '.join(buttons)}"},
-                    {"type": "text", "text": f"\nGame state information from memory after your action:\n{memory_info}"}
-                ],
-            }
-            
-        elif tool_name == "navigate_to":
-            glob_y = tool_input["glob_y"]
-            glob_x = tool_input["glob_x"]
-            logger.info(f"[Navigation] Navigating to global coordinates (Y, X): ({glob_y}, {glob_x})")
-            
-            status, path = self.emulator.find_path(glob_y, glob_x)
-            path_rewards = 0.0
-            
-            if path is not None:
-                # Process each step in the path with rewards
-                for direction in path:
-                    self.emulator.press_buttons([direction], True)
-                    # Validate for active dialog after each navigation step and abort if dialog appears
-                    if self.emulator.get_active_dialog():
-                        logger.info("navigate_to: Active dialog detected, aborting navigation")
-                        break
-                    
-                    # Calculate reward for this step
-                    current_position = self.emulator.get_game_coords()
-                    step_reward = self.calculate_step_reward(current_position)
-                    path_rewards += step_reward
-                    
-                    # Update episode tracking
-                    self.current_episode_reward += step_reward
-                    self.episode_step += 1
-                    
-                    # Check for episode end
-                    if self.episode_step >= 30:
-                        break
-                
-                result = f"Navigation successful: followed path with {len(path)} steps, total reward: {path_rewards:.2f}"
-            else:
-                result = f"Navigation failed: {status}"
-            
-            # Get game state from memory after the action
-            memory_info = self.emulator.get_state_from_memory()
-            
-            # Add reward information
-            reward_info = f"\nREWARD INFORMATION:\n"
-            reward_info += f"Path Reward: {path_rewards:.2f}\n"
-            reward_info += f"Episode Reward: {self.current_episode_reward:.2f}\n"
-            reward_info += f"Episode Step: {self.episode_step}/30\n"
-            reward_info += f"Total Episodes: {self.episode_count}\n"
-            reward_info += f"Total Unique Tiles: {len(self.visited_tiles)}\n"
-            if self.episode_rewards:
-                reward_info += f"Previous Episode Rewards: {', '.join([f'{r:.2f}' for r in self.episode_rewards])}\n"
-            
-            # Add dialog/menu state information
-            if self.is_in_non_navigation_state():
-                reward_info += f"⚠️ DIALOG/MENU ACTIVE - No penalties applied\n"
-                # reward_info += f"Use exit_menu tool to clear dialogs/menus\n"
-                
-                # Check if it might be a battle (persistent dialog that doesn't clear)
-                if self.currently_in_battle:
-                    reward_info += f"⚠️ CURRENTLY IN BATTLE!\n"
-            
-            # Combine memory info with reward info
-            if memory_info:
-                memory_info += reward_info
-            else:
-                memory_info = reward_info
-            
-            # Return tool result with reward information - highlight reward prominently
-            return {
-                "type": "tool_result",
-                "id": tool_call.id,
-                "tool_use_id": tool_call.id,
-                "content": [
-                    {"type": "text", "text": f"REWARD UPDATE: Path Reward: {path_rewards:.2f} | Total: {self.current_episode_reward:.2f} | Step {self.episode_step}/30"},
-                    {"type": "text", "text": f"\nNavigation attempt to global ({glob_y}, {glob_x}): {result}"},
-                    {"type": "text", "text": f"\nGame state information from memory after your action:\n{memory_info}"},
-                ],
-            }
-            
-        # elif tool_name == "exit_menu":
-        #     logger.info("[Menu] Attempting to exit menu")
-        #     result = exit_menu(self.emulator)
+                    "content": [{"type": "text", "text": f"Error: {str(e)}"}],
+                }
 
-        #     # Get game state from memory after the action
-        #     memory_info = self.emulator.get_state_from_memory()
-
-        #     # Add reward information
-        #     reward_info = f"\nREWARD INFORMATION:\n"
-        #     reward_info += f"Step Reward: {step_reward:.2f}\n"
-        #     reward_info += f"Episode Reward: {self.current_episode_reward:.2f}\n"
-        #     reward_info += f"Episode Step: {self.episode_step}/30\n"
-        #     reward_info += f"Total Episodes: {self.episode_count}\n"
-        #     reward_info += f"Total Unique Tiles: {len(self.visited_tiles)}\n"
-
-        #     # Add dialog/menu state information
-        #     if self.is_in_non_navigation_state():
-        #         reward_info += f"⚠️ DIALOG/MENU ACTIVE - No penalties applied\n"
-        #         # reward_info += f"Use exit_menu tool to clear dialogs/menus\n"
-
-        #         # Check if it might be a battle (persistent dialog that doesn't clear)
-        #         if self.currently_in_battle:  
-        #             reward_info += f"⚠️ CURRENTLY IN BATTLE!\n"
-
-        #     # Combine memory info with reward info
-        #     if memory_info:
-        #         memory_info += reward_info
-        #     else:
-        #         memory_info = reward_info
-
-        #     # Return tool result with reward information
-        #     return {
-        #         "type": "tool_result",
-        #         "id": tool_call.id,
-        #         "tool_use_id": tool_call.id,
-        #         "content": [
-        #             {"type": "text", "text": f"Attempted to exit menu."},
-        #             {"type": "text", "text": f"\nGame state information from memory after your action:\n{memory_info}"},
-        #         ],
-        #     }
-            
-        # elif tool_name == "handle_battle":
-        #     # PROTOCOL: Synchronized battle execution sequence
-            
-        #     # 1. CAPTURE INITIAL STATE
-        #     dialog_before = self.emulator.get_active_dialog() or ""
-        #     status_text = dialog_before.strip().replace("\n", " ") if dialog_before else "(Battle dialog cleared)"
-            
-        #     # 2. SYNCHRONIZATION PHASE
-        #     # Execute full emulator step for state stabilization
-        #     self.emulator.step()
-        #     time.sleep(0.5)  # Extended stabilization delay
-            
-        #     # 3. BATTLE MENU VERIFICATION
-        #     battle_menu_visible = "►FIGHT" in dialog_before
-        #     logger.info(f"[BattleAI] Battle menu state: {'Active' if battle_menu_visible else 'Not detected'}")
-            
-        #     if not battle_menu_visible:
-        #         # Reset to known UI state
-        #         logger.info("[BattleAI] Battle menu not detected, attempting to reset UI state")
-        #         self.emulator.press_buttons(["b"], True)
-        #         self.emulator.step()
-        #         time.sleep(0.3)
-            
-        #     # 4. FIGHT MENU SELECTION
-        #     logger.info("[BattleAI] Selecting FIGHT menu option")
-        #     self.emulator.press_buttons(["a"], True)
-            
-        #     # Complete full emulator step cycle
-        #     self.emulator.step()
-        #     time.sleep(0.5)  # Extended stabilization delay
-            
-        #     # 5. MOVE DETERMINATION
-        #     try:
-        #         best_idx = self.choose_best_battle_move()
-        #         logger.info(f"[BattleAI] Best move determined: index {best_idx}")
-        #     except Exception as e:
-        #         logger.error(f"[BattleAI] Error determining best move: {e}", exc_info=True)
-        #         best_idx = 2  # Default to EMBER (position 2) for bug-type enemies
-        #         logger.warning(f"[BattleAI] Defaulting to EMBER (index 2) after calculation error")
-            
-        #     # 6. CURSOR NAVIGATION
-        #     # Establish precise cursor position
-        #     logger.info(f"[BattleAI] Navigation to target position {best_idx}")
-
-        #     # RESET PHASE: Ensure cursor begins at known position 0
-        #     for _ in range(4):  # Comprehensive reset sequence
-        #         self.emulator.press_buttons(["up"], False)
-        #         self.emulator.tick(5)
-        #         self.emulator.step()
-        #         time.sleep(0.1)  # Stabilization interval
-
-        #     # VERIFICATION DIAGNOSTIC: Record starting position
-        #     logger.info(f"[BattleAI] Cursor reset complete, beginning at position 0")
-
-        #     # NAVIGATION PHASE: Execute precisely (best_idx) movements
-        #     if best_idx > 0:  # Only navigate if not already at target
-        #         for i in range(best_idx):
-        #             logger.info(f"[BattleAI] Moving cursor {i} → {i+1}")
-        #             self.emulator.press_buttons(["down"], False)
-        #             self.emulator.tick(10)  # Extended timing for reliable registration
-        #             self.emulator.step()
-        #             time.sleep(0.4)  # Extended stabilization interval
-
-        #     # POSITION VERIFICATION: Confirm final position
-        #     logger.info(f"[BattleAI] Navigation complete. Target: {best_idx}, Movements: {best_idx}")
-            
-        #     # 7. MOVE EXECUTION
-        #     logger.info(f"[BattleAI] Selecting move at position {best_idx}")
-        #     self.emulator.press_buttons(["a"], True)
-            
-        #     # Complete full emulator step with extended delay
-        #     self.emulator.step()
-        #     time.sleep(0.3)  # Allow battle dialog to appear
-            
-        #     # 8. STATE UPDATE
-        #     self.episode_step += 1
-        #     move_name = self.last_chosen_move_name or f"Move at position {best_idx}"
-        #     self.last_message = f"Battle: Selected {move_name} against {status_text}"
-            
-        #     # 9. RESPONSE GENERATION
-        #     return {
-        #         "type": "tool_result",
-        #         "id": tool_call.id,
-        #         "tool_use_id": tool_call.id,
-        #         "content": [
-        #             {"type": "text", "text": f"Battle Text: \"{status_text}\""},
-        #             {"type": "text", "text": f"Selected move: {move_name} (position {best_idx})"},
-        #             {"type": "text", "text": f"Battle action completed with full frame rendering at each step."}
-        #         ],
-            # }
             
     def detect_npc_interaction(self):
         """Detect if the player is interacting with an NPC.
@@ -1109,7 +852,12 @@ class SimpleAgent:
     
     def step(self, force_render=False):
         """Execute a single step with strict timing controls and navigation."""
-               
+        # Dev: force unstucking if flagged
+        try:
+            self._check_dev_unstuck()
+        except Exception as e:
+            logger.debug(f"DEV unstuck check failed: {e}")
+
         self.currently_in_battle = self.emulator.is_in_battle()
         # Retrieve the latest observation dict for accurate state
         self.obs = self.red_reader.get_observation(self.emulator, self.game)
@@ -1263,15 +1011,142 @@ class SimpleAgent:
         # Always ask the LLM to choose the next action via tools
         logger.info("Requesting next action from LLM via OpenAI endpoint")
 
+        # Scripted wall-following when in unstucking mode
+        if self.unstucking_mode:
+            # Forced unstuck: check if the originally blocked direction is now available
+            logger.info("Scripted unstuck: blocked_dir=%s wall_dir=%s", self.blocked_dir, self.unstuck_wall_direction)
+            collision_data = self.emulator.get_collision_map()
+            grid = collision_data.get("collision_map", [])
+            pos = collision_data.get("grid_position", {})
+            pr, pc = pos.get("row"), pos.get("col")
+            # If blocked_dir is set and path opens, move 3 steps in that direction
+            if self.blocked_dir and pr is not None and pc is not None and grid:
+                dir_map = {"up":(-1,0),"down":(1,0),"left":(0,-1),"right":(0,1)}
+                dy, dx = dir_map.get(self.blocked_dir, (0,0))
+                nr, nc = pr + dy, pc + dx
+                if 0 <= nr < len(grid) and 0 <= nc < len(grid[0]) and grid[nr][nc].get("walkable"):
+                    # Execute three steps into now-open direction
+                    for _ in range(3):
+                        self.emulator.press_buttons([self.blocked_dir], True)
+                    # Clear unstuck state
+                    self.unstucking_mode = False
+                    self.blocked_dir = None
+                    self.unstuck_movements = 0
+                    self.consecutive_nav_failures = 0
+                    self.last_message = f"Forced blocked_dir steps: {self.blocked_dir}"
+                    # Sync and exit
+                    self.last_location = self.emulator.get_game_coords()
+                    self.was_in_battle = in_battle
+                    self.was_in_dialog = in_dialog
+                    logger.info("Step execution completed (forced blocked_dir unstuck)")
+                    return
+            # Otherwise, continue wall-following fallback
+            wall_dir = self.unstuck_wall_direction
+            if wall_dir:
+                self.emulator.press_buttons([wall_dir], True)
+                self.last_message = f"Scripted unstuck press_buttons {wall_dir}"
+            # Update tracking and exit
+            current_location = self.emulator.get_game_coords()
+            if self.last_location == current_location:
+                self.persistent_location_count = getattr(self, 'persistent_location_count', 0) + 1
+                logger.info(f"Same location detected {self.persistent_location_count} times: {current_location}")
+            else:
+                self.persistent_location_count = 0
+                self.consecutive_nav_failures = 0
+                logger.info(f"Location changed to {current_location}")
+            self.last_location = current_location
+            self.was_in_battle = in_battle
+            self.was_in_dialog = in_dialog
+            logger.info("Step execution completed (scripted unstuck fallback)")
+            return
+
         try:
-            # Always provide the current game state to Grok
-            try:
-                state_text = self.format_game_state()
-                self.message_history.append({"role": "user", "content": [{"type": "text", "text": state_text}]})
-            except Exception as e:
-                logger.error(f"Failed to append game state: {e}", exc_info=True)
+            # Determine system prompt based on unstucking mode and failure threshold
+            if self.unstucking_mode or (not in_battle and not in_dialog and self.consecutive_nav_failures >= self.failure_threshold):
+                self.system_prompt = OVERWORLD_NAVIGATION_FAILURE_PROMPT
+            else:
+                self.system_prompt = SYSTEM_PROMPT
             # Sanitize history to remove duplicates and enforce structure
             self.sanitize_message_history()
+            # Append available walkable global coordinates for Grok to choose from
+            try:
+                # Gather all walkable screen cells and calculate travel options
+                collision_data = self.emulator.get_collision_map()
+                grid = collision_data.get("collision_map", [])
+                pos = collision_data.get("grid_position", {})
+                pr, pc = pos.get("row"), pos.get("col")
+                # Barrier detection: restrict moves beyond direct neighbor blockers on current screen
+                allow_up = pr > 0 and grid[pr-1][pc].get("walkable")
+                allow_down = pr < len(grid)-1 and grid[pr+1][pc].get("walkable")
+                allow_left = pc > 0 and grid[pr][pc-1].get("walkable")
+                allow_right = pc < len(grid[0])-1 and grid[pr][pc+1].get("walkable")
+                current = self.emulator.get_standard_coords()  # (y, x, map_id)
+                available = []
+                if current and pr is not None and pc is not None:
+                    y0, x0, _ = current
+                    for r, row in enumerate(grid):
+                        for c, cell in enumerate(row):
+                            if cell.get("walkable"):
+                                dr = r - pr
+                                dc = c - pc
+                                # Exclude cells blocked by continuous wall barriers on current screen
+                                if dr < 0 and not allow_up:
+                                    continue
+                                if dr > 0 and not allow_down:
+                                    continue
+                                if dc < 0 and not allow_left:
+                                    continue
+                                if dc > 0 and not allow_right:
+                                    continue
+                                local_y = y0 + dr
+                                local_x = x0 + dc
+                                glob_y = cell.get("global_y")
+                                glob_x = cell.get("global_x")
+                                moves = abs(dr) + abs(dc)
+                                buttons = []
+                                if dr < 0:
+                                    buttons += ["up"] * abs(dr)
+                                elif dr > 0:
+                                    buttons += ["down"] * dr
+                                if dc < 0:
+                                    buttons += ["left"] * abs(dc)
+                                elif dc > 0:
+                                    buttons += ["right"] * dc
+                                available.append({
+                                    "local": [local_y, local_x],
+                                    "global": [glob_y, glob_x],
+                                    "moves": moves,
+                                    "buttons": buttons
+                                })
+                # Prescreen navigation targets: only include ones with a valid A* path
+                filtered_available = []
+                for option in available:
+                    gy, gx = option.get("global", [None, None])
+                    # Attempt pathfinding to this target
+                    status, path = self.emulator.find_path(gy, gx)
+                    # Include only if a non-empty path was found
+                    if path:
+                        filtered_available.append(option)
+                # Summary of filtering
+                filtered_out = len(available) - len(filtered_available)
+                logger.warning(f"paths precomputed: {filtered_out} tiles filtered")
+                # Send summary and valid options to Grok
+                self.message_history.append({
+                    "role": "user",
+                    "content": [{"type": "text", "text": json.dumps({
+                        "valid_paths": len(filtered_available),
+                        "invalid_paths": filtered_out,
+                        "consecutive_failures": self.consecutive_nav_failures,
+                        "available_moves": filtered_available
+                    })}]
+                })
+                # Notify Grok of consecutive navigation failures
+                self.message_history.append({
+                    "role": "user",
+                    "content": [{"type": "text", "text": f"You have failed navigate_to {self.consecutive_nav_failures} consecutive times."}]
+                })
+            except Exception as e:
+                logger.error(f"Failed to append available moves for LLM: {e}")
             # Initialize LLM client
             client_kwargs = {"api_key": self.xai_api_key}
             if getattr(self, 'llm_provider', None) == 'grok':
@@ -1280,8 +1155,7 @@ class SimpleAgent:
             tools_to_use = self.xai_tools
             if in_battle:
                 tools_to_use = [t for t in self.xai_tools if t["function"]["name"] == "press_buttons"]
-            elif self.currently_in_dialog:
-                tools_to_use = [t for t in self.xai_tools if t["function"]["name"] == "exit_menu"]
+            # Note: do not restrict tools in dialog state so navigation and button presses remain available
             # Log the LLM request messages for debugging
             try:
                 log_msg = json.dumps(self.message_history, indent=2)
@@ -1321,9 +1195,13 @@ class SimpleAgent:
                 msg = completion.choices[0].message
                 resp_content = msg.content or ""
                 # Capture Grok's chain-of-thought from API if available
+                # Reasoning: msg.reasoning_content
+                # Final Response: msg.content
                 try:
                     reasoning = None
-                    if hasattr(msg, 'analysis'):
+                    if hasattr(msg, 'reasoning_content'):
+                        reasoning = msg.reasoning_content
+                    elif hasattr(msg, 'analysis'):
                         reasoning = msg.analysis
                     elif hasattr(msg, 'reasoning'):
                         reasoning = msg.reasoning
@@ -1331,7 +1209,7 @@ class SimpleAgent:
                         reasoning = msg.thoughts
                     elif hasattr(msg, 'reasons'):
                         reasoning = msg.reasons
-                    self.latest_grok_thought = reasoning or ""
+                    self.latest_grok_thought = reasoning
                 except Exception as e:
                     self.latest_grok_thought = ""
                     logger.debug(f"Failed to capture Grok reasoning: {e}")
@@ -1343,16 +1221,29 @@ class SimpleAgent:
                 logger.info("LLM tool_calls: %s", [(tc.function.name, tc.function.arguments) for tc in raw_tool_calls])
                 if hasattr(self, 'app') and getattr(self.app.state, 'grok_logger', None):
                     self.app.state.grok_logger.info("LLM tool_calls: %s", [(tc.function.name, tc.function.arguments) for tc in raw_tool_calls])
+                # Store raw LLM response for UI rationales and tool-call parsing
+                self.llm_response_content = resp_content
             except Exception as log_e:
                 logger.error(f"Failed to log LLM response or tool_calls: {log_e}")
             # Extract tool calls and process each
             tool_calls = msg.tool_calls or []
             for tc in tool_calls:
                 func_name = tc.function.name
-                func_args = json.loads(tc.function.arguments or "{}")
+                try:
+                    func_args = json.loads(tc.function.arguments)
+                except Exception as e:
+                    logger.error(f"simple_agent.py: step(): Failed to parse tool call arguments: {e}")
+                    func_args = {}
                 result_obj = self.process_tool_call(
                     FakeToolCall(func_name, func_args, tc.id)
                 )
+                # Track consecutive navigation failures
+                if func_name == "navigate_to":
+                    texts = [item.get("text", "") for item in result_obj.get("content", [])]
+                    if any("fail" in t.lower() for t in texts):
+                        self.consecutive_nav_failures += 1
+                    else:
+                        self.consecutive_nav_failures = 0
                 # Log tool call and result
                 try:
                     log_entry = f"Tool call '{func_name}' args: {func_args} -> result: {result_obj}"
@@ -1371,53 +1262,71 @@ class SimpleAgent:
                 tool_details = []
                 for tc in tool_calls:
                     func_name = tc.function.name
-                    func_args = json.loads(tc.function.arguments or "{}")
+                    try:
+                        func_args = json.loads(tc.function.arguments)
+                    except Exception as e:
+                        logger.error(f"simple_agent.py: step(): Failed to parse tool call arguments: {e}")
+                        func_args = {}
                     tool_details.append(f"{func_name}({func_args})")
                 # Name the specific tool call invoked, and its result e.g. "Pressed buttons: a"    
                 self.last_message = f"Grok invoked tool call {tool_calls}: {', '.join(tool_details)}"
             else:
-                content = msg.content or ""
-                # Fallback: if the model returned a JSON tool call in content, parse and invoke it
-                fallback_invoked = False
-                raw = content.strip()
-                try:
-                    call_obj = json.loads(raw)
-                    if isinstance(call_obj, dict) and 'name' in call_obj:
-                        func_name = call_obj['name']
-                        func_args = call_obj.get('arguments', call_obj.get('input', {})) or {}
-                        result_obj = self.process_tool_call(FakeToolCall(func_name, func_args, f"fallback_raw"))
-                        logger.info(f"Fallback raw tool call '{func_name}' args: {func_args} -> result: {result_obj}")
-                        self.message_history.append({
-                            "role": "tool",
-                            "tool_call_id": "fallback_raw",
-                            "content": json.dumps(result_obj),
-                        })
-                        self.last_message = f"Fallback invoked raw tool call {func_name}({func_args})"
-                        fallback_invoked = True
-                except Exception:
-                    pass
-                if not fallback_invoked:
-                    # Fallback: parse raw <function_call> tags to invoke tools
-                    func_calls = re.findall(r"<function_call>\s*(\{.*?\})\s*</function_call>", content, flags=re.DOTALL)
-                    for idx, fc_json in enumerate(func_calls):
-                        try:
-                            call_obj = json.loads(fc_json)
-                            func_name = call_obj.get("name")
-                            func_args = call_obj.get("arguments", call_obj.get('input', {})) or {}
-                            result_obj = self.process_tool_call(FakeToolCall(func_name, func_args, f"fallback_{idx}"))
-                            logger.info(f"Fallback tool call '{func_name}' args: {func_args} -> result: {result_obj}")
+                # Fallback: attempt to parse a single JSON tool call from the LLM response content
+                content = msg.content
+                const = content.strip()
+                # Extract substring between the first and last brace to capture full JSON object
+                start = const.find('{')
+                end = const.rfind('}')
+                if start != -1 and end != -1 and end > start:
+                    call_str = const[start:end+1]
+                    try:
+                        call_obj = json.loads(call_str)
+                        if isinstance(call_obj, dict) and 'name' in call_obj:
+                            func_name = call_obj['name']
+                            func_args = call_obj.get('arguments', call_obj.get('input', {}))
+                            result_obj = self.process_tool_call(
+                                FakeToolCall(func_name, func_args, "fallback")
+                            )
+                            log_entry = f"Invoked fallback JSON tool call '{func_name}' args: {func_args} -> result: {result_obj}"
+                            logger.info(log_entry)
+                            if hasattr(self, 'app') and getattr(self.app.state, 'grok_logger', None):
+                                self.app.state.grok_logger.info(log_entry)
                             self.message_history.append({
                                 "role": "tool",
-                                "tool_call_id": f"fallback_{idx}",
+                                "tool_call_id": "fallback",
                                 "content": json.dumps(result_obj),
                             })
-                            self.last_message = f"Fallback invoked tool call {func_name}({func_args})"
-                            fallback_invoked = True
-                        except Exception as e:
-                            logger.error(f"Failed to parse fallback function call JSON: {e}")
-                # If still no fallback, retain raw content as last_message
-                if not fallback_invoked:
-                    self.last_message = content.strip()
+                            # Track consecutive navigation failures for fallback too
+                            if func_name == "navigate_to":
+                                direction = getattr(self, 'last_nav_direction', None)
+                                texts_fb = [item.get("text", "") for item in result_obj.get("content", [])]
+                                is_failure = any("fail" in t.lower() for t in texts_fb)
+                                if is_failure:
+                                    self.consecutive_nav_failures += 1
+                                    # Activate unstucking mode when threshold reached
+                                    if self.consecutive_nav_failures >= self.failure_threshold and not self.unstucking_mode:
+                                        self.unstucking_mode = True
+                                        self.unstuck_wall_direction = direction
+                                        self.unstuck_movements = 0
+                                else:
+                                    if self.unstucking_mode:
+                                        # Count movements along the wall direction to detect unstuck
+                                        if direction == self.unstuck_wall_direction:
+                                            self.unstuck_movements += 1
+                                            if self.unstuck_movements >= 2:
+                                                self.unstucking_mode = False
+                                                self.consecutive_nav_failures = 0
+                                                self.unstuck_movements = 0
+                                                self.unstuck_wall_direction = None
+                                    else:
+                                        self.consecutive_nav_failures = 0
+                                # Store for next comparison
+                                self.previous_nav_failures = self.consecutive_nav_failures
+                    except Exception as e:
+                        logger.debug(f"Failed to parse fallback JSON tool call: {e}")
+                else:
+                    # No valid JSON tool call found; retain full content as last_message
+                    self.last_message = const
 
         except Exception as e:
             logger.error(f"LLM action selection failed: {e}", exc_info=True)
@@ -1447,9 +1356,12 @@ class SimpleAgent:
                 self.persistent_location_count = getattr(self, 'persistent_location_count', 0) + 1
                 logger.info(f"Same location detected {self.persistent_location_count} times: {current_location}")
             else:
+                # Location changed: reset sticky navigations
                 self.persistent_location_count = 0
                 logger.info(f"Location changed to {current_location}")
-        
+                # Reset consecutive navigation failures on any successful move
+                self.consecutive_nav_failures = 0
+         
         self.last_location = current_location
         
         # Update battle tracking for the next step
@@ -1552,11 +1464,12 @@ class SimpleAgent:
         
         # 5. Evaluate each move
         for idx in range(len(move_names)):
-            # Move cursor down if needed
-            if idx > 0:
-                self.emulator.press_buttons(["down"], wait=False)
-                self.emulator.tick(5)
-                logger.info(f"[BattleAI] Moved cursor down to index {idx}")
+            # Skip moves with no PP left
+            pp_list = getattr(active_pokemon, 'move_pp', [])
+            pp_left = pp_list[idx] if idx < len(pp_list) else None
+            if pp_left is not None and pp_left <= 0:
+                logger.info(f"[BattleAI] Skipping move {idx} ({move_names[idx]}) with 0 PP")
+                continue
             
             move_name = move_names[idx]
             
@@ -2197,56 +2110,419 @@ class SimpleAgent:
             wait = kwargs.get('wait', True)
             return self.emulator.press_buttons(buttons, wait)
         elif tool_name == 'navigate_to':
-            glob_y = kwargs.get('glob_y')
-            glob_x = kwargs.get('glob_x')
+            # Debug: log tool call arguments
+            logger.debug(f"[navigate_to] called with arguments: {kwargs}")
+            direction = kwargs.get('direction')
+            # Debug: log direction received
+            logger.debug(f"[navigate_to] direction: {direction}")
+            # Blacklist check: skip navigation if current position is known to be stuck
+            current_coords = self.emulator.get_standard_coords()
+            if current_coords:
+                ly, lx, mid = current_coords
+                try:
+                    gy_cur, gx_cur = self.emulator.local_to_global(ly, lx, mid)
+                except Exception:
+                    gy_cur = gx_cur = None
+                if (gy_cur, gx_cur) in self.blacklisted_positions:
+                    return {
+                        'type': 'tool_result',
+                        'id': tool_call.id,
+                        'tool_use_id': tool_call.id,
+                        'content': [
+                            {'type': 'text', 'text': 'Navigation skipped: this location previously yielded no path.'}
+                        ]
+                    }
+            if direction:
+                # Debug: attempt to retrieve current position
+                current = self.emulator.get_standard_coords()  # (local_y, local_x, map_id)
+                logger.debug(f"[navigate_to] current_position: {current}")
+                if current:
+                    local_y, local_x, map_id = current
+                    # Normalize and map synonyms to movement deltas
+                    direction_lower = direction.strip().lower()
+                    dir_map = {
+                        'up':    (-1,  0), 'u':    (-1,  0), 'north': (-1,  0), 'n':     (-1,  0),
+                        'down':  (1,   0), 'd':    (1,   0), 'south': (1,   0), 's':     (1,   0),
+                        'left':  (0,  -1), 'l':    (0,  -1), 'west':  (0,  -1), 'w':     (0,  -1),
+                        'right': (0,   1), 'r':    (0,   1), 'east':  (0,   1), 'e':     (0,   1)
+                    }
+                    move_delta = dir_map.get(direction_lower)
+                    # Debug: log computed move_delta
+                    logger.debug(f"[navigate_to] move_delta for normalized direction '{direction_lower}': {move_delta}")
+                    if move_delta:
+                        dy, dx = move_delta
+                        target_found = False
+                        # Try primary direction up to 4 tiles away
+                        for dist in [4, 3, 2, 1]:
+                            ty_local = local_y + dy * dist
+                            tx_local = local_x + dx * dist
+                            glob_y, glob_x = self.emulator.local_to_global(ty_local, tx_local, map_id)
+                            logger.debug(f"[navigate_to] trying dist={dist}: local=({ty_local},{tx_local}), global=({glob_y},{glob_x})")
+                            status, path = self.emulator.find_path(glob_y, glob_x)
+                            logger.debug(f"[navigate_to] find_path returned status='{status}', path={path}")
+                            if path is not None:
+                                target_found = True
+                                break
+                        if not target_found:
+                            # Fallback: try perpendicular directions for nearest walkable tile
+                            fallback_dirs = ['up', 'down'] if dx != 0 else ['left', 'right']
+                            for fdir in fallback_dirs:
+                                fdy, fdx = dir_map[fdir]
+                                for dist in [1, 2, 3, 4]:
+                                    ty_local = local_y + fdy * dist
+                                    tx_local = local_x + fdx * dist
+                                    glob_y, glob_x = self.emulator.local_to_global(ty_local, tx_local, map_id)
+                                    status, path = self.emulator.find_path(glob_y, glob_x)
+                                    logger.debug(f"[navigate_to] fallback '{fdir}' dist={dist}: status='{status}', path={path}")
+                                    if path is not None:
+                                        target_found = True
+                                        logger.info(f"[navigate_to] fallback direction used: {fdir}")
+                                        break
+                                if target_found:
+                                    break
+                            if not target_found:
+                                return {
+                                    'type': 'tool_result',
+                                    'id': tool_call.id,
+                                    'tool_use_id': tool_call.id,
+                                    'content': [
+                                        {'type': 'text', 'text': f"Navigation failed: no walkable tile found for direction '{direction}' or fallback directions."}
+                                    ]
+                                }
+                    else:
+                        return {
+                            'type': 'tool_result',
+                            'id': tool_call.id,
+                            'tool_use_id': tool_call.id,
+                            'content': [
+                                {'type': 'text', 'text': f"Invalid direction '{direction}' provided."}
+                            ]
+                        }
+                else:
+                    return {
+                        'type': 'tool_result',
+                        'id': tool_call.id,
+                        'tool_use_id': tool_call.id,
+                        'content': [
+                            {'type': 'text', 'text': "Unable to determine current position."}
+                        ]
+                    }
+            else:
+                glob_y = kwargs.get('glob_y')
+                glob_x = kwargs.get('glob_x')
+            # Skip blacklisted target positions
+            if glob_y is not None and glob_x is not None and (glob_y, glob_x) in self.blacklisted_targets:
+                return {
+                    'type': 'tool_result',
+                    'id': tool_call.id,
+                    'tool_use_id': tool_call.id,
+                    'content': [{'type': 'text', 'text': f"Skipping blacklisted target ({glob_y}, {glob_x})."}]
+                }
             # Reset fallback scheduling when attempting on-screen navigation
             self.return_scheduled = False
             self.nav_wait_counter = 0
             # Try A* pathfinding to the target
             status, path = self.emulator.find_path(glob_y, glob_x)
-            if path is not None:
-                if path:
-                    # Execute each step along the path
-                    for direction in path:
-                        self.emulator.press_buttons([direction], True)
-                    return {
-                        'type': 'tool_result',
-                        'id': tool_call.id,
-                        'tool_use_id': tool_call.id,
-                        'content': [{'type': 'text', 'text': f'Navigated {len(path)} steps: {path}'}],
-                    }
-                else:
-                    # Already at target
-                    return {
-                        'type': 'tool_result',
-                        'id': tool_call.id,
-                        'tool_use_id': tool_call.id,
-                        'content': [{'type': 'text', 'text': 'Already at the target location.'}],
-                    }
-            # Off-path fallback: schedule return to path with delay
-            if not self.return_scheduled:
-                self.return_scheduled = True
-                self.nav_wait_counter = 2
+            # Handle empty path list as failure (no reachable path)
+            if path == []:
                 return {
                     'type': 'tool_result',
                     'id': tool_call.id,
                     'tool_use_id': tool_call.id,
-                    'content': [{'type': 'text', 'text': 'Off-path detected: returning to path in a few turns.'}],
+                    'content': [{'type': 'text', 'text': f'Navigation failed: no reachable path to ({glob_y}, {glob_x}).'}]
                 }
-            # Countdown before returning to path
-            self.nav_wait_counter -= 1
-            if self.nav_wait_counter > 0:
+            # If no path found, blacklist target and skip
+            if path is None:
+                try:
+                    self.blacklisted_targets.add((glob_y, glob_x))
+                    logger.info(f"Blacklisted target coords due to no path: {(glob_y, glob_x)}")
+                except Exception:
+                    pass
                 return {
                     'type': 'tool_result',
                     'id': tool_call.id,
                     'tool_use_id': tool_call.id,
-                    'content': [{'type': 'text', 'text': f'Waiting {self.nav_wait_counter} turns before returning to path.'}],
+                    'content': [{'type': 'text', 'text': f"Navigation failed: no path to target ({glob_y}, {glob_x})."}]
                 }
-            # Time to return to the nearest path point
-            self.return_scheduled = False
-            return self.nav.bounds_check_tool(tool_call)
+            if path:
+                # Attempt movement: record start and end positions to detect stuck failures
+                start_coords = self.emulator.get_standard_coords()
+                try:
+                    sy, sx, sm = start_coords
+                    start_glob = self.emulator.local_to_global(sy, sx, sm)
+                except Exception:
+                    start_glob = None
+                # Execute each step along the path
+                for direction in path:
+                    self.emulator.press_buttons([direction], True)
+                # Determine end position
+                end_coords = self.emulator.get_standard_coords()
+                try:
+                    ey, ex, em = end_coords
+                    end_glob = self.emulator.local_to_global(ey, ex, em)
+                except Exception:
+                    end_glob = None
+                # If still at same location, navigation failed
+                if start_glob is not None and end_glob == start_glob:
+                    return {
+                        'type': 'tool_result',
+                        'id': tool_call.id,
+                        'tool_use_id': tool_call.id,
+                        'content': [{'type': 'text', 'text': f'Navigation failed: still at {start_glob}'}]
+                    }
+                # Otherwise, success
+                self.consecutive_nav_failures = 0
+                return {
+                    'type': 'tool_result',
+                    'id': tool_call.id,
+                    'tool_use_id': tool_call.id,
+                    'content': [{'type': 'text', 'text': f'Navigated {len(path)} steps: {path}'}],
+                }
         elif tool_name == 'exit_menu':
-            # Press B to exit current menu or dialog
-            return self.emulator.press_buttons(['b'], True)
+            # Press B repeatedly until any menu/dialog is closed (max 5 attempts)
+            # Attempt to use original press function if available
+            try:
+                from web.button_queue import t_orig_press
+            except ImportError:
+                t_orig_press = None
+            for _ in range(5):
+                if t_orig_press:
+                    t_orig_press(['b'], True)
+                else:
+                    self.emulator.press_buttons(['b'], True)
+                # Advance emulator to apply the button press
+                try:
+                    self.emulator.step()
+                except Exception:
+                    pass
+                # Small delay for stability
+                time.sleep(0.1)
+                # Check if dialog/menu is closed
+                if not self.emulator.get_active_dialog():
+                    break
+            # Return a structured tool result
+            return {
+                'type': 'tool_result',
+                'id': tool_call.id,
+                'tool_use_id': tool_call.id,
+                'content': [{'type': 'text', 'text': 'Pressed B to exit menu.'}],
+            }
+        elif tool_name == 'handle_battle':
+            # PROTOCOL: Synchronized battle execution sequence
+            
+            # 1. CAPTURE INITIAL STATE
+            dialog_before = self.emulator.get_active_dialog() or ""
+            status_text = dialog_before.strip().replace("\n", " ") if dialog_before else "(Battle dialog cleared)"
+            
+            # 2. SYNCHRONIZATION PHASE
+            # Execute full emulator step for state stabilization
+            self.emulator.step()
+            time.sleep(0.5)  # Extended stabilization delay
+            
+            # 3. BATTLE MENU VERIFICATION
+            battle_menu_visible = "►FIGHT" in dialog_before
+            logger.info(f"[BattleAI] Battle menu state: {'Active' if battle_menu_visible else 'Not detected'}")
+            
+            if not battle_menu_visible:
+                # Reset to known UI state
+                logger.info("[BattleAI] Battle menu not detected, attempting to reset UI state")
+                self.emulator.press_buttons(["b"], True)
+                self.emulator.step()
+                time.sleep(0.3)
+            
+            # 4. FIGHT MENU SELECTION
+            logger.info("[BattleAI] Selecting FIGHT menu option")
+            self.emulator.press_buttons(["a"], True)
+            
+            # Complete full emulator step cycle
+            self.emulator.step()
+            time.sleep(0.5)  # Extended stabilization delay
+            
+            # 5. MOVE DETERMINATION
+            try:
+                best_idx = self.choose_best_battle_move()
+                logger.info(f"[BattleAI] Best move determined: index {best_idx}")
+            except Exception as e:
+                logger.error(f"[BattleAI] Error determining best move: {e}", exc_info=True)
+                best_idx = 2  # Default to EMBER (position 2) for bug-type enemies
+                logger.warning(f"[BattleAI] Defaulting to EMBER (index 2) after calculation error")
+            
+            # 6. CURSOR NAVIGATION
+            # Establish precise cursor position
+            logger.info(f"[BattleAI] Navigation to target position {best_idx}")
+
+            # RESET PHASE: Ensure cursor begins at known position 0
+            for _ in range(4):  # Comprehensive reset sequence
+                self.emulator.press_buttons(["up"], False)
+                self.emulator.tick(5)
+                self.emulator.step()
+                time.sleep(0.1)  # Stabilization interval
+
+            # VERIFICATION DIAGNOSTIC: Record starting position
+            logger.info(f"[BattleAI] Cursor reset complete, beginning at position 0")
+
+            # NAVIGATION PHASE: Execute precisely (best_idx) movements
+            if best_idx > 0:  # Only navigate if not already at target
+                for i in range(best_idx):
+                    logger.info(f"[BattleAI] Moving cursor {i} → {i+1}")
+                    self.emulator.press_buttons(["down"], False)
+                    self.emulator.tick(10)  # Extended timing for reliable registration
+                    self.emulator.step()
+                    time.sleep(0.4)  # Extended stabilization interval
+
+            # POSITION VERIFICATION: Confirm final position
+            logger.info(f"[BattleAI] Navigation complete. Target: {best_idx}, Movements: {best_idx}")
+            
+            # 7. MOVE EXECUTION
+            logger.info(f"[BattleAI] Selecting move at position {best_idx}")
+            self.emulator.press_buttons(["a"], True)
+            
+            # Complete full emulator step with extended delay
+            self.emulator.step()
+            time.sleep(0.3)  # Allow battle dialog to appear
+            
+            # 8. STATE UPDATE
+            self.episode_step += 1
+            move_name = self.last_chosen_move_name or f"Move at position {best_idx}"
+            self.last_message = f"Battle: Selected {move_name} against {status_text}"
+            
+            # 9. RESPONSE GENERATION
+            return {
+                "type": "tool_result",
+                "id": tool_call.id,
+                "tool_use_id": tool_call.id,
+                "content": [
+                    {"type": "text", "text": f"Battle Text: \"{status_text}\""},
+                    {"type": "text", "text": f"Selected move: {move_name} (position {best_idx})"},
+                    {"type": "text", "text": f"Battle action completed with full frame rendering at each step."}
+                ],
+            }
+        elif tool_name == 'ask_friend':
+            # Invoke a helper Grok agent on the current game state
+            question = kwargs.get('question')
+            helper_system = "You are Helper Grok, an unaffiliated Grok agent. You have the following game state and a question. Provide clear, concise advice."
+            helper_messages = [
+                {"role": "system", "content": [{"type": "text", "text": helper_system}]},
+                {"role": "user", "content": [{"type": "text", "text": self.format_game_state()}]},
+                {"role": "user", "content": [{"type": "text", "text": question}]}
+            ]
+            # Build LLM client
+            client_kwargs = {"api_key": self.xai_api_key}
+            if self.llm_provider == "grok":
+                client_kwargs["base_url"] = os.getenv("XAI_API_BASE", "https://api.x.ai/v1")
+            client = OpenAI(**client_kwargs)
+            # Ask the helper agent
+            helper_completion = client.chat.completions.create(
+                model=self.model_name,
+                reasoning_effort="low",
+                messages=helper_messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            helper_msg = helper_completion.choices[0].message
+            helper_response = helper_msg.content or ""
+            return {
+                "type": "tool_result",
+                "id": tool_call.id,
+                "tool_use_id": tool_call.id,
+                "content": [{"type": "text", "text": helper_response}],
+            }
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
+
+    def _check_dev_unstuck(self):
+        self.low_tech_unstuck()
+        """Force enter unstucking mode if dev flag is set, and choose a default wall direction."""
+        if getattr(self, 'dev_force_unstuck', False):
+            self.unstucking_mode = True
+            self.previous_nav_failures = self.failure_threshold
+            self.consecutive_nav_failures = self.failure_threshold
+            self.unstuck_movements = 0
+            # Determine default wall direction to follow based on immediate neighbors
+            try:
+                collision_data = self.emulator.get_collision_map()
+                grid = collision_data.get('collision_map', [])
+                pos = collision_data.get('grid_position', {})
+                pr, pc = pos.get('row'), pos.get('col')
+                if pr is not None and pc is not None and grid:
+                    # Choose movement direction based on immediate walkable neighbors
+                    allow_up = pr > 0 and grid[pr-1][pc].get('walkable')
+                    allow_down = pr < len(grid)-1 and grid[pr+1][pc].get('walkable')
+                    allow_left = pc > 0 and grid[pr][pc-1].get('walkable')
+                    allow_right = pc < len(grid[0])-1 and grid[pr][pc+1].get('walkable')
+                    # Prioritize left, then right, then up, then down
+                    if allow_left:
+                        self.unstuck_wall_direction = 'left'
+                    elif allow_right:
+                        self.unstuck_wall_direction = 'right'
+                    elif allow_up:
+                        self.unstuck_wall_direction = 'up'
+                    elif allow_down:
+                        self.unstuck_wall_direction = 'down'
+                    else:
+                        # No adjacent walkable tile: default to left
+                        self.unstuck_wall_direction = 'left'
+                    # Identify the primary blocked neighbor direction
+                    blocked_dirs = []
+                    if pr > 0 and not grid[pr-1][pc].get('walkable'): blocked_dirs.append('up')
+                    if pc < len(grid[0]) - 1 and not grid[pr][pc+1].get('walkable'): blocked_dirs.append('right')
+                    if pr < len(grid) - 1 and not grid[pr+1][pc].get('walkable'): blocked_dirs.append('down')
+                    if pc > 0 and not grid[pr][pc-1].get('walkable'): blocked_dirs.append('left')
+                    self.blocked_dir = blocked_dirs[0] if blocked_dirs else None
+                else:
+                    self.unstuck_wall_direction = 'left'
+            except Exception:
+                self.unstuck_wall_direction = 'left'
+            self.dev_force_unstuck = False
+            logger.info("DEV: Forced unstucking mode activated, wall_dir=%s", self.unstuck_wall_direction)
+    
+    def enable_unstucking_mode(self):
+        """Enable unstucking mode manually."""
+        self.unstucking_mode = True
+        self.previous_nav_failures = self.failure_threshold
+        self.consecutive_nav_failures = self.failure_threshold
+        self.unstuck_movements = 0
+        self.unstuck_wall_direction = None
+        logger.info("Unstucking mode enabled")
+        
+    def low_tech_unstuck(self):
+        """
+        If an attempt to move in a direction fails, the tile the agent is on is marked "stuck tile," ...
+        Call each step().
+        """
+        # Skip unstuck if currently in a battle state
+        if self.emulator.is_in_battle():
+            return
+
+        # Read player facing direction
+        collision_data = self.emulator.get_collision_map()
+        player_facing = collision_data.get("player_position", {}).get("direction")
+        logger.info(f"low_tech_unstuck: Player facing={player_facing}")
+
+        # Determine current global tile
+        cur = self.emulator.get_standard_coords()
+        if not cur or cur == (0,0,0):
+            logger.debug("low_tech_unstuck: Invalid or unknown coords, skipping")
+            return
+        y_loc, x_loc, map_id = cur
+        try:
+            g_y, g_x = self.emulator.local_to_global(y_loc, x_loc, map_id)
+        except Exception as e:
+            logger.warning(f"low_tech_unstuck: Failed converting to global coords: {e}")
+            return
+
+        current_tile = (g_y, g_x)
+        logger.info(f"low_tech_unstuck: Current tile={current_tile}")
+
+        # Initialize blacklist list for this tile if missing
+        self.blacklisted_tiles.setdefault(current_tile, [])
+        # If still on the same tile, record stuck direction
+        if self.last_tile == current_tile:
+            if player_facing and player_facing not in self.blacklisted_tiles[current_tile]:
+                self.blacklisted_tiles[current_tile].append(player_facing)
+                logger.info(f"low_tech_unstuck: Blacklisted {player_facing} at {current_tile}")
+        else:
+            logger.info(f"low_tech_unstuck: Moved to new tile {current_tile}")
+        # Update last seen tile
+        self.last_tile = current_tile
+

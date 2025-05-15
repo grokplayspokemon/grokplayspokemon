@@ -47,7 +47,7 @@ USE_NAVIGATOR = True # Deprecated/Unused?
 STEP_DELAY = 0.0
 
 # --- Logging ---
-LOG_LEVEL = logging.INFO # e.g., logging.DEBUG, logging.INFO, logging.WARNING
+LOG_LEVEL = logging.DEBUG  # Disable debug and info logs
 
 # --- Helper function to get the correct model based on provider ---
 def get_model_name():

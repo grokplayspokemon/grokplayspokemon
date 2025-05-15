@@ -14,15 +14,16 @@ async def run_agent(agent, num_steps=100000, run_log_dir=None, send_game_updates
     
     logger = logging.getLogger(__name__)
     
-    # Clear the main game log file at the start of a new run
-    main_log_file_path = Path("llm_plays_pokemon/DATAPlaysPokemon/game.log")
+    # Clear the run-specific game log file at the start of a new run
     try:
-        if main_log_file_path.exists():
-            with open(main_log_file_path, 'w') as f:
-                f.write("") # Clear the file
-            logger.info(f"Cleared main log file: {main_log_file_path}")
+        if run_log_dir:
+            log_path = Path(run_log_dir) / "game.log"
+            if log_path.exists():
+                with open(log_path, 'w') as f:
+                    f.write("")  # Clear the file
+                logger.info(f"Cleared run-specific game log file: {log_path}")
     except Exception as e:
-        logger.error(f"Error clearing main log file {main_log_file_path}: {e}")
+        logger.error(f"Error clearing run-specific game log file {log_path}: {e}")
     
     logger.info(f"Starting agent for {num_steps} steps")
     logger.info("Agent task started.")
@@ -71,23 +72,28 @@ async def run_agent(agent, num_steps=100000, run_log_dir=None, send_game_updates
     
     # Main agent loop
     while agent.running and step_count < num_steps:
+        # Drain any queued button presses immediately, even if agent is paused
+        from web.button_queue import queue, process_next_button
+        while not queue.empty():
+            await process_next_button("Agent-queue-drain", agent, send_game_updates)
         try:
             # Check if agent is paused (dev mode)
             if hasattr(agent, 'app') and getattr(agent.app.state, 'is_paused', False):
+                # Still loop to drain queue, but skip stepping
                 await asyncio.sleep(0.1)
                 continue
             
             # Sleep before the next step
-            logger.info(f"run_agent: sleeping for {agent.step_delay}s before step {step_count+1}")
+            logger.debug(f"run_agent: sleeping for {agent.step_delay}s before step {step_count+1}")
             await asyncio.sleep(agent.step_delay)
             
             # Check if paused again after delay to avoid stepping during Dev mode
             if hasattr(agent, 'app') and getattr(agent.app.state, 'is_paused', False):
-                logger.info(f"run_agent paused after delay before step {step_count+1}")
+                logger.debug(f"run_agent paused after delay before step {step_count+1}")
                 continue
             
             # Execute the step
-            logger.info(f"Executing step {step_count+1}")
+            logger.debug(f"Executing step {step_count+1}")
             start_time = time.time()
             
             try:
@@ -100,13 +106,13 @@ async def run_agent(agent, num_steps=100000, run_log_dir=None, send_game_updates
                 step_count += 1
                 
                 # Get the latest message and update
-                latest_message = agent.get_last_message()
+                latest_message = getattr(agent, 'llm_response_content', agent.get_last_message())
                 
                 # Log the message
                 if latest_message:
-                    logger.info(f"Agent message: {latest_message}")
+                    logger.debug(f"Agent message: {latest_message}")
                     if grok_logger and grok_logger != logger:
-                        grok_logger.info(latest_message)
+                        grok_logger.debug(latest_message)
                 
                 # CRITICAL UPDATE: Force final frame rendering with synchronization delay
                 if send_game_updates:
@@ -124,7 +130,7 @@ async def run_agent(agent, num_steps=100000, run_log_dir=None, send_game_updates
                 
                 # Calculate and log the elapsed time
                 elapsed = time.time() - start_time
-                logger.info(f"Step {step_count} completed in {elapsed:.2f}s")
+                logger.debug(f"Step {step_count} completed in {elapsed:.2f}s")
                 
             except Exception as e:
                 logger.error(f"Error in step {step_count}: {e}", exc_info=True)

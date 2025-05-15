@@ -1462,7 +1462,10 @@ class PokemonRedReader:
         ph = game.battle.get_player_head_pokemon()
         obs["player_head_pokemon"] = PokemonID(ph).name
         sel = game.battle.get_battle_turn_moves()[0]
-        obs["move_selection"] = Move(sel).name
+        try:
+            obs["move_selection"] = Move(sel).name
+        except ValueError:
+            obs["move_selection"] = f"UNKNOWN({sel})"
 
         # Progress / rewards
         obs["badges"] = game.player.get_badges()

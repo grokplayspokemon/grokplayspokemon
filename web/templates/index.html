@@ -4,21 +4,87 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Grok Plays Pokemon</title>
+    <title>Grok Plays Pokémon</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
         :root {
-            --pokemon-yellow: #FFCB05;
-            --pokemon-blue: #003A70;
-            --chat-bg: #1a1a1a;
-            --chat-text: #9e9e9e;
-            --border-color: #2a2a2a;
-            --header-gradient: linear-gradient(45deg, #1a1a1a, #2a2a2a);
-            --status-border: #3a3a3a;
+            /* Core visual grammar */
+            --background-color: #000000;
+            --background-subtle: #0a0a0a;
+            --panel-background: rgba(10, 10, 10, 0.8);
+            --accent-primary: #ffffff;
+            --accent-secondary: #dddddd;
+            --accent-tertiary: #aaaaaa;
+            --text-primary: #ffffff;
+            --text-secondary: #dddddd;
+            --text-tertiary: #aaaaaa;
+            --border-color: rgba(255, 255, 255, 0.2);
+            --header-gradient: linear-gradient(90deg, #000000, #1a1a1a, #000000);
+            --panel-gradient: linear-gradient(180deg, rgba(10, 10, 10, 0.9), rgba(0, 0, 0, 0.9));
+            
+            /* Enhanced Pokemon-themed colors */
+            --energy-gradient: linear-gradient(90deg, #3D7DCA, #4F90D5, #3D7DCA); /* Pokemon blue gradient */
+            --hp-green-gradient: linear-gradient(90deg, #2DD164, #37F37C, #2DD164); /* Pokemon HP green */
+            --hp-yellow-gradient: linear-gradient(90deg, #FCCE4B, #FDD85D, #FCCE4B); /* Pokemon HP yellow */
+            --hp-red-gradient: linear-gradient(90deg, #FB5B5D, #FF7375, #FB5B5D); /* Pokemon HP red */
+            --exp-blue-gradient: linear-gradient(90deg, #5EBDFC, #70C7FD, #5EBDFC); /* Pokemon EXP blue */
+            
+            /* Specific colors for type indicators */
+            --fire-gradient: linear-gradient(90deg, #FB5B5D, #FF7375, #FB5B5D); /* Fire type red */
+            --water-gradient: linear-gradient(90deg, #3D7DCA, #4F90D5, #3D7DCA); /* Water type blue */
+            --electric-gradient: linear-gradient(90deg, #FCCE4B, #FDD85D, #FCCE4B); /* Electric type yellow */
+            --normal-gradient: linear-gradient(90deg, #9099A1, #A8B0B9, #9099A1); /* Normal type gray */
+            --psychic-gradient: linear-gradient(90deg, #FF6675, #FE8395, #FF6675); /* Psychic type pink */
+            --ghost-gradient: linear-gradient(90deg, #4B6AB3, #5D7BC5, #4B6AB3); /* Ghost type purple */
+            
+            /* Text effects */
+            --glow-effect: 0 0 5px rgba(255, 255, 255, 0.5), 0 0 10px rgba(255, 255, 255, 0.3);
+            --text-stroke: -0.5px -0.5px 0 rgba(0, 0, 0, 0.7), 0.5px -0.5px 0 rgba(0, 0, 0, 0.7), -0.5px 0.5px 0 rgba(0, 0, 0, 0.7), 0.5px 0.5px 0 rgba(0, 0, 0, 0.7);
+            
+            /* Grid and other UI elements */
             --grid-color: rgba(255, 255, 255, 0.2);
-            /* Grid line color */
+            
+            /* Enhanced Font sizes - INCREASED for viewability */
+            --font-size-xlarge: clamp(1.8rem, 3vw, 2.5rem);
+            --font-size-large: clamp(1.4rem, 2.2vw, 2rem);
+            --font-size-medium: clamp(1.1rem, 1.7vw, 1.6rem);
+            --font-size-normal: clamp(0.9rem, 1.4vw, 1.3rem);
+            --font-size-small: clamp(0.8rem, 1.2vw, 1.1rem);
+            --font-size-tiny: clamp(0.7rem, 1vw, 0.9rem);
+        }
+
+        /* Animation keyframes */
+        @keyframes staticNoise {
+            0%, 100% { opacity: 0.03; }
+            50% { opacity: 0.05; }
+        }
+
+        @keyframes scanline {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(100vh); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 0.8; }
+        }
+
+        @keyframes glow {
+            0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.3)); }
+            50% { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.5)); }
+        }
+
+        @keyframes barPulse {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
+
+        /* Added animation for segmented bars */
+        @keyframes segmentFlicker {
+            0%, 100% { opacity: 0.9; }
+            50% { opacity: 1; }
         }
 
         * {
@@ -28,679 +94,1019 @@
         }
 
         body {
-            font-family: 'Press Start 2P', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            background-color: #000000;
-            background-image: linear-gradient(45deg, #0a0a0a 25%, transparent 25%),
-                linear-gradient(-45deg, #0a0a0a 25%, transparent 25%),
-                linear-gradient(45deg, transparent 75%, #0a0a0a 75%),
-                linear-gradient(-45deg, transparent 75%, #0a0a0a 75%);
-            background-size: 20px 20px;
-            color: var(--chat-text);
+            font-family: 'Press Start 2P', 'Arial', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-secondary);
             height: 100vh;
+            width: 100vw;
             overflow: hidden;
-            /* prevent page scrollbars */
             display: flex;
             flex-direction: column;
             line-height: 1.6;
+            position: relative;
+            text-transform: uppercase;
+            text-shadow: var(--glow-effect);
+        }
+
+        /* Enhanced background with subtle grid */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(90deg, transparent 49px, rgba(255,255,255,0.03) 49px, rgba(255,255,255,0.03) 51px, transparent 51px),
+                linear-gradient(0deg, transparent 49px, rgba(255,255,255,0.03) 49px, rgba(255,255,255,0.03) 51px, transparent 51px);
+            background-size: 50px 50px;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Data lines pattern */
+        body::after {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                radial-gradient(circle at 200px 400px, rgba(255,255,255,0.15) 0%, transparent 30%),
+                radial-gradient(circle at 1000px 400px, rgba(255,255,255,0.15) 0%, transparent 30%);
+            animation: pulse 10s infinite;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Scanline effect */
+        .scanline {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background-color: rgba(255, 255, 255, 0.03);
+            pointer-events: none;
+            z-index: 9999;
+            animation: scanline 4s linear infinite;
+        }
+
+        /* Static noise effect */
+        .static-noise {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            opacity: 0.03;
+            z-index: 9998;
+            animation: staticNoise 0.5s infinite;
+        }
+
+        /* Grok logo watermark */
+        .grok-logo-bg {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 800px;
+            height: 800px;
+            opacity: 0.03;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .grok-logo-path {
+            fill: none;
+            stroke: #ffffff;
+            stroke-width: 1.5;
         }
 
         .header {
             background: var(--header-gradient);
-            padding: 1rem;
-            border-bottom: 4px solid var(--pokemon-yellow);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
             display: flex;
             align-items: center;
             justify-content: space-between;
+            position: relative;
+            z-index: 10;
+            min-height: 70px;
+            height: auto;
         }
 
         .header h1 {
-            color: var(--pokemon-yellow);
-            font-size: 1.2rem;
-            text-shadow: 2px 2px #000;
-            letter-spacing: 1px;
-        }
-
-        .container {
-            display: grid;
-            grid-template-columns: 2fr 1fr 1.5fr;
-            grid-template-areas:
-                "game actions chat"
-                "team team team";
-            gap: 1rem;
-            padding: 1rem;
-            height: calc(100vh - 4rem);
-            overflow: hidden;
-            /* prevent overflow of grid */
-        }
-
-        .game-window {
-            grid-area: game;
-            background-color: var(--chat-bg);
-            border: 4px solid var(--border-color);
-            overflow: hidden;
-            position: relative;
-            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            /* Center children horizontally */
-            justify-content: flex-start;
-            /* Stack from top */
-        }
-
-        /* Container for scaled canvas and overlay */
-        #screen-container {
-            position: relative;
-            display: inline-block;
-            /* Shrink-wrap to canvas size */
-            /* Intrinsic canvas size controls container dimensions */
-        }
-
-        /* Scale canvas to fill container, preserving pixel art */
-        #game-screen {
-            image-rendering: pixelated;
-            width: 640px;
-            height: 576px;
-        }
-
-        /* Overlay ASCII collision map atop canvas */
-        #collision-map-overlay {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            max-height: 30%;
-            margin: 0;
-            font-family: monospace;
-            font-size: 0.8rem;
-            line-height: 1rem;
-            color: var(--chat-text);
-            background: rgba(0, 0, 0, 0.2);
-            white-space: pre;
-            pointer-events: none;
-            overflow-y: auto;
-        }
-
-        /* Hide old collision-container */
-        #collision-container {
-            display: none !important;
-        }
-
-        .chat-window {
-            height: 100%;
-            /* constrain to grid cell height */
-            overflow: hidden;
-            /* hide any overflow at window level */
-            grid-area: chat;
-            background-color: var(--chat-bg);
-            border: 4px solid var(--border-color);
-            border-radius: 8px;
-            display: flex;
-            flex-direction: column;
-            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
-        }
-
-        .chat-header {
-            padding: 1rem;
-            border-bottom: 4px solid var(--border-color);
-            background: var(--header-gradient);
-        }
-
-        .chat-header h2 {
-            font-size: 1.2rem;
-            color: var(--pokemon-yellow);
-            text-shadow: 1px 1px #000;
-        }
-
-        .chat-messages {
-            flex: 1;
-            overflow-y: auto;
-            padding: 1rem;
-            scrollbar-width: none;
-            /* hide scrollbar in Firefox */
-            -ms-overflow-style: none;
-            /* hide scrollbar in IE 10+ */
-        }
-
-        .chat-messages::-webkit-scrollbar {
-            display: none;
-            /* hide scrollbar in Chrome, Safari, Edge */
-        }
-
-        .message {
-            margin-bottom: 1.5rem;
-            word-wrap: break-word;
-            font-size: 1rem;
-            padding: 0.8rem;
-            background-color: rgba(255, 255, 255, 0.02);
-            border-radius: 4px;
-            border: 2px solid var(--border-color);
-        }
-
-        .message .timestamp {
-            color: var(--pokemon-yellow);
-            font-size: 0.6rem;
-            margin-right: 0.5rem;
-            opacity: 0.7;
-        }
-
-        .message .content {
-            color: var(--chat-text);
-            line-height: 1.8;
-        }
-
-        /* Style for Grok's inner thoughts */
-        .message.thought {
-            background-color: rgba(255, 255, 255, 0.05);
-            font-style: italic;
-        }
-
-        /* Make preformatted text readable */
-        .message pre {
-            white-space: pre-wrap;
-            /* Since CSS 2.1 */
-            white-space: -moz-pre-wrap;
-            /* Mozilla, since 1999 */
-            white-space: -pre-wrap;
-            /* Opera 4-6 */
-            white-space: -o-pre-wrap;
-            /* Opera 7 */
-            word-wrap: break-word;
-            /* Internet Explorer 5.5+ */
-            background-color: rgba(0, 0, 0, 0.2);
-            padding: 5px;
-            border-radius: 3px;
-            font-size: 0.9rem;
-        }
-
-        .status {
-            background-color: rgba(0, 0, 0, 0.9);
-            color: var(--chat-text);
-            padding: 0.5rem;
-            border-radius: 4px;
-            font-size: 0.7rem;
-            border: 2px solid var(--status-border);
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-            z-index: 10;
-        }
-
-        .run-button {
-            background-color: var(--pokemon-yellow);
-            color: var(--pokemon-blue);
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            font-family: 'Press Start 2P', cursive;
-            font-size: 0.7rem;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .run-button.red {
-            background-color: #ff4444;
-            color: white;
-        }
-
-        .run-button.purple {
-            background-color: #9b59b6;
-            color: white;
-        }
-
-        .run-button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        /* Share styling for dev toggle */
-        .dev-toggle-button {
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            font-family: 'Press Start 2P', cursive;
-            font-size: 0.7rem;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .dev-toggle-button.red {
-            background-color: #ff4444;
-            color: white;
-        }
-
-        .dev-toggle-button.green {
-            background-color: #00cc00;
-            /* Brighter green */
-            color: black;
-            /* Better contrast */
-        }
-
-        /* Scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: var(--chat-bg);
-            border: 2px solid var(--border-color);
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--border-color);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: #3a3a3a;
-        }
-
-        /* Added collision map CSS */
-        #collision-container {
-            display: none;
-        }
-
-        #collision-container h3 {
-            margin: 0 0 0.5rem 0;
-            color: var(--pokemon-yellow);
-            font-size: 1.5rem;
-            text-shadow: 1px 1px #000;
+            color: var(--text-primary);
+            font-size: var(--font-size-xlarge);
+            text-shadow: var(--glow-effect);
+            letter-spacing: 2px;
+            font-weight: 800;
             text-align: center;
-        }
-
-        #collision-map {
-            position: absolute;
-            top: 300;
-            left: 0;
-            margin: 0;
-            font-size: 0.5rem;
-            line-height: 0.5rem;
-            color: var(--chat-text);
+            flex: 1;
+            animation: glow 4s infinite;
+            text-transform: uppercase;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            padding: 5px 15px;
+            border-radius: 5px;
             background: rgba(0, 0, 0, 0.3);
         }
 
-        #collision-info {
-            display: inline-block;
-            text-align: center;
-            vertical-align: top;
-            margin-left: 2rem;
-        }
-
-        /* Collision info items */
-        #player-facing,
-        #recent-moves,
-        #warp-list {
-            font-size: 1rem;
-            margin: 0.5rem 0;
-        }
-
-        .team-window {
-            grid-area: team;
-            background-color: var(--chat-bg);
-            border: 4px solid var(--border-color);
-            border-radius: 8px;
-            padding: 0.5rem;
-            color: var(--chat-text);
-            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+        /* Main container grid layout - MODIFIED */
+        .container {
+            display: grid;
+            grid-template-columns: minmax(220px, 1fr) minmax(600px, 3fr) minmax(220px, 1fr);
+            grid-template-rows: auto 1fr auto minmax(40px, auto);
+            grid-template-areas:
+                "stats game-window action-history"
+                "performance game-window action-history"
+                "mission-params cognitive tool-calls"
+                "system-status team-status system-indicators";
+            gap: 8px;
+            padding: 8px;
+            height: calc(100vh - 70px);
             overflow: hidden;
-            height: 120px;
-            /* constrain to grid row height */
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Enhanced Panel styling with shader effects */
+        .panel {
+            background: var(--panel-gradient);
+            border: 2px solid var(--border-color);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.7);
+            overflow: hidden;
+            position: relative;
+            border-radius: 3px;
+        }
+
+        /* Panel grid lines */
+        .panel::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 50 50' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='50' height='50' fill='%23000000' fill-opacity='0.5'/%3E%3Crect width='1' height='50' fill='%23ffffff' fill-opacity='0.02'/%3E%3Crect width='50' height='1' fill='%23ffffff' fill-opacity='0.02'/%3E%3C/svg%3E");
+            background-size: 50px 50px;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Panel scanlines */
+        .panel::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 50%, transparent 50%);
+            background-size: 100% 2px;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        /* Enhanced Panel sections */
+        .panel-header {
+            padding: 12px;
+            border-bottom: 2px solid var(--border-color);
+            background: var(--header-gradient);
+            position: relative;
+            z-index: 3;
+            font-size: var(--font-size-large);
+            font-weight: 600;
+            color: var(--text-primary);
+            text-align: center;
+            text-shadow: var(--glow-effect);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .panel-content {
+            padding: 12px;
+            position: relative;
+            z-index: 3;
+            overflow-y: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            height: calc(100% - 48px);
+            flex: 1;
             display: flex;
             flex-direction: column;
         }
 
-        .team-window h2 {
-            font-size: 1rem;
-            color: var(--pokemon-yellow);
-            margin-bottom: 0.5rem;
+        .panel-content::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* Module-specific styling */
+        
+        /* Stream Statistics Module */
+        .stream-statistics {
+            grid-area: stats;
+            min-height: 160px;
+            height: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stream-statistics .panel-content {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* Cognitive Processes Module - MODIFIED */
+        .cognitive-processes {
+            grid-area: cognitive;
+            min-height: 310px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Tool Calls Module - MODIFIED */
+        .tool-calls-panel {
+            grid-area: tool-calls;
+            min-height: 310px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Mission Parameters Module */
+        .mission-parameters {
+            grid-area: mission-params;
+            min-height: 240px;
+            height: auto;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Game Window */
+        .game-window {
+            grid-area: game-window;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .game-display {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            padding: 5px;
+            min-height: 460px;
+        }
+
+        /* Game screen with Grok overlay */
+        #screen-container {
+            position: relative;
+            border: 2px solid var(--border-color);
+            background-color: #000;
+            display: inline-block;
+            margin: 0 auto;
+            max-width: 680px;
+            width: 100%;
+            aspect-ratio: 10/9; /* GameBoy aspect ratio - 160:144 simplified */
+            z-index: 3;
+            box-shadow: 0 0 20px rgba(61, 125, 202, 0.4);
+        }
+
+        #game-screen {
+            image-rendering: pixelated;
+            width: 100%;
+            height: 100%;
+            z-index: 4;
+        }
+
+        /* Game screen grok logo watermark */
+        #screen-container::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 600 600' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M300,120 A240,240 0 1,0 300,660 L300,540 A120,120 0 1,1 300,240 L520,240' fill='none' stroke='white' stroke-width='1.5' stroke-opacity='0.03'/%3E%3C/svg%3E");
+            background-size: contain;
+            background-position: center;
+            background-repeat: no-repeat;
+            pointer-events: none;
+            opacity: 0.1;
+            z-index: 5;
+        }
+
+        /* Tool Calls Section */
+        .tool-calls {
+            padding: 10px;
+            margin-top: 0;
+            border-top: 0;
+            background: rgba(0, 0, 0, 0.3);
+            height: calc(100% - 48px);
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .tool-calls-header {
+            color: var(--text-primary);
+            margin-bottom: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            text-shadow: 0px 0px 5px rgba(255, 255, 255, 0.3);
+        }
+
+        /* Action History Module - MODIFIED */
+        .action-history {
+            grid-area: action-history;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Performance Metrics Module */
+        .performance-metrics {
+            grid-area: performance;
+            height: 260px;
+        }
+
+        /* Pokemon-style segmented bar for metrics */
+        .metric-bar-container {
+            width: 100%;
+            height: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            margin: 10px 0;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+            overflow: hidden;
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
+        }
+
+        .metric-bar {
+            height: 100%;
+            position: relative;
+            background: var(--hp-green-gradient);
+            animation: barPulse 3s infinite;
+            box-shadow: 0 0 10px rgba(45, 209, 100, 0.4);
+        }
+
+        /* Segmented bar style */
+        .metric-bar::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 100%;
+            background-image: linear-gradient(90deg, 
+                transparent 5%, rgba(255, 255, 255, 0.4) 5%, rgba(255, 255, 255, 0.4) 6%, 
+                transparent 6%, transparent 15%, rgba(255, 255, 255, 0.4) 15%, rgba(255, 255, 255, 0.4) 16%, 
+                transparent 16%, transparent 25%, rgba(255, 255, 255, 0.4) 25%, rgba(255, 255, 255, 0.4) 26%, 
+                transparent 26%, transparent 35%, rgba(255, 255, 255, 0.4) 35%, rgba(255, 255, 255, 0.4) 36%, 
+                transparent 36%, transparent 45%, rgba(255, 255, 255, 0.4) 45%, rgba(255, 255, 255, 0.4) 46%, 
+                transparent 46%, transparent 55%, rgba(255, 255, 255, 0.4) 55%, rgba(255, 255, 255, 0.4) 56%, 
+                transparent 56%, transparent 65%, rgba(255, 255, 255, 0.4) 65%, rgba(255, 255, 255, 0.4) 66%, 
+                transparent 66%, transparent 75%, rgba(255, 255, 255, 0.4) 75%, rgba(255, 255, 255, 0.4) 76%, 
+                transparent 76%, transparent 85%, rgba(255, 255, 255, 0.4) 85%, rgba(255, 255, 255, 0.4) 86%, 
+                transparent 86%, transparent 95%, rgba(255, 255, 255, 0.4) 95%, rgba(255, 255, 255, 0.4) 96%, 
+                transparent 96%);
+            animation: segmentFlicker 2s infinite;
+        }
+
+        .metric-bar.medium {
+            background: var(--hp-yellow-gradient);
+            box-shadow: 0 0 10px rgba(252, 206, 75, 0.4);
+        }
+
+        .metric-bar.low {
+            background: var(--hp-red-gradient);
+            box-shadow: 0 0 10px rgba(251, 91, 93, 0.4);
+        }
+
+        .metric-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: var(--font-size-small);
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        /* Datastream Module */
+        .datastream {
+            grid-area: datastream;
+            height: 240px;
+        }
+
+        .message {
+            font-family: 'Press Start 2P', 'Arial', monospace;
+            font-size: var(--font-size-small);
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+            text-shadow: var(--glow-effect);
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .message.highlight {
+            color: var(--text-primary);
+        }
+
+        .stats-data .message {
+            margin-bottom: 10px;
+            font-size: var(--font-size-medium);
+        }
+
+        /* Team Status Module */
+        .team-status {
+            grid-area: team-status;
+            display: flex;
+            flex-direction: column;
+            min-height: 240px;
+            height: auto;
+            flex: 1;
         }
 
         .team-container {
-            display: flex;
-            flex-wrap: nowrap;
-            gap: 0.5rem;
-            overflow-x: auto;
-            /* enable horizontal scrolling if needed */
-            overflow-y: hidden;
-            height: 80px;
-            /* original height */
-            scrollbar-width: none;
-            /* hide scrollbar in Firefox */
-            -ms-overflow-style: none;
-            /* hide scrollbar in IE 10+ */
-        }
-
-        .team-container::-webkit-scrollbar {
-            display: none;
-            /* hide scrollbar in Chrome, Safari, Edge */
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            grid-template-rows: 1fr;
+            gap: 10px;
+            padding: 10px;
+            flex: 1;
+            min-height: 200px;
         }
 
         .pokemon-card {
-            flex: 0 0 140px;
-            background-color: rgba(0, 0, 0, 0.3);
-            border: 2px solid var(--border-color);
-            border-radius: 4px;
-            padding: 0.3rem;
-            font-size: 0.6rem;
+            background-color: rgba(0, 0, 0, 0.7);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            padding: 10px;
+            position: relative;
             display: flex;
             flex-direction: column;
+            justify-content: space-between;
+            text-align: center;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
         }
 
-        .pokemon-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 0.2rem;
+        .pokemon-card.empty {
+            opacity: 0.6;
+        }
+
+        .pokemon-sprite {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 5px auto;
+            image-rendering: pixelated;
+            filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.3));
         }
 
         .pokemon-name {
-            font-weight: bold;
-            color: var(--pokemon-yellow);
+            font-family: 'Press Start 2P', 'Arial', sans-serif;
+            font-size: var(--font-size-small);
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 5px;
+            text-shadow: var(--glow-effect);
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
 
-        .pokemon-level {
-            color: white;
+        .pokemon-status {
+            font-size: var(--font-size-tiny);
+            color: var(--accent-secondary);
+            margin-bottom: 5px;
+        }
+        
+        .pokemon-status .poisoned {
+            color: #B45AFF; /* Purple for poison status */
         }
 
-        .pokemon-hp {
-            margin-bottom: 0.2rem;
-            height: 8px;
-            background-color: #444;
-            border-radius: 4px;
+        .pokemon-stats {
+            font-family: 'Press Start 2P', 'Arial', monospace;
+            font-size: var(--font-size-small);
+            color: var(--text-secondary);
+            margin-bottom: 5px;
+            text-shadow: var(--glow-effect);
+        }
+
+        /* HP bar styling - THE MODEL FOR ALL STATUS BARS */
+        .hp-bar-container {
+            width: 100%;
+            height: 15px;
+            background-color: rgba(0, 0, 0, 0.7);
+            margin: 10px 0;
+            border-radius: 3px;
             overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
         }
 
         .hp-bar {
             height: 100%;
-            background-color: #4caf50;
+            position: relative;
+            background: var(--hp-green-gradient);
+            box-shadow: 0 0 10px rgba(45, 209, 100, 0.4);
+        }
+
+        /* Segmented bar style */
+        .hp-bar::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
             width: 100%;
+            background-image: linear-gradient(90deg, 
+                transparent 5%, rgba(255, 255, 255, 0.4) 5%, rgba(255, 255, 255, 0.4) 6%, 
+                transparent 6%, transparent 15%, rgba(255, 255, 255, 0.4) 15%, rgba(255, 255, 255, 0.4) 16%, 
+                transparent 16%, transparent 25%, rgba(255, 255, 255, 0.4) 25%, rgba(255, 255, 255, 0.4) 26%, 
+                transparent 26%, transparent 35%, rgba(255, 255, 255, 0.4) 35%, rgba(255, 255, 255, 0.4) 36%, 
+                transparent 36%, transparent 45%, rgba(255, 255, 255, 0.4) 45%, rgba(255, 255, 255, 0.4) 46%, 
+                transparent 46%, transparent 55%, rgba(255, 255, 255, 0.4) 55%, rgba(255, 255, 255, 0.4) 56%, 
+                transparent 56%, transparent 65%, rgba(255, 255, 255, 0.4) 65%, rgba(255, 255, 255, 0.4) 66%, 
+                transparent 66%, transparent 75%, rgba(255, 255, 255, 0.4) 75%, rgba(255, 255, 255, 0.4) 76%, 
+                transparent 76%, transparent 85%, rgba(255, 255, 255, 0.4) 85%, rgba(255, 255, 255, 0.4) 86%, 
+                transparent 86%, transparent 95%, rgba(255, 255, 255, 0.4) 95%, rgba(255, 255, 255, 0.4) 96%, 
+                transparent 96%);
+            animation: segmentFlicker 2s infinite;
         }
 
         .hp-bar.low {
-            background-color: #f44336;
+            background: var(--hp-red-gradient);
+            box-shadow: 0 0 10px rgba(251, 91, 93, 0.4);
         }
 
         .hp-bar.medium {
-            background-color: #ff9800;
+            background: var(--hp-yellow-gradient);
+            box-shadow: 0 0 10px rgba(252, 206, 75, 0.4);
         }
-
-        .pokemon-types {
-            display: flex;
-            gap: 0.2rem;
-            margin-top: 0.2rem;
-        }
-
-        .type-pill {
-            padding: 0.1rem 0.3rem;
-            border-radius: 10px;
-            font-size: 0.5rem;
-            text-transform: uppercase;
-        }
-
-        /* Type colors */
-        .type-normal {
-            background-color: #A8A878;
-            color: black;
-        }
-
-        .type-fighting {
-            background-color: #C03028;
-            color: white;
-        }
-
-        .type-flying {
-            background-color: #A890F0;
-            color: black;
-        }
-
-        .type-poison {
-            background-color: #A040A0;
-            color: white;
-        }
-
-        .type-ground {
-            background-color: #E0C068;
-            color: black;
-        }
-
-        .type-rock {
-            background-color: #B8A038;
-            color: black;
-        }
-
-        .type-bug {
-            background-color: #A8B820;
-            color: black;
-        }
-
-        .type-ghost {
-            background-color: #705898;
-            color: white;
-        }
-
-        .type-steel {
-            background-color: #B8B8D0;
-            color: black;
-        }
-
-        .type-fire {
-            background-color: #F08030;
-            color: white;
-        }
-
-        .type-water {
-            background-color: #6890F0;
-            color: white;
-        }
-
-        .type-grass {
-            background-color: #78C850;
-            color: black;
-        }
-
-        .type-electric {
-            background-color: #F8D030;
-            color: black;
-        }
-
-        .type-psychic {
-            background-color: #F85888;
-            color: white;
-        }
-
-        .type-ice {
-            background-color: #98D8D8;
-            color: black;
-        }
-
-        .type-dragon {
-            background-color: #7038F8;
-            color: white;
-        }
-
-        .type-dark {
-            background-color: #705848;
-            color: white;
-        }
-
-        .type-fairy {
-            background-color: #EE99AC;
-            color: black;
-        }
-
-        /* Species label styling */
-        .pokemon-species {
-            font-size: 0.6rem;
-            color: var(--pokemon-yellow);
+        
+        .hp-text {
+            font-size: var(--font-size-small);
+            color: var(--text-tertiary);
             text-align: center;
-            margin-bottom: 0.2rem;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
         }
 
-        /* Pane for Grok's Tool Calls beneath the emulator screen */
-        .toolcalls-window {
-            width: 100%;
-            padding: 0.5rem;
-            margin-top: 1rem;
-            background-color: var(--chat-bg);
-            border-top: 4px solid var(--border-color);
+        .pokemon-type {
+            font-family: 'Press Start 2P', 'Courier New', monospace;
+            font-size: 10px;
+            color: var(--text-tertiary);
+            margin-top: 5px;
+        }
+
+        /* System Status Bar */
+        .system-status {
+            grid-area: system-status;
+            min-height: 45px;
+            height: auto;
+            padding: 0;
+            position: relative;
             display: flex;
             flex-direction: column;
-            max-height: 950px;
-            overflow: hidden;
-        }
-        .toolcalls-header {
-            padding: 0.5rem;
-            border-bottom: 2px solid var(--border-color);
-            background: var(--header-gradient);
-        }
-        .toolcalls-header h2 {
-            font-size: 1rem;
-            color: var(--pokemon-yellow);
-            margin: 0;
-        }
-        .toolcalls-messages {
-            flex: 1;
-            padding: 1rem;
-            overflow-y: auto;
-            font-size: 0.9rem;
-            color: var(--chat-text);
-            white-space: pre-wrap;
-            word-wrap: break-word;
         }
 
-        /* Progress Bar styling */
-        .progress-bar-container {
-            position: relative;
+        .system-status-bar {
             width: 100%;
-            height: 1rem;
-            background-color: var(--border-color);
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            margin-top: 0.5rem;
+            height: 15px;
+            position: relative;
+            background: var(--exp-blue-gradient);
+            animation: barPulse 2s infinite;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 0 10px rgba(94, 189, 252, 0.4);
         }
+
+        /* Segmented status bar */
+        .system-status-bar::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 100%;
+            background-image: linear-gradient(90deg, 
+                transparent 10%, rgba(255, 255, 255, 0.4) 10%, rgba(255, 255, 255, 0.4) 11%, 
+                transparent 11%, transparent 20%, rgba(255, 255, 255, 0.4) 20%, rgba(255, 255, 255, 0.4) 21%, 
+                transparent 21%, transparent 30%, rgba(255, 255, 255, 0.4) 30%, rgba(255, 255, 255, 0.4) 31%, 
+                transparent 31%, transparent 40%, rgba(255, 255, 255, 0.4) 40%, rgba(255, 255, 255, 0.4) 41%, 
+                transparent 41%, transparent 50%, rgba(255, 255, 255, 0.4) 50%, rgba(255, 255, 255, 0.4) 51%, 
+                transparent 51%, transparent 60%, rgba(255, 255, 255, 0.4) 60%, rgba(255, 255, 255, 0.4) 61%, 
+                transparent 61%, transparent 70%, rgba(255, 255, 255, 0.4) 70%, rgba(255, 255, 255, 0.4) 71%, 
+                transparent 71%, transparent 80%, rgba(255, 255, 255, 0.4) 80%, rgba(255, 255, 255, 0.4) 81%, 
+                transparent 81%, transparent 90%, rgba(255, 255, 255, 0.4) 90%, rgba(255, 255, 255, 0.4) 91%, 
+                transparent 91%);
+            animation: segmentFlicker 2s infinite;
+        }
+
+        .system-status-text {
+            font-family: 'Press Start 2P', 'Arial', monospace;
+            font-size: var(--font-size-medium);
+            color: var(--text-primary);
+            padding: 8px;
+            text-shadow: var(--glow-effect);
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+        }
+
+        /* System Indicators */
+        .system-indicators {
+            grid-area: system-indicators;
+            min-height: 45px;
+            height: auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 15px;
+        }
+
+        .system-indicator {
+            font-family: 'Press Start 2P', 'Arial', monospace;
+            font-size: var(--font-size-small);
+            color: var(--text-tertiary);
+            text-shadow: var(--glow-effect);
+            white-space: nowrap;
+            padding: 0 5px;
+        }
+
+        /* Control elements */
+        .status-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-text {
+            font-family: 'Press Start 2P', 'Courier New', monospace;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .control-button {
+            background-color: var(--background-subtle);
+            color: var(--text-primary);
+            border: 2px solid var(--border-color);
+            border-radius: 3px;
+            padding: 8px 12px;
+            font-family: 'Press Start 2P', 'Arial', sans-serif;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .control-button:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+        }
+
+        .control-button.green {
+            background-color: rgba(0, 204, 0, 0.2);
+            border-color: rgba(0, 204, 0, 0.5);
+            box-shadow: 0 0 10px rgba(0, 204, 0, 0.3);
+        }
+
+        .control-button.red {
+            background-color: rgba(255, 68, 68, 0.2);
+            border-color: rgba(255, 68, 68, 0.5);
+            box-shadow: 0 0 10px rgba(255, 68, 68, 0.3);
+        }
+
+        /* Chat and cognitive display - MODIFIED with larger text */
+        .chat-output {
+            height: 100%;
+            overflow-y: auto;
+            font-family: 'Press Start 2P', 'Courier New', monospace;
+            font-size: var(--font-size-medium);
+            color: var(--text-secondary);
+        }
+
+        .thought-bubble {
+            background-color: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+            padding: 10px;
+            margin-bottom: 12px;
+            font-size: var(--font-size-medium);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Progress Bar - Enhanced to match Pokemon HP bars */
+        .progress-bar-container {
+            width: 100%;
+            height: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            margin-top: 8px;
+            position: relative;
+            border-radius: 3px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
+        }
+
         .progress-bar-fill {
             height: 100%;
-            background-color: var(--pokemon-yellow);
+            background: var(--exp-blue-gradient);
             width: 0%;
-            border-radius: 4px 0 0 4px;
             transition: width 0.3s ease;
+            position: relative;
+            box-shadow: 0 0 10px rgba(94, 189, 252, 0.4);
         }
+
+        /* Segmented progress bar */
+        .progress-bar-fill::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 100%;
+            background-image: linear-gradient(90deg, 
+                transparent 5%, rgba(255, 255, 255, 0.4) 5%, rgba(255, 255, 255, 0.4) 6%, 
+                transparent 6%, transparent 15%, rgba(255, 255, 255, 0.4) 15%, rgba(255, 255, 255, 0.4) 16%, 
+                transparent 16%, transparent 25%, rgba(255, 255, 255, 0.4) 25%, rgba(255, 255, 255, 0.4) 26%, 
+                transparent 26%, transparent 35%, rgba(255, 255, 255, 0.4) 35%, rgba(255, 255, 255, 0.4) 36%, 
+                transparent 36%, transparent 45%, rgba(255, 255, 255, 0.4) 45%, rgba(255, 255, 255, 0.4) 46%, 
+                transparent 46%, transparent 55%, rgba(255, 255, 255, 0.4) 55%, rgba(255, 255, 255, 0.4) 56%, 
+                transparent 56%, transparent 65%, rgba(255, 255, 255, 0.4) 65%, rgba(255, 255, 255, 0.4) 66%, 
+                transparent 66%, transparent 75%, rgba(255, 255, 255, 0.4) 75%, rgba(255, 255, 255, 0.4) 76%, 
+                transparent 76%, transparent 85%, rgba(255, 255, 255, 0.4) 85%, rgba(255, 255, 255, 0.4) 86%, 
+                transparent 86%, transparent 95%, rgba(255, 255, 255, 0.4) 95%, rgba(255, 255, 255, 0.4) 96%, 
+                transparent 96%);
+            animation: segmentFlicker 2s infinite;
+        }
+
         .progress-bar-text {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            text-align: center;
-            font-size: 0.75rem;
-            line-height: 1rem;
-            color: var(--chat-text);
-        }
-
-        /* Agent Actions pane styling */
-        .actions-window {
-            grid-area: actions;
-            height: 100%;
-            overflow: hidden;
-            background-color: var(--chat-bg);
-            border: 4px solid var(--border-color);
-            border-radius: 8px;
             display: flex;
-            flex-direction: column;
-            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+            justify-content: center;
+            align-items: center;
+            font-size: var(--font-size-small);
+            color: var(--text-primary);
+            z-index: 1;
+            text-shadow: 0px 0px 2px rgba(0, 0, 0, 1);
+            font-weight: bold;
         }
 
-        .actions-window .actions-header {
-            padding: 1rem;
-            border-bottom: 4px solid var(--border-color);
-            background: var(--header-gradient);
+        /* Input area for development mode */
+        #delay-input {
+            background-color: rgba(0, 0, 0, 0.5);
+            color: var(--text-primary);
+            border: 2px solid var(--border-color);
+            border-radius: 3px;
+            padding: 5px 8px;
+            font-family: 'Press Start 2P', 'Courier New', monospace;
+            font-size: 14px;
+            width: 80px;
+            text-align: center;
         }
 
-        .actions-window .actions-header h2 {
-            font-size: 1.2rem;
-            color: var(--pokemon-yellow);
-            text-shadow: 1px 1px #000;
-        }
-
-        .actions-messages {
-            flex: 1;
+        /* Debug output */
+        #debug-output {
+            width: 100%;
+            max-height: 100px;
             overflow-y: auto;
-            padding: 1rem;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-        }
-
-        .actions-messages::-webkit-scrollbar {
-            display: none;
+            margin-top: 10px;
+            padding: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            color: var(--text-tertiary);
+            background-color: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border-color);
         }
     </style>
 </head>
 
 <body>
+    <!-- Grok logo watermark -->
+    <svg class="grok-logo-bg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <path class="grok-logo-path" d="M50,20 A30,30 0 1,0 50,80 L50,65 A15,15 0 1,1 50,35 L70,35" />
+    </svg>
+
+    <!-- Static noise effect -->
+    <div class="static-noise"></div>
+
+    <!-- Scanline effect -->
+    <div class="scanline"></div>
+
     <header class="header">
-        <h1>Grok Plays Pokemon</h1>
-        <div class="status">
-            <span id="connectionStatus" class="status-text">Stopped</span>
-            <button class="dev-toggle-button red" id="dev-toggle" onclick="toggleDevControl()">Dev Control: OFF</button>
-            <button class="run-button" id="run-button" onclick="toggleAgent()">Run</button>
-            <button class="run-button red" id="stop-button" onclick="stopAgent()" style="display: none;">Stop</button>
-            <input type="file" id="save-state-input" style="display: none" accept=".state">
-            <button class="run-button" id="load-state-button"
-                onclick="document.getElementById('save-state-input').click()">Load Save</button>
-            <label for="delay-input" style="margin-left:1rem; color: var(--chat-text); font-size:0.7rem;">Delay
-                (s):</label>
-            <input id="delay-input" type="number" min="0" step="0.1" value="2.0"
-                style="width:4rem; font-size:0.7rem; margin-left:0.5rem;" />
-            <button id="connectButton" onclick="connectWebSocket()">Connect</button>
-            <button id="disconnectButton" onclick="disconnectWebSocket()">Disconnect</button>
-            <button id="refreshButton" onclick="connectWebSocket()">Refresh</button>
-        </div>
+        <h1>GROK PLAYS POKÉMON</h1>
     </header>
 
     <main class="container">
-        <div class="game-window">
-            <div id="screen-container">
-                <canvas id="game-screen" width="160" height="144"></canvas>
-                <div id="progress-bar-container" class="progress-bar-container"></div>
-                <pre id="debug-output"
-                    style="background: rgba(0,0,0,0.7); color: var(--chat-text); font-family: monospace; font-size: 0.7rem; max-height: 100px; overflow-y: auto; width: 640px; margin-top: 8px;"></pre>
-            </div>
-
-            <!-- Pane for Grok's Tool Calls beneath the emulator screen -->
-            <div class="toolcalls-window">
-                <div class="toolcalls-header">
-                    <h2>Grok's Tool Calls</h2>
+        <!-- Stream Statistics Module -->
+        <section class="stream-statistics panel">
+            <div class="panel-header">STREAM STATISTICS</div>
+            <div class="panel-content">
+                <div class="status-controls">
+                    <span id="connectionStatus" class="status-text">Disconnected</span>
+                    <button id="connectButton" class="control-button" onclick="connectWebSocket()">Connect</button>
+                    <button id="disconnectButton" class="control-button" onclick="disconnectWebSocket()">Disconnect</button>
+                    <button id="refreshButton" class="control-button" onclick="connectWebSocket()">Refresh</button>
                 </div>
-                <div class="toolcalls-messages" id="toolcalls-messages"></div>
+                <div class="stats-data">
+                    <div class="message">VIEWERS: <span id="viewer-count">69,420</span></div>
+                    <div class="message">UPTIME: <span id="uptime">14D 07H 22M</span></div>
+                    <div class="message">BADGES: <span id="badge-count">1/8</span></div>
+                    <div class="message">POKÉDEX: <span id="pokedex-count">1/151</span></div>
+                </div>
             </div>
-        </div>
-        <div class="actions-window">
-            <div class="actions-header">
-                <h2>Agent Actions</h2>
-            </div>
-            <div class="actions-messages" id="actions-messages"></div>
-        </div>
-        <div class="chat-window">
-            <div class="chat-header">
-                <h2>Grok's Thoughts</h2>
-            </div>
-            <div class="chat-messages" id="chat-messages">
-            </div>
-        </div>
+        </section>
 
-        <div class="team-window">
-            <h2>Current Team</h2>
-            <div class="team-container" id="team-container">
-                <div class="pokemon-card placeholder">No Pokémon data available</div>
+        <!-- Performance Metrics Module -->
+        <section class="performance-metrics panel">
+            <div class="panel-header">PERFORMANCE METRICS</div>
+            <div class="panel-content">
+                <div class="metric-label">
+                    <span>WIN RATE:</span>
+                    <span>1000%</span>
+                </div>
+                <div class="metric-bar-container">
+                    <div class="metric-bar" style="width: 75%;"></div>
+                </div>
+                
+                <div class="metric-label">
+                    <span>STEPS TAKEN:</span>
+                    <span>420,420</span>
+                </div>
+                <div class="metric-bar-container">
+                    <div class="metric-bar" style="width: 90%;"></div>
+                </div>
+                
+                <div class="metric-label">
+                    <span>POKÉMON CAUGHT:</span>
+                    <span>1/151</span>
+                </div>
+                <div class="metric-bar-container">
+                    <div class="metric-bar medium" style="width: 57%;"></div>
+                </div>
+                
+                <div class="metric-label">
+                    <span>CURRENCY:</span>
+                    <span>₽1</span>
+                </div>
+                <div class="metric-bar-container">
+                    <div class="metric-bar" style="width: 80%;"></div>
+                </div>
+                
+                <div class="metric-label">
+                    <span>INVENTORY:</span>
+                    <span>5</span>
+                </div>
+                <div class="metric-bar-container">
+                    <div class="metric-bar low" style="width: 20%;"></div>
+                </div>
             </div>
-        </div>
+        </section>
+
+        <!-- Mission Parameters Module -->
+        <section class="mission-parameters panel">
+            <div class="panel-header">MISSION PARAMETERS</div>
+            <div class="panel-content">
+                <div class="mission-controls">
+                    <button class="control-button" id="dev-toggle" onclick="toggleDevControl()">Dev Control: OFF</button>
+                    <button class="control-button" id="run-button" onclick="toggleAgent()">Run</button>
+                    <button class="control-button red" id="stop-button" onclick="stopAgent()" style="display: none;">Stop</button>
+                    <input type="file" id="save-state-input" style="display: none" accept=".state">
+                    <button class="control-button" id="load-state-button" onclick="document.getElementById('save-state-input').click()">Load Save</button>
+                    <div style="margin-top: 10px;">
+                        <label for="delay-input" style="font-size: 14px;">DELAY (S):</label>
+                        <input id="delay-input" type="number" min="0" step="0.1" value="0" />
+                    </div>
+                </div>
+                
+                <div class="mission-goals" style="margin-top: 15px;">
+                    <div class="message">PRIMARY: DO NOT GET STUCK</div>
+                    <div class="metric-bar-container">
+                        <div class="metric-bar" style="width: 70%;"></div>
+                    </div>
+                    
+                    <div class="message">SECONDARY: STAY CLASSY</div>
+                    <div class="metric-bar-container">
+                        <div class="metric-bar medium" style="width: 57%;"></div>
+                    </div>
+                </div>
+
+                                
+                <div class="system-status" style="margin-top: 15px;">
+                    <div class="metric-bar-container">
+                        <div class="metric-bar" style="width: 100%;"></div>
+                    </div>
+                    <div class="message">CURRENT ZONE PROGRESS</div>
+                </div>
+                
+                <div class="navigation-system" style="margin-top: 15px;">
+                    <div class="message">NAVIGATION SYSTEM</div>
+                    <div class="message" style="color: var(--text-tertiary);">CURRENT: <span id="current-location">Somewhere...</span></div>
+                    <div class="message" style="color: var(--text-tertiary);">TARGET: <span id="target-location">Do things</span></div>
+                    <div class="message" style="color: var(--text-tertiary);">DISTANCE: <span id="location-distance">???</span></div>
+                </div>
+                
+                <!-- Progress Bar moved from game display to mission parameters -->
+                <div id="progress-bar-container" class="progress-bar-container" style="margin-top: 15px;">
+                    <div class="progress-bar-fill" id="progress-bar-fill"></div>
+                    <div class="progress-bar-text" id="progress-bar-text">Loading...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Game Window -->
+        <section class="game-window panel">
+            <div class="panel-header">GAME DISPLAY</div>
+            <div class="game-display">
+                <div id="screen-container">
+                    <canvas id="game-screen"></canvas>
+                </div>
+                <pre id="debug-output"></pre>
+            </div>
+        </section>
+
+        <!-- Action History Module -->
+        <section class="action-history panel">
+            <div class="panel-header">ACTION HISTORY</div>
+            <div class="panel-content">
+                <div id="actions-messages">
+                    <!-- Action history will be populated here dynamically -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Cognitive Processes Module - RENAMED to GROK'S THINKING -->
+        <section class="cognitive-processes panel">
+            <div class="panel-header">GROK'S THINKING</div>
+            <div class="panel-content">
+                <div class="chat-output" id="chat-messages">
+                    <!-- Grok's thoughts will be populated here dynamically -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Tool Calls Module -->
+        <section class="tool-calls-panel panel">
+            <div class="panel-header">GROK'S TOOL CALLS</div>
+            <div class="tool-calls">
+                <div id="toolcalls-messages"></div>
+            </div>
+        </section>
+
+        <!-- Datastream Module (moved to bottom for proper display flow) -->
+        <section class="datastream panel" style="display: none;">
+            <div class="panel-header">DATASTREAM</div>
+            <div class="panel-content">
+                <div class="message">UserA: use charizard!</div>
+                <div class="message">UserB: heal first!</div>
+                <div class="message highlight">EVENT: Found rare candy</div>
+                <div class="message">UserC: save the game!!</div>
+                <div class="message">MILESTONE: 330K steps!</div>
+                <div class="message">UserD: go catch zapdos</div>
+                <div class="message">UserE: level up kadabra</div>
+                <div class="message highlight">ALERT: Low HP warning!</div>
+                <div class="message">UserF: use master ball</div>
+            </div>
+        </section>
+
+        <!-- Team Status Module -->
+        <section class="team-status panel">
+            <div class="panel-header">CURRENT TEAM</div>
+            <div class="team-container" id="team-container">
+                <!-- Dynamically populated Pokémon cards will go here -->
+            </div>
+        </section>
+
+        <!-- System Status Bar -->
+        <section class="system-status panel">
+            <div class="system-status-bar"></div>
+            <div class="system-status-text">QUANTUM SYSTEMS: NOMINAL</div>
+        </section>
+
+        <!-- System Indicators -->
+        <section class="system-indicators panel">
+            <div class="system-indicator">PREDICTIVE MATRIX: 92% ACCURACY</div>
+            <div class="system-indicator">NEURAL CORE: ONLINE</div>
+            <div class="system-indicator">STRATEGIC OVERLAY: ACTIVE</div>
+            <div class="system-indicator" style="color: var(--text-primary);">GROK_v2.7</div>
+        </section>
     </main>
 
     <script>
-        console.log('Index.html script loaded');
+        console.log('Grok Plays Pokemon interface initialized');
         let devMode = false;
         let ws;
         let reconnectAttempts = 0;
@@ -717,6 +1123,10 @@
         const gameScreen = document.getElementById('game-screen');
         const ctx = gameScreen.getContext('2d');
         const debugOutput = document.getElementById('debug-output');
+        
+        // Initialize the canvas size
+        gameScreen.width = 160;
+        gameScreen.height = 144;
 
         // --- Grid Drawing Function ---
         function drawGrid() {
@@ -775,13 +1185,15 @@
                     // Update button UI
                     if (devMode) {
                         btn.textContent = 'Dev Control: ON';
-                        btn.classList.remove('red'); btn.classList.add('green');
+                        btn.classList.remove('red'); 
+                        btn.classList.add('green');
                     } else {
                         btn.textContent = 'Dev Control: OFF';
-                        btn.classList.remove('green'); btn.classList.add('red');
+                        btn.classList.remove('green'); 
+                        btn.classList.add('red');
                     }
                     // Update status text
-                    const statusText = document.querySelector('.status-text');
+                    const statusText = document.querySelector('#connectionStatus');
                     statusText.textContent = devMode ? 'Paused' : 'Running';
                     isAgentPaused = devMode;
                     console.log(`Dev Control ${devMode ? 'activated' : 'deactivated'}:`, data);
@@ -897,48 +1309,51 @@
                             }
                         }
 
-                        // Display Grok's inner thoughts if available
-                        if (data.grok_thought) {
-                            const thoughtDiv = document.createElement('div');
-                            thoughtDiv.className = 'message thought';
-                            const timeSpan = document.createElement('span');
-                            timeSpan.className = 'timestamp';
-                            timeSpan.textContent = new Date().toLocaleTimeString();
-                            thoughtDiv.appendChild(timeSpan);
-                            const preThought = document.createElement('pre');
-                            preThought.className = 'content';
-                            preThought.textContent = data.grok_thought;
-                            thoughtDiv.appendChild(preThought);
-                            chatMessages.appendChild(thoughtDiv);
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
-                        }
-                        // Route messages: tool calls vs Grok's thoughts
+                        // Route messages: Tool Calls and Thoughts
                         if (data.message) {
-                            const msg = data.message;
-                            if (msg.startsWith('{') || msg.startsWith('Fallback invoked') || msg.startsWith('Grok invoked')) {
-                                // Show tool calls in the tool-call pane beneath the emulator
+                            const raw = data.message.trim();
+                            // Ignore internal invocation logs
+                            if (raw.startsWith('Grok invoked') || raw.startsWith('Fallback invoked')) {
+                                // no-op (internal logs)
+                            }
+                            // Pure JSON tool call: display in the Tool Calls pane
+                            else if (raw.startsWith('{') && raw.endsWith('}')) {
                                 const toolContainer = document.getElementById('toolcalls-messages');
                                 const callDiv = document.createElement('div');
-                                callDiv.className = 'tool-call';
-                                callDiv.textContent = msg;
+                                callDiv.className = 'message';
+                                callDiv.textContent = raw;
                                 toolContainer.appendChild(callDiv);
+                                toolContainer.scrollTop = toolContainer.scrollHeight;
                             } else {
-                                // Show Grok's actual thought in the chat pane
-                                const messageDiv = document.createElement('div');
-                                messageDiv.className = 'message';
+                                // Extract rationale and any JSON function call
+                                const match = raw.match(/^([\s\S]*?)\s*(\{.*\})$/);
+                                let rationale = raw;
+                                let jsonCall = null;
+                                if (match) {
+                                    rationale = match[1].trim();
+                                    jsonCall = match[2];
+                                }
+                                // Append rationale to Grok's Thoughts pane
+                                const thoughtDiv = document.createElement('div');
+                                thoughtDiv.className = 'thought-bubble';
                                 const timeSpan = document.createElement('span');
                                 timeSpan.className = 'timestamp';
-                                timeSpan.textContent = new Date().toLocaleTimeString();
-                                const pre = document.createElement('pre');
-                                pre.className = 'content';
-                                pre.textContent = msg;
-                                messageDiv.appendChild(timeSpan);
-                                messageDiv.appendChild(pre);
-                                chatMessages.appendChild(messageDiv);
+                                timeSpan.textContent = new Date().toLocaleTimeString() + ' ';
+                                thoughtDiv.appendChild(timeSpan);
+                                const contentSpan = document.createElement('span');
+                                contentSpan.className = 'content';
+                                contentSpan.textContent = rationale;
+                                thoughtDiv.appendChild(contentSpan);
+                                chatMessages.appendChild(thoughtDiv);
                                 chatMessages.scrollTop = chatMessages.scrollHeight;
-                                // Mirror the thought under the game screen for quick dev view
-                                if (debugOutput) {
-                                    debugOutput.textContent = msg;
+                                // If there's a JSON call, display it in the Tool Calls pane
+                                if (jsonCall) {
+                                    const toolContainer = document.getElementById('toolcalls-messages');
+                                    const callDiv = document.createElement('div');
+                                    callDiv.className = 'message';
+                                    callDiv.textContent = jsonCall;
+                                    toolContainer.appendChild(callDiv);
+                                    toolContainer.scrollTop = toolContainer.scrollHeight;
                                 }
                             }
                         }
@@ -950,17 +1365,11 @@
 
                         // Update progress bar for next goal
                         if (data.progress_bar) {
-                            const progressContainer = document.getElementById('progress-bar-container');
-                            if (progressContainer) {
-                                progressContainer.innerHTML = '';
-                                const fillDiv = document.createElement('div');
-                                fillDiv.className = 'progress-bar-fill';
-                                fillDiv.style.width = `${data.progress_bar.percent}%`;
-                                progressContainer.appendChild(fillDiv);
-                                const textDiv = document.createElement('div');
-                                textDiv.className = 'progress-bar-text';
-                                textDiv.textContent = `${data.progress_bar.goal}: ${data.progress_bar.percent}%`;
-                                progressContainer.appendChild(textDiv);
+                            const progressBarFill = document.getElementById('progress-bar-fill');
+                            const progressBarText = document.getElementById('progress-bar-text');
+                            if (progressBarFill && progressBarText) {
+                                progressBarFill.style.width = `${data.progress_bar.percent}%`;
+                                progressBarText.textContent = `${data.progress_bar.goal}: ${data.progress_bar.percent}%`;
                             }
                         }
                     }
@@ -968,17 +1377,22 @@
                     else if (data.type === 'tool_result') {
                         console.log('Tool result received:', data.content);
                         // Display agent actions in the actions pane
-                        const items = Array.isArray(data.content)
-                            ? data.content
-                            : (data.content.content || []);
+                        let items = [];
+                        if (Array.isArray(data.content)) {
+                            items = data.content;
+                        } else if (data.content && Array.isArray(data.content.content)) {
+                            items = data.content.content;
+                        } else if (data.content && typeof data.content === 'string') {
+                            items = [{ type: 'text', text: data.content }];
+                        } else {
+                            console.warn('Received tool_result with no content to display', data.content);
+                            items = [];
+                        }
                         items.forEach(item => {
                             if (item.type === 'text') {
                                 const messageDiv = document.createElement('div');
                                 messageDiv.className = 'message';
-                                const pre = document.createElement('pre');
-                                pre.className = 'content';
-                                pre.textContent = item.text;
-                                messageDiv.appendChild(pre);
+                                messageDiv.textContent = item.text;
                                 actionsMessages.appendChild(messageDiv);
                             }
                         });
@@ -987,17 +1401,15 @@
                 } catch (e) {
                     console.error("Error processing WebSocket message:", e);
                     const messageDiv = document.createElement('div');
-                    messageDiv.className = 'message error-message'; // Use a class for errors
-                    const timeSpan = document.createElement('span');
-                    timeSpan.className = 'timestamp';
-                    timeSpan.textContent = new Date().toLocaleTimeString();
-                    const pre = document.createElement('pre');
-                    pre.className = 'content';
-                    pre.textContent = `Error parsing/processing message: ${e}\nRaw data: ${event.data}`; // Show raw data on error
-                    messageDiv.appendChild(timeSpan);
-                    messageDiv.appendChild(pre);
+                    messageDiv.className = 'message'; 
+                    messageDiv.textContent = `Error parsing message: ${e}`;
                     chatMessages.appendChild(messageDiv);
                     chatMessages.scrollTop = chatMessages.scrollHeight;
+                    
+                    if (debugOutput) {
+                        debugOutput.textContent += `Error: ${e}\nRaw data: ${event.data.substring(0, 200)}...\n`;
+                        debugOutput.scrollTop = debugOutput.scrollHeight;
+                    }
                 }
             };
 
@@ -1027,13 +1439,6 @@
             };
         }
 
-        // Helper function to escape HTML for safe display
-        function escapeHTML(str) {
-            const div = document.createElement('div');
-            div.appendChild(document.createTextNode(str));
-            return div.innerHTML;
-        }
-
         // --- Agent Control Functions ---
         document.getElementById('save-state-input').addEventListener('change', async function (e) {
             if (!e.target.files.length) return;
@@ -1042,7 +1447,6 @@
             const formData = new FormData();
             formData.append('file', file);
 
-            const statusText = document.querySelector('.status-text');
             try {
                 const response = await fetch('/upload-save-state', {
                     method: 'POST',
@@ -1051,17 +1455,17 @@
 
                 const data = await response.json();
                 if (data.status === 'success') {
-                    statusText.textContent = 'Save state loaded';
+                    document.getElementById('connectionStatus').textContent = 'Save state loaded';
                     // Request a fresh frame after loading state
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ type: 'refresh_frame' }));
                     }
                 } else {
-                    statusText.textContent = 'Error: ' + data.message;
+                    document.getElementById('connectionStatus').textContent = 'Error: ' + data.message;
                 }
             } catch (error) {
                 console.error('Error uploading save state:', error);
-                statusText.textContent = 'Error uploading save state';
+                document.getElementById('connectionStatus').textContent = 'Error uploading save state';
             }
             e.target.value = ''; // Clear the input
         });
@@ -1070,7 +1474,6 @@
             const runButton = document.getElementById('run-button');
             const stopButton = document.getElementById('stop-button');
             const loadStateButton = document.getElementById('load-state-button');
-            const statusText = document.querySelector('.status-text');
 
             if (!isAgentRunning) {
                 runButton.disabled = true;
@@ -1081,17 +1484,17 @@
                     if (data.status === 'success') {
                         isAgentRunning = true;
                         isAgentPaused = false;
-                        statusText.textContent = 'Running';
+                        document.getElementById('connectionStatus').textContent = 'Running';
                         runButton.style.display = 'none';
                         stopButton.style.display = 'inline';
                         loadStateButton.style.display = 'none';
                     } else {
-                        statusText.textContent = 'Error: ' + data.message;
+                        document.getElementById('connectionStatus').textContent = 'Error: ' + data.message;
                         runButton.disabled = false;
                     }
                 } catch (error) {
                     console.error('Error starting agent:', error);
-                    statusText.textContent = 'Error starting agent';
+                    document.getElementById('connectionStatus').textContent = 'Error starting agent';
                     runButton.disabled = false;
                 }
             }
@@ -1101,7 +1504,6 @@
             const runButton = document.getElementById('run-button');
             const stopButton = document.getElementById('stop-button');
             const loadStateButton = document.getElementById('load-state-button');
-            const statusText = document.querySelector('.status-text');
 
             try {
                 const response = await fetch('/stop', { method: 'POST' });
@@ -1110,17 +1512,17 @@
                 if (data.status === 'success') {
                     isAgentRunning = false;
                     isAgentPaused = false;
-                    statusText.textContent = 'Stopped';
+                    document.getElementById('connectionStatus').textContent = 'Stopped';
                     runButton.disabled = false;
                     runButton.style.display = 'inline';
                     stopButton.style.display = 'none';
                     loadStateButton.style.display = 'inline';
                 } else {
-                    statusText.textContent = 'Error: ' + data.message;
+                    document.getElementById('connectionStatus').textContent = 'Error: ' + data.message;
                 }
             } catch (error) {
                 console.error('Error stopping agent:', error);
-                statusText.textContent = 'Error stopping agent';
+                document.getElementById('connectionStatus').textContent = 'Error stopping agent';
             }
         }
 
@@ -1132,7 +1534,6 @@
                 }
                 const data = await response.json();
 
-                const statusText = document.querySelector('.status-text');
                 const devBtn = document.getElementById('dev-toggle');
                 const runButton = document.getElementById('run-button');
                 const stopButton = document.getElementById('stop-button');
@@ -1145,22 +1546,25 @@
                 // Sync dev toggle UI
                 if (isAgentPaused) {
                     devBtn.textContent = 'Dev Control: ON';
-                    devBtn.classList.remove('red'); devBtn.classList.add('green');
+                    devBtn.classList.remove('red'); 
+                    devBtn.classList.add('green');
                     devMode = true;
                 } else {
                     devBtn.textContent = 'Dev Control: OFF';
-                    devBtn.classList.remove('green'); devBtn.classList.add('red');
+                    devBtn.classList.remove('green'); 
+                    devBtn.classList.add('red');
                     devMode = false;
                 }
+                
                 // Update UI based on fetched run status
                 if (isAgentRunning) {
-                    statusText.textContent = isAgentPaused ? 'Paused' : 'Running';
+                    document.getElementById('connectionStatus').textContent = isAgentPaused ? 'Paused' : 'Running';
                     runButton.style.display = 'none';
                     stopButton.style.display = 'inline';
                     loadStateButton.style.display = 'none';
                     runButton.disabled = true;
                 } else {
-                    statusText.textContent = data.status === 'stopped' ? 'Stopped' : `Status: ${data.status}`;
+                    document.getElementById('connectionStatus').textContent = data.status === 'stopped' ? 'Stopped' : `Status: ${data.status}`;
                     runButton.disabled = false;
                     runButton.style.display = 'inline';
                     stopButton.style.display = 'none';
@@ -1170,25 +1574,249 @@
             } catch (error) {
                 console.error('Error checking agent status:', error);
                 // Optionally update status text to indicate an error fetching status
-                const statusText = document.querySelector('.status-text');
-                if (statusText) statusText.textContent = 'Status Error';
+                document.getElementById('connectionStatus').textContent = 'Status Error';
             }
         }
 
-        // --- Initial Setup ---
-        // Using fixed canvas size; auto-resize disabled
-        // Window resize listener and resizeCanvas removed to preserve display dimensions
-        connectWebSocket(); // Initial WebSocket connection
+        // --- ENHANCED Pokémon sprite handling ---
+        // Parse party data from WebSocket and update UI with robust image handling
+        function updateTeamDisplay(partyData) {
+            const teamContainer = document.getElementById('team-container');
+            if (!teamContainer) return;
 
-        // Send periodic ping to keep connection alive
-        setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'ping' }));
+            // Clear current team display
+            teamContainer.innerHTML = '';
+
+            if (!partyData || partyData.length === 0) {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'pokemon-card empty';
+                placeholder.textContent = 'No Pokémon data available';
+                teamContainer.appendChild(placeholder);
+                return;
             }
-        }, 30000);
 
-        // Check agent status periodically
-        setInterval(checkAgentStatus, 5000);
+            // Create card for each Pokémon in the party
+            partyData.forEach(pokemon => {
+                const card = document.createElement('div');
+                card.className = 'pokemon-card';
+                
+                // Enhanced sprite loading with fallback strategy
+                const sprite = document.createElement('img');
+                sprite.className = 'pokemon-sprite';
+                
+                // First try: Use pokemonId if available directly
+                if (pokemon.id && !isNaN(parseInt(pokemon.id))) {
+                    sprite.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${pokemon.id}.png`;
+                } 
+                // Second try: Get ID from species name (normalized to lowercase for robustness)
+                else {
+                    const pokemonId = getPokemonIdByName(pokemon.species);
+                    sprite.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${pokemonId}.png`;
+                }
+                
+                sprite.alt = pokemon.species;
+                // Enhanced error handling with retry mechanism
+                sprite.onerror = function() {
+                    // If the specific ID fails, try a generic lookup based on name
+                    const speciesLower = pokemon.species.toLowerCase();
+                    // Check if image loading failed because name not found or formatting issue
+                    if (sprite.src.includes('/0.png') || sprite.src.includes('/undefined.png') || sprite.src.includes('/null.png')) {
+                        // Try alternative lookup by lowercase name
+                        const commonPokemonIds = {
+                            'bulbasaur': 1, 'ivysaur': 2, 'venusaur': 3, 'charmander': 4, 
+                            'charmeleon': 5, 'charizard': 6, 'squirtle': 7, 'wartortle': 8, 
+                            'blastoise': 9, 'caterpie': 10, 'metapod': 11, 'butterfree': 12,
+                            'weedle': 13, 'kakuna': 14, 'beedrill': 15, 'pidgey': 16,
+                            'pidgeotto': 17, 'pidgeot': 18, 'rattata': 19, 'raticate': 20,
+                            'pikachu': 25, 'raichu': 26, 'geodude': 74, 'zubat': 41
+                        };
+                        
+                        const id = commonPokemonIds[speciesLower];
+                        if (id) {
+                            sprite.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png`;
+                            return; // Try this new source before falling back
+                        }
+                    }
+                    
+                    // Ultimate fallback to placeholder
+                    this.src = 'https://placehold.co/64x64/334155/e0e0e0?text=PKM';
+                    this.onerror = null; // Prevent infinite loop
+                };
+                card.appendChild(sprite);
+
+                // Pokemon name with status if applicable
+                const name = document.createElement('div');
+                name.className = 'pokemon-name';
+                name.textContent = pokemon.nickname || pokemon.species;
+                card.appendChild(name);
+                
+                // Status and level
+                const status = document.createElement('div');
+                status.className = 'pokemon-status';
+                if (pokemon.status) {
+                    const statusSpan = document.createElement('span');
+                    statusSpan.className = pokemon.status.toLowerCase();
+                    statusSpan.textContent = `(${pokemon.status}) `;
+                    status.appendChild(statusSpan);
+                }
+                status.appendChild(document.createTextNode(`Lvl: ${pokemon.level}`));
+                card.appendChild(status);
+
+                // HP bar
+                const hpContainer = document.createElement('div');
+                hpContainer.className = 'hp-bar-container';
+                const hpBar = document.createElement('div');
+                hpBar.className = 'hp-bar';
+                const hpPercent = (pokemon.hp / pokemon.max_hp) * 100;
+                hpBar.style.width = `${hpPercent}%`;
+
+                if (hpPercent < 25) {
+                    hpBar.classList.add('low');
+                } else if (hpPercent < 50) {
+                    hpBar.classList.add('medium');
+                }
+                
+                hpContainer.appendChild(hpBar);
+                card.appendChild(hpContainer);
+
+                // HP text
+                const hpText = document.createElement('div');
+                hpText.className = 'hp-text';
+                hpText.textContent = `HP: ${pokemon.hp}/${pokemon.max_hp}`;
+                card.appendChild(hpText);
+
+                teamContainer.appendChild(card);
+            });
+            
+            // Fill remaining slots with empty cards
+            const emptySlots = 6 - partyData.length;
+            for (let i = 0; i < emptySlots; i++) {
+                const emptyCard = document.createElement('div');
+                emptyCard.className = 'pokemon-card empty';
+                
+                const emptySprite = document.createElement('img');
+                emptySprite.className = 'pokemon-sprite';
+                emptySprite.src = 'https://placehold.co/64x64/1E293B/475569?text=Slot';
+                emptySprite.alt = 'Empty Slot';
+                emptyCard.appendChild(emptySprite);
+                
+                const emptyName = document.createElement('div');
+                emptyName.className = 'pokemon-name';
+                emptyName.style.color = 'var(--text-tertiary)';
+                emptyName.textContent = '- EMPTY -';
+                emptyCard.appendChild(emptyName);
+                
+                const emptyHpContainer = document.createElement('div');
+                emptyHpContainer.className = 'hp-bar-container';
+                const emptyHpBar = document.createElement('div');
+                emptyHpBar.className = 'hp-bar';
+                emptyHpBar.style.width = '0%';
+                emptyHpContainer.appendChild(emptyHpBar);
+                emptyCard.appendChild(emptyHpContainer);
+                
+                const emptyHpText = document.createElement('div');
+                emptyHpText.className = 'hp-text';
+                emptyHpText.textContent = 'HP: --/--';
+                emptyCard.appendChild(emptyHpText);
+                
+                teamContainer.appendChild(emptyCard);
+            }
+        }
+        
+        // ENHANCED Pokémon ID lookup with case insensitivity and more complete mapping
+        function getPokemonIdByName(name) {
+            if (!name) return 0;
+            
+            // Normalize input for case-insensitive matching
+            const normalizedName = name.toLowerCase().trim();
+            
+            // Comprehensive mapping for Gen 1 Pokémon
+            const pokemonMap = {
+                // Starters and evolutions
+                'bulbasaur': 1, 'ivysaur': 2, 'venusaur': 3,
+                'charmander': 4, 'charmeleon': 5, 'charizard': 6,
+                'squirtle': 7, 'wartortle': 8, 'blastoise': 9,
+                
+                // Early route Pokémon
+                'caterpie': 10, 'metapod': 11, 'butterfree': 12,
+                'weedle': 13, 'kakuna': 14, 'beedrill': 15,
+                'pidgey': 16, 'pidgeotto': 17, 'pidgeot': 18,
+                'rattata': 19, 'raticate': 20,
+                'spearow': 21, 'fearow': 22,
+                'ekans': 23, 'arbok': 24,
+                'pikachu': 25, 'raichu': 26,
+                'sandshrew': 27, 'sandslash': 28,
+                
+                // More common Pokémon
+                'nidoran♀': 29, 'nidorina': 30, 'nidoqueen': 31,
+                'nidoran♂': 32, 'nidorino': 33, 'nidoking': 34,
+                'clefairy': 35, 'clefable': 36,
+                'vulpix': 37, 'ninetales': 38,
+                'jigglypuff': 39, 'wigglytuff': 40,
+                'zubat': 41, 'golbat': 42,
+                'oddish': 43, 'gloom': 44, 'vileplume': 45,
+                'paras': 46, 'parasect': 47,
+                'venonat': 48, 'venomoth': 49,
+                'diglett': 50, 'dugtrio': 51,
+                'meowth': 52, 'persian': 53,
+                'psyduck': 54, 'golduck': 55,
+                'mankey': 56, 'primeape': 57,
+                'growlithe': 58, 'arcanine': 59,
+                'poliwag': 60, 'poliwhirl': 61, 'poliwrath': 62,
+                'abra': 63, 'kadabra': 64, 'alakazam': 65,
+                'machop': 66, 'machoke': 67, 'machamp': 68,
+                'bellsprout': 69, 'weepinbell': 70, 'victreebel': 71,
+                'tentacool': 72, 'tentacruel': 73,
+                'geodude': 74, 'graveler': 75, 'golem': 76,
+                'ponyta': 77, 'rapidash': 78,
+                
+                // More Pokémon
+                'slowpoke': 79, 'slowbro': 80,
+                'magnemite': 81, 'magneton': 82,
+                'farfetch\'d': 83, 'doduo': 84, 'dodrio': 85,
+                'seel': 86, 'dewgong': 87,
+                'grimer': 88, 'muk': 89,
+                'shellder': 90, 'cloyster': 91,
+                'gastly': 92, 'haunter': 93, 'gengar': 94,
+                'onix': 95, 'drowzee': 96, 'hypno': 97,
+                'krabby': 98, 'kingler': 99,
+                'voltorb': 100, 'electrode': 101,
+                'exeggcute': 102, 'exeggutor': 103,
+                'cubone': 104, 'marowak': 105,
+                'hitmonlee': 106, 'hitmonchan': 107,
+                'lickitung': 108, 'koffing': 109, 'weezing': 110,
+                'rhyhorn': 111, 'rhydon': 112,
+                'chansey': 113, 'tangela': 114,
+                'kangaskhan': 115, 'horsea': 116, 'seadra': 117,
+                'goldeen': 118, 'seaking': 119,
+                'staryu': 120, 'starmie': 121,
+                'mr. mime': 122, 'scyther': 123,
+                'jynx': 124, 'electabuzz': 125, 'magmar': 126,
+                'pinsir': 127, 'tauros': 128,
+                
+                // Water Pokémon
+                'magikarp': 129, 'gyarados': 130,
+                'lapras': 131, 'ditto': 132,
+                'eevee': 133, 'vaporeon': 134, 'jolteon': 135, 'flareon': 136,
+                'porygon': 137, 'omanyte': 138, 'omastar': 139,
+                'kabuto': 140, 'kabutops': 141,
+                
+                // Rare and legendary Pokémon
+                'aerodactyl': 142, 'snorlax': 143,
+                'articuno': 144, 'zapdos': 145, 'moltres': 146,
+                'dratini': 147, 'dragonair': 148, 'dragonite': 149,
+                'mewtwo': 150, 'mew': 151
+            };
+            
+            // Handle special cases
+            if (normalizedName === 'nidoran-f' || normalizedName === 'nidoran f') return 29;
+            if (normalizedName === 'nidoran-m' || normalizedName === 'nidoran m') return 32;
+            if (normalizedName === 'farfetchd' || normalizedName === "farfetch'd") return 83;
+            if (normalizedName === 'mr mime') return 122;
+            
+            // Return the ID from the map or 0 if not found
+            return pokemonMap[normalizedName] || 0;
+        }
 
         // --- Input Handlers ---
         // Capture keyboard events in Dev Mode
@@ -1199,7 +1827,7 @@
                 case "KeyA": btn = "a"; break;
                 case "KeyS": btn = "b"; break;
                 case "Enter": btn = "start"; break;
-                case "Backspace": btn = "select"; break; // Often Backspace for Select
+                case "Backspace": btn = "select"; break;
                 case "ArrowUp": btn = "up"; break;
                 case "ArrowDown": btn = "down"; break;
                 case "ArrowLeft": btn = "left"; break;
@@ -1249,119 +1877,7 @@
             }
         });
 
-        // Refresh button functionality
-        const refreshButton = document.getElementById('refreshButton');
-        if (refreshButton) {
-            refreshButton.addEventListener('click', function () {
-                console.log("Refresh button clicked. Closing WebSocket and attempting to reconnect.");
-                if (ws) {
-                    ws.close(); // Close current connection
-                }
-                reconnectAttempts = 0; // Reset attempts
-                currentReconnectDelay = initialReconnectDelay; // Reset delay
-                clearTimeout(reconnectTimeoutId); // Clear any pending reconnect
-                // Add a small delay before the first reconnect attempt after manual refresh
-                reconnectTimeoutId = setTimeout(connectWebSocket, 500); // Wait 500ms
-            });
-        }
-
-        // Parse party data from WebSocket and update UI
-        function updateTeamDisplay(partyData) {
-            const teamContainer = document.getElementById('team-container');
-            if (!teamContainer) return;
-
-            // Clear current team display
-            teamContainer.innerHTML = '';
-
-            if (!partyData || partyData.length === 0) {
-                const placeholder = document.createElement('div');
-                placeholder.className = 'pokemon-card placeholder';
-                placeholder.textContent = 'No Pokémon data available';
-                teamContainer.appendChild(placeholder);
-                return;
-            }
-
-            // Create card for each Pokémon
-            partyData.forEach(pokemon => {
-                const card = document.createElement('div');
-                card.className = 'pokemon-card';
-
-                // Species label above entry
-                const speciesDiv = document.createElement('div');
-                speciesDiv.className = 'pokemon-species';
-                speciesDiv.textContent = pokemon.species;
-                card.appendChild(speciesDiv);
-
-                // Header with name and level
-                const header = document.createElement('div');
-                header.className = 'pokemon-header';
-
-                const name = document.createElement('div');
-                name.className = 'pokemon-name';
-                name.textContent = pokemon.nickname || pokemon.species;
-
-                const level = document.createElement('div');
-                level.className = 'pokemon-level';
-                level.textContent = `Lv.${pokemon.level}`;
-
-                header.appendChild(name);
-                header.appendChild(level);
-
-                // HP bar
-                const hpContainer = document.createElement('div');
-                hpContainer.className = 'pokemon-hp';
-
-                const hpBar = document.createElement('div');
-                hpBar.className = 'hp-bar';
-                const hpPercent = (pokemon.hp / pokemon.max_hp) * 100;
-                hpBar.style.width = `${hpPercent}%`;
-
-                if (hpPercent < 25) {
-                    hpBar.classList.add('low');
-                } else if (hpPercent < 50) {
-                    hpBar.classList.add('medium');
-                }
-
-                const hpText = document.createElement('div');
-                hpText.className = 'hp-text';
-                hpText.textContent = `HP: ${pokemon.hp}/${pokemon.max_hp}`;
-
-                hpContainer.appendChild(hpBar);
-
-                // Status/Type display
-                const statusDiv = document.createElement('div');
-                statusDiv.className = 'pokemon-status';
-                statusDiv.textContent = pokemon.status || 'OK';
-
-                // Type pills
-                const typesDiv = document.createElement('div');
-                typesDiv.className = 'pokemon-types';
-
-                if (pokemon.type1) {
-                    const type1Pill = document.createElement('span');
-                    type1Pill.className = `type-pill type-${pokemon.type1.toLowerCase()}`;
-                    type1Pill.textContent = pokemon.type1;
-                    typesDiv.appendChild(type1Pill);
-                }
-
-                if (pokemon.type2) {
-                    const type2Pill = document.createElement('span');
-                    type2Pill.className = `type-pill type-${pokemon.type2.toLowerCase()}`;
-                    type2Pill.textContent = pokemon.type2;
-                    typesDiv.appendChild(type2Pill);
-                }
-
-                // Assemble card
-                card.appendChild(header);
-                card.appendChild(hpContainer);
-                card.appendChild(hpText);
-                card.appendChild(statusDiv);
-                card.appendChild(typesDiv);
-
-                teamContainer.appendChild(card);
-            });
-        }
-
+        // --- Manual navigation helpers for console ---
         // Manual navigation helper: call nav(y, x) in the browser console to navigate to global coordinates
         window.nav = function (gy, gx) {
             console.log(`Console navigation request to global coords (${gy}, ${gx})`);
@@ -1372,6 +1888,28 @@
             }
         };
 
+        // Manual directional navigation helper: call goDir(direction) in the console to navigate 
+        window.goDir = function(direction) {
+            console.log(`Console directional navigation request: direction=${direction}`);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'navigate_to_dir', direction: direction }));
+            } else {
+                console.warn('WebSocket is not connected');
+            }
+        };
+
+        // --- Initial setup ---
+        connectWebSocket(); // Initial WebSocket connection
+
+        // Send periodic ping to keep connection alive
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000);
+
+        // Check agent status periodically
+        setInterval(checkAgentStatus, 5000);
     </script>
 </body>
 

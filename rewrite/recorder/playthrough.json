@@ -1,0 +1,482 @@
+[
+    {
+        "action": 0,
+        "map_id": 40,
+        "local_coords": {
+            "x": 5,
+            "y": 4
+        },
+        "global_coords": {
+            "gx": 110,
+            "gy": 349
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 40,
+        "local_coords": {
+            "x": 5,
+            "y": 5
+        },
+        "global_coords": {
+            "gx": 110,
+            "gy": 350
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 40,
+        "local_coords": {
+            "x": 5,
+            "y": 6
+        },
+        "global_coords": {
+            "gx": 110,
+            "gy": 351
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 40,
+        "local_coords": {
+            "x": 5,
+            "y": 7
+        },
+        "global_coords": {
+            "gx": 110,
+            "gy": 352
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 40,
+        "local_coords": {
+            "x": 5,
+            "y": 8
+        },
+        "global_coords": {
+            "gx": 110,
+            "gy": 353
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 40,
+        "local_coords": {
+            "x": 5,
+            "y": 9
+        },
+        "global_coords": {
+            "gx": 110,
+            "gy": 354
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 40,
+        "local_coords": {
+            "x": 5,
+            "y": 10
+        },
+        "global_coords": {
+            "gx": 110,
+            "gy": 355
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 40,
+        "local_coords": {
+            "x": 5,
+            "y": 11
+        },
+        "global_coords": {
+            "gx": 110,
+            "gy": 356
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 0,
+        "local_coords": {
+            "x": 5,
+            "y": 11
+        },
+        "global_coords": {
+            "gx": 89,
+            "gy": 349
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 0,
+        "local_coords": {
+            "x": 12,
+            "y": 12
+        },
+        "global_coords": {
+            "gx": 96,
+            "gy": 350
+        }
+    },
+    {
+        "action": 1,
+        "map_id": 0,
+        "local_coords": {
+            "x": 11,
+            "y": 12
+        },
+        "global_coords": {
+            "gx": 95,
+            "gy": 350
+        }
+    },
+    {
+        "action": 1,
+        "map_id": 0,
+        "local_coords": {
+            "x": 10,
+            "y": 12
+        },
+        "global_coords": {
+            "gx": 94,
+            "gy": 350
+        }
+    },
+    {
+        "action": 1,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 12
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 350
+        }
+    },
+    {
+        "action": 1,
+        "map_id": 0,
+        "local_coords": {
+            "x": 8,
+            "y": 12
+        },
+        "global_coords": {
+            "gx": 92,
+            "gy": 350
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 0,
+        "local_coords": {
+            "x": 8,
+            "y": 13
+        },
+        "global_coords": {
+            "gx": 92,
+            "gy": 351
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 0,
+        "local_coords": {
+            "x": 8,
+            "y": 14
+        },
+        "global_coords": {
+            "gx": 92,
+            "gy": 352
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 0,
+        "local_coords": {
+            "x": 8,
+            "y": 15
+        },
+        "global_coords": {
+            "gx": 92,
+            "gy": 353
+        }
+    },
+    {
+        "action": 3,
+        "map_id": 0,
+        "local_coords": {
+            "x": 8,
+            "y": 14
+        },
+        "global_coords": {
+            "gx": 92,
+            "gy": 352
+        }
+    },
+    {
+        "action": 3,
+        "map_id": 0,
+        "local_coords": {
+            "x": 8,
+            "y": 13
+        },
+        "global_coords": {
+            "gx": 92,
+            "gy": 351
+        }
+    },
+    {
+        "action": 3,
+        "map_id": 0,
+        "local_coords": {
+            "x": 8,
+            "y": 12
+        },
+        "global_coords": {
+            "gx": 92,
+            "gy": 350
+        }
+    },
+    {
+        "action": 3,
+        "map_id": 0,
+        "local_coords": {
+            "x": 8,
+            "y": 11
+        },
+        "global_coords": {
+            "gx": 92,
+            "gy": 349
+        }
+    },
+    {
+        "action": 3,
+        "map_id": 0,
+        "local_coords": {
+            "x": 8,
+            "y": 10
+        },
+        "global_coords": {
+            "gx": 92,
+            "gy": 348
+        }
+    },
+    {
+        "action": 3,
+        "map_id": 0,
+        "local_coords": {
+            "x": 8,
+            "y": 9
+        },
+        "global_coords": {
+            "gx": 92,
+            "gy": 347
+        }
+    },
+    {
+        "action": 2,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 9
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 347
+        }
+    },
+    {
+        "action": 2,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 9
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 347
+        }
+    },
+    {
+        "action": 3,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 8
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 346
+        }
+    },
+    {
+        "action": 3,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 7
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 345
+        }
+    },
+    {
+        "action": 2,
+        "map_id": 0,
+        "local_coords": {
+            "x": 10,
+            "y": 7
+        },
+        "global_coords": {
+            "gx": 94,
+            "gy": 345
+        }
+    },
+    {
+        "action": 2,
+        "map_id": 0,
+        "local_coords": {
+            "x": 11,
+            "y": 7
+        },
+        "global_coords": {
+            "gx": 95,
+            "gy": 345
+        }
+    },
+    {
+        "action": 1,
+        "map_id": 0,
+        "local_coords": {
+            "x": 10,
+            "y": 7
+        },
+        "global_coords": {
+            "gx": 94,
+            "gy": 345
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 0,
+        "local_coords": {
+            "x": 10,
+            "y": 7
+        },
+        "global_coords": {
+            "gx": 94,
+            "gy": 345
+        }
+    },
+    {
+        "action": 1,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 7
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 345
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 8
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 346
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 9
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 347
+        }
+    },
+    {
+        "action": 1,
+        "map_id": 0,
+        "local_coords": {
+            "x": 10,
+            "y": 12
+        },
+        "global_coords": {
+            "gx": 94,
+            "gy": 350
+        }
+    },
+    {
+        "action": 1,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 12
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 350
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 13
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 351
+        }
+    },
+    {
+        "action": 0,
+        "map_id": 0,
+        "local_coords": {
+            "x": 9,
+            "y": 14
+        },
+        "global_coords": {
+            "gx": 93,
+            "gy": 352
+        }
+    },
+    {
+        "action": 2,
+        "map_id": 0,
+        "local_coords": {
+            "x": 10,
+            "y": 14
+        },
+        "global_coords": {
+            "gx": 94,
+            "gy": 352
+        }
+    },
+    {
+        "action": 2,
+        "map_id": 0,
+        "local_coords": {
+            "x": 10,
+            "y": 14
+        },
+        "global_coords": {
+            "gx": 94,
+            "gy": 352
+        }
+    }
+]

@@ -1,6 +1,7 @@
 import io
 import os
 import uuid
+import json # Added for saving path trace data
 from abc import abstractmethod
 from collections import deque
 from multiprocessing import Lock, shared_memory
@@ -103,10 +104,7 @@ class RedGymEnv(Env):
         self.state_dir = Path(env_config.state_dir)
         self.init_state = env_config.init_state
         self.init_state_name = self.init_state
-        if self.init_state_name is None:
-            self.init_state_path = None
-        else:
-            self.init_state_path = self.state_dir / f"{self.init_state_name}.state"
+        self.init_state_path = self.state_dir / f"{self.init_state_name}.state"
         self.action_freq = env_config.action_freq
         self.max_steps = env_config.max_steps
         self.save_video = env_config.save_video
@@ -161,6 +159,16 @@ class RedGymEnv(Env):
         self.max_steps_scaling = env_config.max_steps_scaling
         self.map_id_scalefactor = env_config.map_id_scalefactor
         self.action_space = ACTION_SPACE
+
+        # For saving replays
+        self.replays_base_dir = Path(__file__).parent / "replays" / "recordings"
+        self.current_run_dir = None
+        self.path_trace_data = {}
+        # Control whether to record new run directories and traces
+        try:
+            self.record_replays = env_config.record_replays
+        except Exception:
+            self.record_replays = True
 
         # Obs space-related. TODO: avoid hardcoding?
         self.global_map_shape = GLOBAL_MAP_SHAPE
@@ -340,66 +348,75 @@ class RedGymEnv(Env):
         # restart game, skipping credits
         options = options or {}
 
+        # Reset recording attributes for the new run
+        self.path_trace_data = {}
+        self.current_run_dir = None
+
         infos = {}
         self.explore_map_dim = 384
-        
-        # Determine state to load from
-        state_to_load_from_path = None
-        state_to_load_from_bytes = None
-
-        # Prioritize init_state from options (typically a string name from replay.py)
-        opt_init_state_name = options.get("init_state")
-        if isinstance(opt_init_state_name, str):
-            potential_path = self.state_dir / f"{opt_init_state_name}.state"
-            if potential_path.is_file():
-                state_to_load_from_path = potential_path
-            else:
-                print(f"Warning: init_state '{opt_init_state_name}' from options not found at {potential_path}. Using default or no state.")
-
-        # Fallback to "state" from options if it contains bytes (direct state data)
-        if state_to_load_from_path is None:
-            opt_state_bytes = options.get("state")
-            if isinstance(opt_state_bytes, bytes):
-                state_to_load_from_bytes = opt_state_bytes
-
-        # If no state from options, use the one from __init__ (self.init_state_path)
-        if state_to_load_from_path is None and state_to_load_from_bytes is None:
-            if self.init_state_path and self.init_state_path.is_file():
-                state_to_load_from_path = self.init_state_path
-            elif self.init_state_path: # Path was set but file not found
-                print(f"Warning: Default init_state_path {self.init_state_path} not found. Starting from ROM beginning.")
-
-        # Load state if identified
-        loaded_from_state = False
-        if self.first or state_to_load_from_path or state_to_load_from_bytes:
-            if state_to_load_from_bytes:
-                self.pyboy.load_state(io.BytesIO(state_to_load_from_bytes))
-                print(f"Successfully loaded state from bytes provided in options.")
-                loaded_from_state = True
-            elif state_to_load_from_path: # This implies it exists and is a file
+        if self.first or options.get("state", None) is not None:
+            # We only init seen hidden objs once cause they can only be found once!
+            state_loaded_successfully = False
+            if options and options.get("state", None) is not None:
                 try:
-                    with open(state_to_load_from_path, "rb") as f:
-                        self.pyboy.load_state(f)
-                    print(f"Successfully loaded state from {state_to_load_from_path}")
-                    loaded_from_state = True
+                    print(f"Attempting to load state from provided 'options'.")
+                    self.pyboy.load_state(io.BytesIO(options["state"]))
+                    state_loaded_successfully = True
+                    print("State loaded successfully from 'options'.")
                 except Exception as e:
-                    print(f"Error loading state from {state_to_load_from_path}: {e}. Starting from ROM beginning.")
-            
-            # Common logic after loading any state or if it's the first run with a default state
-            if loaded_from_state or (self.first and not state_to_load_from_bytes and not state_to_load_from_path and self.init_state_path and self.init_state_path.is_file()):
-                 # If we loaded a state, or if it's the first run and a default valid init_state_path was defined and used implicitly by pyboy starting up with it earlier or not.
-                 # This block is for initializing things that are set once on the very first load of a save state.
-                 pass # Original logic for initializing events, missables, etc., if needed post-load, would go here
+                    print(f"environment.py: reset(): Error loading state from 'options': {e}")
+            elif self.init_state_path: # Only try if a path is configured
+                try:
+                    print(f"Attempting to load state from path: {self.init_state_path}")
+                    # Ensure self.init_state_path is a string or Path object for open()
+                    # If it comes from config, it might be a string. Path() handles it.
+                    state_file_to_load = Path(self.init_state_path)
+                    with open(state_file_to_load, "rb") as f:
+                        self.pyboy.load_state(f)
+                    state_loaded_successfully = True
+                    print(f"State loaded successfully from {state_file_to_load}.")
+                except FileNotFoundError:
+                    print(f"environment.py: reset(): State file not found at {self.init_state_path}. Starting new game.")
+                except Exception as e: # Catch other errors like corrupted state
+                    print(f"environment.py: reset(): Error loading state from {self.init_state_path}: {e}. Starting new game.")
+            else:
+                print("environment.py: reset(): No initial state path configured and no state in options. Starting new game.")
 
-        # If no state was loaded (e.g., file not found, or no state specified), PyBoy starts from ROM default.
-        # Initialize these regardless of state load, as they define the fresh environment state or are reset each time.
-        if not loaded_from_state and not self.first: # if not first run and no state loaded, means it's a reset to ROM start
-            self.pyboy.reset_game() # Ensure a clean restart if no state was loaded on subsequent resets
-            print("No valid init_state found or provided. Resetting to ROM default start.")
+            if not state_loaded_successfully:
+                # Pyboy usually starts fresh if no state is loaded. 
+                # If an explicit reset to title screen or new game is needed, it would go here.
+                print("environment.py: reset(): Proceeding with a new game session (or default PyBoy state).")
 
-        # Initialize/Re-initialize game state variables for every reset call
-        self.events = EventFlags(self.pyboy)
-        self.missables = MissableFlags(self.pyboy)
+            # These initializations should run whether a state was loaded or a new game started.
+            self.events = EventFlags(self.pyboy)
+            self.missables = MissableFlags(self.pyboy)
+            self.flags = Flags(self.pyboy)
+            self.required_events = self.get_required_events()
+            self.required_items = self.get_required_items()
+            self.base_event_flags = sum(
+                self.read_m(i).bit_count()
+                for i in range(EVENT_FLAGS_START, EVENT_FLAGS_START + EVENTS_FLAGS_LENGTH)
+            )
+
+            if self.save_state:
+                state = io.BytesIO()
+                self.pyboy.save_state(state)
+                state.seek(0)
+                infos |= {
+                    "state": {
+                        tuple(
+                            sorted(list(self.required_events) + list(self.required_items))
+                        ): state.read()
+                    },
+                    "required_count": len(self.required_events) + len(self.required_items),
+                    "env_id": self.env_id,
+                }
+        # lazy random seed setting
+        # if not seed:
+        #     seed = random.randint(0, 4096)
+        #  self.pyboy.tick(seed, render=False)
+        self.reset_count += 1
+
         self.flags = Flags(self.pyboy)
         self.party = PartyMons(self.pyboy)
         self.required_events = self.get_required_events()
@@ -442,9 +459,47 @@ class RedGymEnv(Env):
 
         self.max_map_progress = 0
 
+        # Wrap recording session for replay runs
+        if self.record_replays:
+            # --- Start of new recording session ---
+            # Determine base name for the run
+            # Ensure pyboy state is loaded and game_coords are from the *actual* starting state
+            # This code block should be after all state loading and initial pyboy setup is complete.
+            
+            # Check if init_state_name was likely used for loading
+            # A bit indirect: if self.init_state_name is set and the path it implies was used for loading.
+            # The actual loading happens above and sets state_loaded_successfully.
+            # For naming, we primarily care if an init_state was specified in the config.
+            
+            # Get current game state info for naming AFTER potential state load
+            current_map_id_for_name = self.read_m("wCurMap")
+            start_x_for_name, start_y_for_name, _ = self.get_game_coords()
+            map_name_str_for_name = self.get_map_name_by_id(current_map_id_for_name)
 
+            if self.init_state_name:  # If an init_state was specified in config
+                base_name = self.init_state_name
+            else:
+                base_name = f"{map_name_str_for_name}_x{start_x_for_name}_y{start_y_for_name}"
+
+            run_identifier = f"{base_name}__{uuid.uuid4().hex[:8]}"
+            self.current_run_dir = self.replays_base_dir / run_identifier
+            self.current_run_dir.mkdir(parents=True, exist_ok=True)
+
+            initial_state_file = self.current_run_dir / f"{run_identifier}.state"
+            try:
+                with open(initial_state_file, "wb") as f_s:
+                    self.pyboy.save_state(f_s)
+                print(f"Saved initial state for run {run_identifier} to {initial_state_file}")
+            except Exception as e:
+                print(f"Error saving initial state for run {run_identifier}: {e}")
+
+            # Log the first point in the path trace for the new run.
+            self.update_path_trace()
+            self.first = False
+            return self._get_obs(), infos
+
+        # Default behavior when not recording: just finish reset
         self.first = False
-
         return self._get_obs(), infos
 
     def init_mem(self):
@@ -821,6 +876,8 @@ class RedGymEnv(Env):
         self.required_events = required_events
         self.required_items = required_items
 
+        self.update_path_trace() # Update path trace with the new state
+
         obs = self._get_obs()
 
         self.step_count += 1
@@ -837,6 +894,20 @@ class RedGymEnv(Env):
 
         if self.save_video:
             self.add_video_frame()
+
+        # Auto-save state when in-game 'SAVE' option completes (detect 'Game saved' dialog)
+        try:
+            dialog_text = self.read_dialog()
+            if dialog_text and "game saved" in dialog_text.lower():
+                # Save state to a file for resuming later
+                end_name = f"{self.init_state_name or 'autosave'}_in_game.state"
+                end_path = Path(self.state_dir) / end_name
+                end_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(end_path, "wb") as f_state:
+                    self.pyboy.save_state(f_state)
+                print(f"Saved game state after in-game SAVE to {end_path}")
+        except Exception as e:
+            print(f"Error saving state after in-game SAVE: {e}")
 
         return obs, _, reset, False, info
 
@@ -1119,7 +1190,7 @@ class RedGymEnv(Env):
                 WindowEvent.PRESS_ARROW_RIGHT,
                 WindowEvent.PRESS_ARROW_UP,
             ]
-        ):
+            ):
             in_overworld = self.read_m("wCurMapTileset") == Tilesets.OVERWORLD.value
             in_plateau = self.read_m("wCurMapTileset") == Tilesets.PLATEAU.value
             in_cavern = self.read_m("wCurMapTileset") == Tilesets.CAVERN.value
@@ -1579,7 +1650,7 @@ class RedGymEnv(Env):
                 "pokecenter": np.sum(self.pokecenters),
                 "pokecenter_heal": self.pokecenter_heal,
                 "in_battle": self.read_m("wIsInBattle") > 0,
-                "event": self.event_progress["event"],
+                "event": self.event_progress.get("event", None),
                 "max_steps": self.get_max_steps(),
                 # redundant but this is so we don't interfere with the swarm logic
                 "required_count": len(self.required_events) + len(self.required_items),
@@ -1890,6 +1961,127 @@ class RedGymEnv(Env):
         max_hp_sum = max(max_hp_sum, 1)
         return hp_sum / max_hp_sum
 
+    def get_map_name_by_id(self, map_id_val: int) -> str:
+        try:
+            return MapIds(map_id_val).name
+        except ValueError:
+            return f"map_{map_id_val}"
+
+    def update_path_trace(self):
+        if not hasattr(self, 'current_run_dir') or not self.current_run_dir:
+            return
+
+        player_x, player_y, map_n = self.get_game_coords()
+        gy, gx = local_to_global(player_y, player_x, map_n)
+        map_key_str = str(map_n)
+
+        if map_key_str not in self.path_trace_data:
+            self.path_trace_data[map_key_str] = []
+
+        if not self.path_trace_data[map_key_str] or self.path_trace_data[map_key_str][-1] != [gy, gx]:
+            self.path_trace_data[map_key_str].append([gy, gx])
+
+    def read_dialog(self) -> str:
+        """Read any dialog text currently on screen by scanning the tilemap buffer"""
+        # Tilemap buffer is from C3A0 to C507
+        buffer_start = 0xC3A0
+        buffer_end = 0xC507
+
+        # Get all bytes from the buffer
+        buffer_bytes = [self.memory[addr] for addr in range(buffer_start, buffer_end)]
+
+        # Look for sequences of text (ignoring long sequences of 0x7F/spaces)
+        text_lines = []
+        current_line = []
+        space_count = 0
+        last_was_border = False
+
+        for b in buffer_bytes:
+            if b == 0x7C:  # ║ character
+                if last_was_border:
+                    # If the last character was a border and this is ║, treat as newline
+                    text = self._convert_text(current_line)
+                    if text.strip():
+                        text_lines.append(text)
+                    current_line = []
+                    space_count = 0
+                else:
+                    # current_line.append(b)
+                    pass
+                last_was_border = True
+            elif b == 0x7F:  # Space
+                space_count += 1
+                current_line.append(b)  # Always keep spaces
+                last_was_border = False
+            # All text characters: uppercase, lowercase, special chars, punctuation, symbols
+            elif (
+                # Box drawing (0x79-0x7E)
+                # (0x79 <= b <= 0x7E)
+                # or
+                # Uppercase (0x80-0x99)
+                (0x80 <= b <= 0x99)
+                or
+                # Punctuation (0x9A-0x9F)
+                (0x9A <= b <= 0x9F)
+                or
+                # Lowercase (0xA0-0xB9)
+                (0xA0 <= b <= 0xB9)
+                or
+                # Contractions (0xBA-0xBF)
+                (0xBA <= b <= 0xBF)
+                or
+                # Special characters in E-row (0xE0-0xEF)
+                (0xE0 <= b <= 0xEF)
+                or
+                # Special characters in F-row (0xF0-0xF5)
+                (0xF0 <= b <= 0xF5)
+                or
+                # Numbers (0xF6-0xFF)
+                (0xF6 <= b <= 0xFF)
+                or
+                # Line break
+                b == 0x4E
+            ):
+                space_count = 0
+                current_line.append(b)
+                last_was_border = (
+                    0x79 <= b <= 0x7E
+                )  # Track if this is a border character
+
+            # If we see a lot of spaces, might be end of line
+            if space_count > 10 and current_line:
+                text = self._convert_text(current_line)
+                if text.strip():  # Only add non-empty lines
+                    text_lines.append(text)
+                current_line = []
+                space_count = 0
+                last_was_border = False
+
+        # Add final line if any
+        if current_line:
+            text = self._convert_text(current_line)
+            if text.strip():
+                text_lines.append(text)
+
+        # Join into a single string
+        text = "\n".join(text_lines)
+        import re  # for filtering gibberish
+        # Filter out numeric-gibberish and overly long lines
+        filtered = []
+        for line in text_lines:
+            # Drop lines longer than 100 chars
+            if len(line) > 100:
+                continue
+            # Drop lines consisting of 5 or more digits (e.g., memory dumps)
+            if re.fullmatch(r"\d{5,}", line.strip()):
+                continue
+            filtered.append(line)
+        text = "\n".join(filtered)
+        # Post-process for name entry context if any valid text remains
+        if text and ("lower case" in text.lower() or "UPPER CASE" in text):
+            text = text.replace("♭", "ED\n")
+        return text
+    
     def update_map_progress(self):
         map_idx = self.read_m(0xD35E)
         self.max_map_progress = max(0, self.max_map_progress, self.get_map_progress(map_idx))
@@ -1981,3 +2173,29 @@ class RedGymEnv(Env):
             self.map_frame_writer.close()
             self.screen_obs_frame_writer.close()
             self.visited_mask_frame_writer.close()
+
+        # Save path trace data if a run was recorded
+        if hasattr(self, 'current_run_dir') and self.current_run_dir and self.path_trace_data:
+            try:
+                # Name trace file using full run identifier
+                trace_file_name = f"{self.current_run_dir.name}_trace.json"
+                trace_file_path = self.current_run_dir / trace_file_name
+                with open(trace_file_path, "w") as f_json:
+                    json.dump(self.path_trace_data, f_json, indent=4)
+                print(f"Saved path trace for run {self.current_run_dir.name} to {trace_file_path}")
+            except Exception as e:
+                print(f"Error saving path trace for run {self.current_run_dir.name}: {e}")
+            finally:
+                # Clear for next potential full re-initialization if object is reused by play.py
+                self.current_run_dir = None 
+                self.path_trace_data = {}
+        # Always save the ending game state for resuming later
+        try:
+            end_name = f"{self.init_state_name}_end.state" if self.init_state_name else "end.state"
+            end_path = self.state_dir / end_name
+            end_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(end_path, "wb") as f_end:
+                self.pyboy.save_state(f_end)
+            print(f"Saved ending game state to {end_path}")
+        except Exception as e:
+            print(f"Error saving ending game state: {e}")

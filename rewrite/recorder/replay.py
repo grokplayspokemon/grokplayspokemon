@@ -140,14 +140,49 @@ def process_frame_for_pygame(frame_from_env_render, target_resolution=(160,144))
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--name", type=str, default="default_replay.json")
-    # parser.add_argument("--rom", type=str, default="./PokemonRed.gb") # No direct ROM CLI arg, gb_path comes from config
+    parser.add_argument("run_dir", type=str, help="Path to the replay run directory")
     parser.add_argument("--headless", action="store_true")
-    parser.add_argument("--init_state", type=str, default=None) # Keep for loading specific .state
     parser.add_argument('--wait', type=int, default=0, help='Time to wait between frames in ms')
-    parser.add_argument('--config_file', type=str, default='../config.yaml') # Added
+    parser.add_argument('--config_file', type=str, default='../config.yaml')
 
     args = parser.parse_args()
+
+    # Determine run directory and files
+    run_dir = Path(args.run_dir)
+    if not run_dir.is_dir():
+        print(f"Run directory not found: {run_dir}")
+        return
+    run_name = run_dir.name
+
+    # Load initial state if available
+    state_file = run_dir / f"{run_name}.state"
+    if state_file.is_file():
+        try:
+            state_bytes = state_file.read_bytes()
+            options = {"state": state_bytes}
+        except Exception as e:
+            print(f"Error reading initial state file {state_file}: {e}. Starting new game.")
+            options = {}
+    else:
+        print(f"Initial state file not found at {state_file}. Starting new game.")
+        options = {}
+
+    # Load recorded actions JSON: look for playthrough.json, then specific or generic fallbacks
+    candidates = [
+        run_dir / "playthrough.json",
+        run_dir / f"{run_name}_actions.json",
+        run_dir / "actions.json",
+    ]
+    actions_file = None
+    for candidate in candidates:
+        if candidate.is_file():
+            actions_file = candidate
+            break
+    if not actions_file:
+        print(f"Actions file not found in run directory: {run_dir}. Checked: {', '.join(str(c) for c in candidates)}")
+        return
+    with open(actions_file, "r") as f:
+        action_list = json.load(f)
 
     # 1. Establish base configuration from replay.py's own defaults
     # Use args.init_state for initial_state_path and a default for rom_path.
@@ -156,7 +191,7 @@ def main():
     
     base_env_config_dict = get_default_config(
         rom_path=default_rom_for_base_config,
-        initial_state_path=args.init_state # Passed to get_default_config
+        initial_state_path=None
     )
 
     # 2. Load configuration from YAML file, if specified
@@ -185,14 +220,10 @@ def main():
     if args.headless is not None: # Check if specified, as action="store_true" defaults to False if not present
         final_merged_config_dict['headless'] = args.headless
     
-    # If args.init_state was provided via CLI, it should override anything from YAML or defaults.
-    # get_default_config already incorporates args.init_state into 'init_state'.
-    # If YAML also had 'init_state', it would have updated it.
-    # This ensures CLI's intent for init_state is final if specified.
-    if args.init_state:
-        final_merged_config_dict['init_state'] = Path(args.init_state).stem
-    elif 'init_state' not in final_merged_config_dict: # Ensure key exists if no source provided it
-        final_merged_config_dict['init_state'] = None
+    # For replay, we derive state solely from options, so disable config init_state
+    final_merged_config_dict['init_state'] = None
+    # Disable recording for replay mode
+    final_merged_config_dict['record_replays'] = False
     
     # gb_path precedence: YAML > default from get_default_config.
     # No direct CLI arg for gb_path in replay.py.
@@ -216,15 +247,6 @@ def main():
     env = RedGymEnv(env_config=env_config_for_redgymenv) 
     # ReplayExtender instance removed: # extender = ReplayExtender(pyboy_instance=env.pyboy, env_instance=env)
 
-    # Load replay actions
-    replay_file = Path(args.name)
-    if not replay_file.is_file():
-        print(f"Replay file not found: {replay_file}")
-        return
-
-    with open(replay_file, "r") as f:
-        action_list = json.load(f)
-
     # stats_wrapper = StatsWrapper(pyboy) # Old, pyboy is now env.pyboy
     stats_wrapper = StatsWrapper(env.pyboy) # Updated if StatsWrapper is still needed
 
@@ -233,7 +255,7 @@ def main():
     running = True
     
     # Initial observation and screen render
-    obs, info = env.reset(options={"init_state": args.init_state} if args.init_state else None)
+    obs, info = env.reset(options=options)
     if not args.headless and screen:
         raw_frame = env.render()
         frame_surface = process_frame_for_pygame(raw_frame)

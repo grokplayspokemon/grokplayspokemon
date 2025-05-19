@@ -37,6 +37,8 @@ class WildEncounter:
 class StatsWrapper(Env):
     def __init__(self, env: RedGymEnv):
         self.env = env
+        # Initialize move_usage to track how many times each move is used
+        self.move_usage = defaultdict(int)
 
         self.env.hook_register(
             None, "PlayerCanExecuteMove", self.increment_move_hook, None
@@ -84,7 +86,6 @@ class StatsWrapper(Env):
         self.current_events = event_obs
         self.events_steps = {name: -1 for name in filtered_event_names}
         self.caught_species = np.zeros(152, dtype=np.uint8)
-        self.move_usage = defaultdict(int)
         self.pokecenter_count = 0
         self.pokecenter_location_count = defaultdict(int)
         self.item_usage = defaultdict(int)

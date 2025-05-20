@@ -7,6 +7,7 @@ from collections import deque
 from multiprocessing import Lock, shared_memory
 from pathlib import Path
 from typing import Any, Iterable, Optional
+from datetime import datetime
 
 import mediapy as media
 import numpy as np
@@ -103,8 +104,18 @@ class RedGymEnv(Env):
         self.emulator_delay = env_config.emulator_delay
         self.state_dir = Path(env_config.state_dir)
         self.init_state = env_config.init_state
-        self.init_state_name = self.init_state
-        self.init_state_path = self.state_dir / f"{self.init_state_name}.state"
+        # Determine full path for initial state: if provided as a .state file, use it directly
+        if self.init_state:
+            init_path_candidate = Path(self.init_state)
+            if init_path_candidate.suffix == '.state':
+                self.init_state_path = init_path_candidate
+                self.init_state_name = init_path_candidate.stem
+            else:
+                self.init_state_name = self.init_state
+                self.init_state_path = self.state_dir / f"{self.init_state_name}.state"
+        else:
+            self.init_state_name = None
+            self.init_state_path = None
         self.action_freq = env_config.action_freq
         self.max_steps = env_config.max_steps
         self.save_video = env_config.save_video
@@ -481,7 +492,9 @@ class RedGymEnv(Env):
             else:
                 base_name = f"{map_name_str_for_name}_x{start_x_for_name}_y{start_y_for_name}"
 
-            run_identifier = f"{base_name}__{uuid.uuid4().hex[:8]}"
+            # Use timestamp for naming instead of uuid
+            timestamp = datetime.now().strftime("%m%d%Y_%H%M%S")
+            run_identifier = f"{base_name}__{timestamp}"
             self.current_run_dir = self.replays_base_dir / run_identifier
             self.current_run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1981,6 +1994,122 @@ class RedGymEnv(Env):
         if not self.path_trace_data[map_key_str] or self.path_trace_data[map_key_str][-1] != [gy, gx]:
             self.path_trace_data[map_key_str].append([gy, gx])
 
+    def _convert_text(self, bytes_data: list[int]) -> str:
+        """Convert Pokemon text format to ASCII"""
+        result = ""
+        for b in bytes_data:
+            if b == 0x50:  # End marker
+                break
+            elif b == 0x4E:  # Line break
+                result += "\n"
+            # Main character ranges
+            elif 0x80 <= b <= 0x99:  # A-Z
+                result += chr(b - 0x80 + ord("A"))
+            elif 0xA0 <= b <= 0xB9:  # a-z
+                result += chr(b - 0xA0 + ord("a"))
+            elif 0xF6 <= b <= 0xFF:  # Numbers 0-9
+                result += str(b - 0xF6)
+            # Punctuation characters (9A-9F)
+            elif b == 0x9A:  # (
+                result += "("
+            elif b == 0x9B:  # )
+                result += ")"
+            elif b == 0x9C:  # :
+                result += ":"
+            elif b == 0x9D:  # ;
+                result += ";"
+            elif b == 0x9E:  # [
+                result += "["
+            elif b == 0x9F:  # ]
+                result += "]"
+            # Special characters
+            elif b == 0x7F:  # Space
+                result += " "
+            elif b == 0x6D:  # : (also appears here)
+                result += ":"
+            elif b == 0x54:  # POKé control character
+                result += "POKé"
+            elif b == 0xBA:  # é
+                result += "é"
+            elif b == 0xBB:  # 'd
+                result += "'d"
+            elif b == 0xBC:  # 'l
+                result += "'l"
+            elif b == 0xBD:  # 's
+                result += "'s"
+            elif b == 0xBE:  # 't
+                result += "'t"
+            elif b == 0xBF:  # 'v
+                result += "'v"
+            elif b == 0xE1:  # PK
+                result += "Pk"
+            elif b == 0xE2:  # MN
+                result += "Mn"
+            elif b == 0xE3:  # -
+                result += "-"
+            elif b == 0xE6:  # ?
+                result += "?"
+            elif b == 0xE7:  # !
+                result += "!"
+            elif b == 0xE8:  # .
+                result += "."
+            elif b == 0xE9:  # .
+                result += "."
+            # E-register special characters
+            elif b == 0xE0:  # '
+                result += "'"
+            elif b == 0xE1:  # PK
+                result += "POKé"
+            elif b == 0xE2:  # MN
+                result += "MON"
+            elif b == 0xE3:  # -
+                result += "-"
+            elif b == 0xE4:  # 'r
+                result += "'r"
+            elif b == 0xE5:  # 'm
+                result += "'m"
+            elif b == 0xE6:  # ?
+                result += "?"
+            elif b == 0xE7:  # !
+                result += "!"
+            elif b == 0xE8:  # .
+                result += "."
+            elif b == 0xE9:  # ア
+                result += "ア"
+            elif b == 0xEA:  # ウ
+                result += "ウ"
+            elif b == 0xEB:  # エ
+                result += "エ"
+            elif b == 0xEC:  # ▷
+                result += "▷"
+            elif b == 0xED:  # ►
+                result += "►"
+            elif b == 0xEE:  # ▼
+                result += "▼"
+            elif b == 0xEF:  # ♂
+                result += "♂"
+            # F-register special characters
+            elif b == 0xF0:  # ♭
+                result += "♭"
+            elif b == 0xF1:  # ×
+                result += "×"
+            elif b == 0xF2:  # .
+                result += "."
+            elif b == 0xF3:  # /
+                result += "/"
+            elif b == 0xF4:  # ,
+                result += ","
+            elif b == 0xF5:  # ♀
+                result += "♀"
+            # Numbers 0-9 (0xF6-0xFF)
+            elif 0xF6 <= b <= 0xFF:
+                result += str(b - 0xF6)
+            else:
+                # For debugging, show the hex value of unknown characters
+                result += f"[{b:02X}]"
+        return result.strip()
+
+    
     def read_dialog(self) -> str:
         """Read any dialog text currently on screen by scanning the tilemap buffer"""
         # Tilemap buffer is from C3A0 to C507
@@ -1988,7 +2117,7 @@ class RedGymEnv(Env):
         buffer_end = 0xC507
 
         # Get all bytes from the buffer
-        buffer_bytes = [self.memory[addr] for addr in range(buffer_start, buffer_end)]
+        buffer_bytes = [self.pyboy.memory[addr] for addr in range(buffer_start, buffer_end)]
 
         # Look for sequences of text (ignoring long sequences of 0x7F/spaces)
         text_lines = []
@@ -2174,28 +2303,40 @@ class RedGymEnv(Env):
             self.screen_obs_frame_writer.close()
             self.visited_mask_frame_writer.close()
 
-        # Save path trace data if a run was recorded
-        if hasattr(self, 'current_run_dir') and self.current_run_dir and self.path_trace_data:
+        # Save path trace data and ending state for recorded runs
+        if hasattr(self, 'current_run_dir') and self.current_run_dir:
+            # Save path trace data if available
+            if self.path_trace_data:
+                try:
+                    trace_file_name = f"{self.current_run_dir.name}_trace.json"
+                    trace_file_path = self.current_run_dir / trace_file_name
+                    with open(trace_file_path, "w") as f_json:
+                        json.dump(self.path_trace_data, f_json, indent=4)
+                    print(f"Saved path trace for run {self.current_run_dir.name} to {trace_file_path}")
+                except Exception as e:
+                    print(f"Error saving path trace for run {self.current_run_dir.name}: {e}")
+            # Save ending game state in run directory
             try:
-                # Name trace file using full run identifier
-                trace_file_name = f"{self.current_run_dir.name}_trace.json"
-                trace_file_path = self.current_run_dir / trace_file_name
-                with open(trace_file_path, "w") as f_json:
-                    json.dump(self.path_trace_data, f_json, indent=4)
-                print(f"Saved path trace for run {self.current_run_dir.name} to {trace_file_path}")
+                timestamp = datetime.now().strftime("%m%d%Y_%H%M%S")
+                end_state_name = f"{self.current_run_dir.name}__{timestamp}.state"
+                end_state_path = self.current_run_dir / end_state_name
+                with open(end_state_path, "wb") as f_end:
+                    self.pyboy.save_state(f_end)
+                print(f"Saved ending game state to {end_state_path}")
             except Exception as e:
-                print(f"Error saving path trace for run {self.current_run_dir.name}: {e}")
+                print(f"Error saving ending game state: {e}")
             finally:
-                # Clear for next potential full re-initialization if object is reused by play.py
-                self.current_run_dir = None 
+                # Clear for next potential full re-initialization if object is reused
+                self.current_run_dir = None
                 self.path_trace_data = {}
-        # Always save the ending game state for resuming later
-        try:
-            end_name = f"{self.init_state_name}_end.state" if self.init_state_name else "end.state"
-            end_path = self.state_dir / end_name
-            end_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(end_path, "wb") as f_end:
-                self.pyboy.save_state(f_end)
-            print(f"Saved ending game state to {end_path}")
-        except Exception as e:
-            print(f"Error saving ending game state: {e}")
+        else:
+            # Fallback: save ending game state in state_dir for resume
+            try:
+                end_name = f"{self.init_state_name}_end.state" if self.init_state_name else "end.state"
+                end_path = self.state_dir / end_name
+                end_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(end_path, "wb") as f_end:
+                    self.pyboy.save_state(f_end)
+                print(f"Saved ending game state to {end_path}")
+            except Exception as e:
+                print(f"Error saving ending game state: {e}")

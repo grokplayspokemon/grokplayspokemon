@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pygame
 # import io # No longer needed
-# from datetime import datetime # No longer needed
+from datetime import datetime
 import yaml
 from omegaconf import DictConfig
 
@@ -364,6 +364,17 @@ def main():
         if not args.headless:
             pygame.quit()
         print("Replay finished.")
+        # Save ending game state to run directory
+        try:
+            timestamp = datetime.now().strftime("%m%d%Y_%H%M%S")
+            end_state_name = f"{run_name}__{timestamp}.state"
+            end_state_path = run_dir / end_state_name
+            run_dir.mkdir(parents=True, exist_ok=True)
+            with open(end_state_path, "wb") as f_end:
+                env.pyboy.save_state(f_end)
+            print(f"Saved ending game state to {end_state_path}")
+        except Exception as e:
+            print(f"Error saving ending game state: {e}")
 
 if __name__ == "__main__":
     main()

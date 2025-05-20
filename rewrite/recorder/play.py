@@ -45,7 +45,8 @@ def get_default_config(rom_path, initial_state_path):
         p = Path(initial_state_path)
         # Full path to a state file overrides default
         if p.is_file():  # Provided a full path to a .state file
-            init_state_name = p.stem
+            # Store full path so environment can detect and load directly
+            init_state_name = str(p)
         else:
             # Check default state directory for state file
             state_dir = Path("./states/new")

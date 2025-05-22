@@ -1,4 +1,3 @@
-
 pokemon_data = [
     {'hex': '1', 'decimal': '1', 'name': 'Rhydon'},
     {'hex': '2', 'decimal': '2', 'name': 'Kangaskhan'},

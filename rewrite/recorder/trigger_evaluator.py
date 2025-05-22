@@ -78,8 +78,6 @@ class TriggerEvaluator:
                     continue
                 if item_enum.name == clean_name:
                     count += quantity
-            # Debug: show total quantity
-            print(f"[TriggerEvaluator] Inventory total for '{raw_name}' -> '{clean_name}': {count} (need >= {qty_min})")
             result = (count >= qty_min)
         elif ttype == 'party_pokemon_species_is':
             species_name = trigger.get('species_name', '')

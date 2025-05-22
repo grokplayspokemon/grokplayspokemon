@@ -58,13 +58,14 @@ VISITED_MASK_SHAPE = (144 // 16, 160 // 16, 1)
 
 
 VALID_ACTIONS = [
-    WindowEvent.PRESS_ARROW_DOWN,
-    WindowEvent.PRESS_ARROW_LEFT,
-    WindowEvent.PRESS_ARROW_RIGHT,
-    WindowEvent.PRESS_ARROW_UP,
-    WindowEvent.PRESS_BUTTON_A,
-    WindowEvent.PRESS_BUTTON_B,
-    WindowEvent.PRESS_BUTTON_START,
+    WindowEvent.PRESS_ARROW_DOWN,    # 0: down
+    WindowEvent.PRESS_ARROW_LEFT,    # 1: left
+    WindowEvent.PRESS_ARROW_RIGHT,   # 2: right
+    WindowEvent.PRESS_ARROW_UP,      # 3: up
+    WindowEvent.PRESS_BUTTON_A,      # 4: a
+    WindowEvent.PRESS_BUTTON_B,      # 5: b
+    None,                            # 6: path-follow (handled in step())
+    WindowEvent.PRESS_BUTTON_START,  # 7: start
 ]
 
 VALID_RELEASE_ACTIONS = [
@@ -74,12 +75,14 @@ VALID_RELEASE_ACTIONS = [
     WindowEvent.RELEASE_ARROW_UP,
     WindowEvent.RELEASE_BUTTON_A,
     WindowEvent.RELEASE_BUTTON_B,
+    None,                         # 6: path-follow
     WindowEvent.RELEASE_BUTTON_START,
 ]
 
-VALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "start"]
+VALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start"]
 
-ACTION_SPACE = spaces.Discrete(len(VALID_ACTIONS))
+PATH_FOLLOW_ACTION = 6  # discrete action index for path-follow (key 6)
+ACTION_SPACE = spaces.Discrete(len(VALID_ACTIONS))  # total actions including path-follow and start
 
 # x, y, map_n
 SEAFOAM_SURF_SPOTS = {
@@ -298,7 +301,57 @@ class RedGymEnv(Env):
 
         if self.save_video and self.n_record:
             self.save_video = self.env_id < self.n_record
+        
+        # Path following attributes
+        self.combined_path = []
+        self.current_path_target_index = 0
+        self._load_all_path_data()
+
         self.init_mem()
+
+    def _load_all_path_data(self):
+        completions_file_path = Path(__file__).parent / "required_completions.json"
+        paths_root_dir = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046"
+        
+        self.combined_path = []
+        try:
+            with open(completions_file_path, 'r') as f:
+                completions_data = json.load(f)
+            
+            for quest_info in completions_data:
+                quest_id_str = quest_info.get("quest_id")
+                coords_filename = quest_info.get("associated_coordinates_file")
+                
+                if not quest_id_str or not coords_filename:
+                    print(f"Skipping quest due to missing id or coords_filename: {quest_info}")
+                    continue
+                
+                coord_file_path = paths_root_dir / quest_id_str / coords_filename
+                if coord_file_path.exists():
+                    try:
+                        with open(coord_file_path, 'r') as cf:
+                            coords_data = json.load(cf)
+                        # coords_data is a list of [gy, gx]
+                        for coord_pair in coords_data:
+                            if isinstance(coord_pair, list) and len(coord_pair) == 2:
+                                self.combined_path.append(tuple(coord_pair))
+                            else:
+                                print(f"Warning: Invalid coordinate format {coord_pair} in {coord_file_path}")
+                    except json.JSONDecodeError as e:
+                        print(f"Error decoding JSON from {coord_file_path}: {e}")
+                    except Exception as e:
+                        print(f"Error reading or processing {coord_file_path}: {e}")
+                else:
+                    print(f"Coordinate file not found: {coord_file_path}")
+            
+            print(f"Loaded a total of {len(self.combined_path)} coordinates for path following.")
+
+        except FileNotFoundError:
+            print(f"Error: {completions_file_path} not found. Path data not loaded.")
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from {completions_file_path}: {e}. Path data not loaded.")
+        except Exception as e:
+            print(f"An unexpected error occurred during path loading: {e}. Path data not loaded.")
 
     def register_hooks(self):
         self.pyboy.hook_register(None, "DisplayStartMenu", self.start_menu_hook, None)
@@ -512,25 +565,9 @@ class RedGymEnv(Env):
 
             # Log the first point in the path trace for the new run.
             self.update_path_trace()
-            self.first = False
-            # Apply infinite money and health on reset
-            if self.infinite_money:
-                _, wPlayerMoney = self.pyboy.symbol_lookup("wPlayerMoney")
-                for offset in range(3):
-                    self.pyboy.memory[wPlayerMoney + offset] = 0x99
-            if self.infinite_health:
-                self.reverse_damage()
-                self.party = PartyMons(self.pyboy)
-            # Infinite PP and super move hack in default reset
-            for i in range(self.read_m("wPartyCount")):
-                _, moves_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Moves")
-                self.pyboy.memory[moves_addr] = TmHmMoves.HYPER_BEAM.value
-                _, pp_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}PP")
-                for slot in range(4):
-                    self.pyboy.memory[pp_addr + slot] = 0x3F
-            return self._get_obs(), infos
+        
+        self.current_path_target_index = 0 # Reset path index on environment reset
 
-        # Default behavior when not recording: just finish reset
         self.first = False
         # Apply infinite money and health on reset
         if self.infinite_money:
@@ -843,6 +880,55 @@ class RedGymEnv(Env):
 
     def step(self, action):
         reset = False # Initialize reset here
+
+        # --- BEGIN PATH FOLLOWING LOGIC ---
+        # Use discrete action PATH_FOLLOW_ACTION (index 7) to follow combined path
+        if action == PATH_FOLLOW_ACTION and self.combined_path:
+            player_x, player_y, map_n = self.get_game_coords()
+            current_gy, current_gx = local_to_global(player_y, player_x, map_n)
+            
+            determined_new_action = False
+            if self.current_path_target_index >= len(self.combined_path):
+                # Path complete, do nothing special
+                pass
+            else:
+                target_gy, target_gx = self.combined_path[self.current_path_target_index]
+
+                if (current_gy, current_gx) == (target_gy, target_gx):
+                    self.current_path_target_index += 1
+                    if self.current_path_target_index >= len(self.combined_path):
+                        # Path just completed this step, use original action (START)
+                        pass
+                    else:
+                        # Advanced to new target, get new coords for this step's move determination
+                        target_gy, target_gx = self.combined_path[self.current_path_target_index]
+                
+                # Determine move from current_pos to (potentially new) target_pos
+                # Only if we are not already at the new target (after potential index increment)
+                if not ((current_gy, current_gx) == (target_gy, target_gx) and \
+                        self.current_path_target_index >= len(self.combined_path) -1 and \
+                        (current_gy, current_gx) == self.combined_path[-1]) : # Avoid re-evaluating if already at final target
+
+                    delta_gy = target_gy - current_gy
+                    delta_gx = target_gx - current_gx
+                    
+                    new_action_event = None
+                    if delta_gy > 0: new_action_event = WindowEvent.PRESS_ARROW_DOWN
+                    elif delta_gy < 0: new_action_event = WindowEvent.PRESS_ARROW_UP
+                    elif delta_gx > 0: new_action_event = WindowEvent.PRESS_ARROW_RIGHT
+                    elif delta_gx < 0: new_action_event = WindowEvent.PRESS_ARROW_LEFT
+                    # If delta_gy and delta_gx are both 0, new_action_event remains None.
+                    # This means we are at the target, or it's the last point and we just arrived.
+
+                    if new_action_event:
+                        try:
+                            # Override to movement action index
+                            action = VALID_ACTIONS.index(new_action_event)
+                            determined_new_action = True
+                        except ValueError:
+                            pass
+        # --- END PATH FOLLOWING LOGIC ---
+
         # Trigger debug prints
         cur_map_id = self.read_m("wCurMap")
         print(f"[TriggerTest] current_map_id_is: {cur_map_id}")

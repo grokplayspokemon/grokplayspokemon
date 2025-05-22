@@ -4,6 +4,8 @@ wandb:
   group: ~
 
 env:
+  # If true, record replays.
+  record_replays: True
   # If true, run without rendering every step.
   headless: True
   # Directory to store video output.
@@ -35,21 +37,21 @@ env:
   # If true, disable the need for Flash.
   auto_flash: False
   # If true, disable wild encounters with repels.
-  disable_wild_encounters: True
+  disable_wild_encounters: False
   # If true, disable AI input. Useful for debugging.
-  disable_ai_actions: False
+  disable_ai_actions: True
   # If true, teach cut if possible.
-  auto_teach_cut: False
+  auto_teach_cut: True
   # If true, use cut when standing next to a tree.
-  auto_use_cut: False
+  auto_use_cut: True
   # If true, use surf when attempting to walk on water.
-  auto_use_surf: False
+  auto_use_surf: True
   # If true, teach surf if possible.
-  auto_teach_surf: False
+  auto_teach_surf: True
   # If true, use strength when walking into a cave if possible.
-  auto_use_strength: False
+  auto_use_strength: True
   # If true, teach strength if possible.
-  auto_teach_strength: False
+  auto_teach_strength: True
   # If true, solve a strength puzzle if next to a moveable boulder.
   auto_solve_strength_puzzles: True
   # If true, toss all unneeded items when the bag is full.
@@ -531,3 +533,9 @@ debug:
     async_wrapper: False
     sqlite_wrapper: False
     archive_states: False
+
+env_config:
+  # Path to your Pokemon Red ROM file
+  gb_path: "/puffertank/llm_plays_pokemon/DATAPlaysPokemon/rewrite/recorder/PokemonRed.gb"
+  # Optional: set headless to true to disable Pygame window
+  headless: false

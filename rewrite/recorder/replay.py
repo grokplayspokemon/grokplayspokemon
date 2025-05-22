@@ -140,7 +140,7 @@ def process_frame_for_pygame(frame_from_env_render, target_resolution=(160,144))
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("run_dir", type=str, help="Path to the replay run directory")
+    parser.add_argument("--run_dir", type=str, help="Path to the replay run directory")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument('--wait', type=int, default=0, help='Time to wait between frames in ms')
     parser.add_argument('--config_file', type=str, default='../config.yaml')
@@ -156,6 +156,11 @@ def main():
 
     # Load initial state if available
     state_file = run_dir / f"{run_name}.state"
+    # If no default state file, try the _start.state variant
+    if not state_file.is_file():
+        alt_state = run_dir / f"{run_name}_start.state"
+        if alt_state.is_file():
+            state_file = alt_state
     if state_file.is_file():
         try:
             state_bytes = state_file.read_bytes()
@@ -167,19 +172,19 @@ def main():
         print(f"Initial state file not found at {state_file}. Starting new game.")
         options = {}
 
-    # Load recorded actions JSON: look for playthrough.json, then specific or generic fallbacks
-    candidates = [
-        run_dir / "playthrough.json",
-        run_dir / f"{run_name}_actions.json",
-        run_dir / "actions.json",
-    ]
+    # Load recorded actions JSON: find any JSON file containing a list of ints
     actions_file = None
-    for candidate in candidates:
-        if candidate.is_file():
-            actions_file = candidate
-            break
-    if not actions_file:
-        print(f"Actions file not found in run directory: {run_dir}. Checked: {', '.join(str(c) for c in candidates)}")
+    for json_path in run_dir.glob("*.json"):
+        try:
+            with open(json_path, "r") as f:
+                data = json.load(f)
+            if isinstance(data, list) and all(isinstance(x, int) for x in data):
+                actions_file = json_path
+                break
+        except Exception:
+            continue
+    if actions_file is None:
+        print(f"No actions file found in {run_dir}. Expected a JSON file containing a list of ints.")
         return
     with open(actions_file, "r") as f:
         action_list = json.load(f)

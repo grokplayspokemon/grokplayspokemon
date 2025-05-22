@@ -134,7 +134,7 @@ map_data = {
         },
         {
             "id": "10",
-            "name": "Saffrdon City",
+            "name": "Saffron City",
             "coordinates": [
                 234,
                 192

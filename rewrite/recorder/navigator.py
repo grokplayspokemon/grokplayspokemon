@@ -39,11 +39,17 @@ from data.tilesets import Tilesets # Assuming play.py's sys.path allows this
 class InteractiveNavigator:
     def __init__(self, env_instance: RedGymEnv):
         self.env = env_instance
-        self.pyboy = self.env.pyboy # Direct access to pyboy via RedGymEnv
+        self.pyboy = self.env.pyboy  # Direct access to pyboy via RedGymEnv
         self.tile_pair_collisions = {}
-        self.warp_path_data: dict[str, list[tuple[int,int]]] = {} # map_id_str to list of (gx,gy) tuples
+        self.warp_path_data: dict[str, list[tuple[int,int]]] = {}  # map_id_str to list of (gx,gy) tuples
         self._load_warp_paths()
         self._load_tile_pair_collisions()
+        # Load quest coordinate paths for quests
+        self.quest_path_data: dict[str, dict[str, list[tuple[int,int]]]] = {}
+        self.current_quest_id: Optional[int] = None
+        self._load_quest_paths()
+        # Track last global position including map to detect changes
+        self.last_position = None
         
         # Action mapping for navigation paths (UP, DOWN, LEFT, RIGHT strings)
         self.ACTION_MAPPING_STR_TO_INT = {
@@ -62,13 +68,18 @@ class InteractiveNavigator:
         self.current_map_id_for_json_progress: Optional[str] = None
         self.current_json_path_target_idx: int = 0 # Index of the target coord in the current map's JSON path
         self.turns_since_json_path_advance: int = 0
-        self.STAGNATION_THRESHOLD: int = 5
+        self.STAGNATION_THRESHOLD: int = 2
 
         # For A* segment loop detection (when A* path executes but player doesn't move globally)
         self.last_global_pos_before_astar_segment: Optional[tuple[int, int]] = None
         self.astar_segment_no_global_progress_count: int = 0
         self.ASTAR_SEGMENT_NO_GLOBAL_PROGRESS_THRESHOLD: int = 2 # Allow one full A* segment retry with no global progress
         self.global_nav_short_history: list[tuple[int, int]] = [] # For detecting oscillations
+
+        # Add warp handling attributes
+        self.current_warp_segment: Optional[list[tuple[int,int]]] = None  # Warp path segment for map change transitions
+        self.current_warp_index: int = 0  # Index within the warp path segment
+        self.last_map_id: Optional[str] = None  # Track last map ID to detect map changes
 
     def _load_warp_paths(self):
         base_path = Path(__file__).parent 
@@ -125,6 +136,25 @@ class InteractiveNavigator:
             self.tile_pair_collisions = {}
             print(f"InteractiveNavigator: Warning: Tile pair collision file not found at {collisions_file_path_project_root} or {collisions_file_path_local_dir}. Tile pair collision checking will be permissive.")
 
+    def _load_quest_paths(self):
+        base_dir = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046"
+        if not base_dir.exists():
+            print(f"Navigator: Quest paths directory not found at {base_dir}")
+            return
+        for quest_dir in base_dir.iterdir():
+            if not quest_dir.is_dir():
+                continue
+            coords_file = quest_dir / f"{quest_dir.name}_coords.json"
+            if coords_file.exists():
+                try:
+                    raw = json.load(open(coords_file))
+                    formatted = {map_id: [tuple(pt) for pt in pts] for map_id, pts in raw.items()}
+                    self.quest_path_data[quest_dir.name] = formatted
+                    total = sum(len(v) for v in formatted.values())
+                    print(f"Navigator: Loaded quest path for {quest_dir.name} with {total} points")
+                except Exception as e:
+                    print(f"Navigator: Failed to load quest path for {quest_dir.name}: {e}")
+
     def _get_player_global_coords(self) -> Optional[tuple[int, int]]:
         if not hasattr(self.env, 'get_game_coords'):
             print("InteractiveNavigator: env object does not have get_game_coords method.")
@@ -132,7 +162,12 @@ class InteractiveNavigator:
         try:
             player_local_x, player_local_y, current_map_id_int = self.env.get_game_coords()
             global_y, global_x = local_to_global(player_local_y, player_local_x, current_map_id_int)
-            return int(global_x), int(global_y) 
+            # Only print when the location (including map) changes
+            coord = (int(global_x), int(global_y), current_map_id_int)
+            if self.last_position is None or coord != self.last_position:
+                print(f"Navigator: Location changed to global {coord}")
+            self.last_position = coord
+            return int(global_x), int(global_y)
         except Exception as e:
             print(f"InteractiveNavigator: Error getting player global coords: {e}")
             return None
@@ -646,81 +681,48 @@ class InteractiveNavigator:
         print("Navigation (A* segment and global goal) reset to idle.")
 
     def check_json_path_stagnation_and_assist(self):
+        # Skip assistance if navigation is not idle
         if self.navigation_status != "idle":
-            return 
-
+            return
+        # Do not trigger when dialog is present
+        try:
+            if hasattr(self.env, 'read_dialog'):
+                dialog_text = self.env.read_dialog()
+                if dialog_text and dialog_text.strip():
+                    return
+        except Exception:
+            pass
+        # Ensure active quest is set
+        if self.current_quest_id is None:
+            return
         player_gx, player_gy = self._get_player_global_coords()
         current_map_id_str = self._get_current_map_id()
-
         if player_gx is None or current_map_id_str is None:
             return
-
-        current_map_json_path = self.warp_path_data.get(current_map_id_str)
-        if not current_map_json_path:
-            self.turns_since_json_path_advance = 0 
-            self.current_map_id_for_json_progress = current_map_id_str 
-            self.current_json_path_target_idx = 0
+        # Fetch quest path data for this quest and map
+        quest_data = self.quest_path_data.get(str(self.current_quest_id))
+        if not quest_data:
+            print(f"Navigator: No path data for quest {self.current_quest_id}")
             return
-
-        if self.current_map_id_for_json_progress != current_map_id_str:
-            print(f"Stagnation check: Map changed from {self.current_map_id_for_json_progress} to {current_map_id_str}. Resetting JSON path progress.")
-            self.current_map_id_for_json_progress = current_map_id_str
-            self.current_json_path_target_idx = 0
-            self.turns_since_json_path_advance = 0
-            self.last_player_gx_on_json_path_advance = None 
-            self.last_player_gy_on_json_path_advance = None
-
-        if not (0 <= self.current_json_path_target_idx < len(current_map_json_path)):
-            self.turns_since_json_path_advance = 0 
+        current_coords = quest_data.get(current_map_id_str)
+        if not current_coords:
             return
-            
-        target_gx, target_gy = current_map_json_path[self.current_json_path_target_idx]
-
-        if abs(player_gx - target_gx) <= 1 and abs(player_gy - target_gy) <= 1:
-            print(f"JSON Path: Reached target {self.current_json_path_target_idx} ({target_gx},{target_gy}) on map {current_map_id_str}.")
-            self.last_player_gx_on_json_path_advance = player_gx
-            self.last_player_gy_on_json_path_advance = player_gy
-            self.current_json_path_target_idx += 1
-            self.turns_since_json_path_advance = 0
-            if not (0 <= self.current_json_path_target_idx < len(current_map_json_path)):
-                print(f"JSON Path: All targets on map {current_map_id_str} reached.")
-        else:
-            self.turns_since_json_path_advance += 1
-            print(f"JSON Path: Turn {self.turns_since_json_path_advance}/{self.STAGNATION_THRESHOLD} stagnated towards JSON target idx {self.current_json_path_target_idx} ({target_gx},{target_gy}). Player at ({player_gx},{player_gy})")
-
-            if self.turns_since_json_path_advance >= self.STAGNATION_THRESHOLD:
-                print(f"JSON Path: Stagnation detected! Attempting to assist towards JSON target idx {self.current_json_path_target_idx} ({target_gx},{target_gy}).")
-                
-                # --- Smarter Target Selection for Stagnation Assist ---
-                final_nav_gx, final_nav_gy = target_gx, target_gy # Default to original JSON target
-                
-                astar_target_rg_candidate = self._global_to_local_9x10(target_gx, target_gy)
-                
-                if astar_target_rg_candidate:
-                    r_json, c_json = astar_target_rg_candidate
-                    # Need to check if this local A* target is walkable
-                    # This requires access to terrain and sprite data AT THE TIME OF PLANNING
-                    # which make_path_to_target_row_col normally fetches.
-                    # For now, let's assume _global_to_local_9x10 gives a valid grid point.
-                    # The A* itself will determine true walkability.
-                    # The main concern is if the JSON point *itself* is a known bad spot like a sign.
-                    # A simple first step: if the A* target is the *exact* problematic global coord that
-                    # has failed before, maybe try an alternative.
-                    # However, the existing A* loop detection handles repeated failures to the same *A* target*.
-
-                    # What if the JSON target (target_gx, target_gy) is known to be a common failure point?
-                    # This is harder to quantify here directly. The A* improvements are primary.
-                    # For now, we'll still target the JSON coordinate, and let the improved A*
-                    # figure out how to get adjacent if the JSON coord itself is unwalkable.
-                    pass # Keeping original target_gx, target_gy for now. A* will handle it.
-
-                else: # JSON target is off-screen, which is unusual for stagnation if player is on the same map.
-                      # This implies an issue with coordinate systems or the JSON path itself.
-                      # Stick to original JSON target; A* will fail if it can't be made local.
-                    print(f"JSON Path Stagnation: Warning - JSON target ({target_gx},{target_gy}) is off-screen from player at ({player_gx},{player_gy}). A* might fail to plan.")
-
-                self.set_navigation_goal_global(final_nav_gx, final_nav_gy)
-                self.turns_since_json_path_advance = 0 # Reset counter as A* is taking over
+        # Log quest and path info
+        print(f"Navigator: Quest {self.current_quest_id} on map {current_map_id_str}, path length {len(current_coords)}")
+        # Find nearest recorded point (swap pt order: stored as (gy, gx))
+        distances = [self._manhattan_distance((player_gx, player_gy), (pt[1], pt[0])) for pt in current_coords]
+        nearest_idx = distances.index(min(distances))
+        nearest_pt = current_coords[nearest_idx]
+        print(f"Navigator: Nearest path point idx {nearest_idx}, raw coords {nearest_pt}, player at ({player_gx},{player_gy}), dist {distances[nearest_idx]}")
+        # Debug: log full quest path for this map
+        print(f"Navigator: Full path for quest {self.current_quest_id} on map {current_map_id_str}: {current_coords}")
+        # Navigate back to nearest path point with correct (gx,gy) ordering
+        self.current_json_path_target_idx = nearest_idx
+        # nearest_pt stored as (map_y, map_x); swap for global coordinates
+        target_y, target_x = nearest_pt
+        target_gx, target_gy = target_x, target_y
+        print(f"Navigator: Setting navigation goal to nearest path point (gx,gy)=({target_gx},{target_gy})")
+        self.set_navigation_goal_global(target_gx, target_gy)
 
     def add_to_global_nav_history(self, pos: tuple[int, int]):
         """Adds a position to the short-term history for oscillation detection."""
@@ -734,3 +736,159 @@ class InteractiveNavigator:
         if not self.global_nav_short_history:
             return False
         return self.global_nav_short_history.count(pos) >= count
+
+    def set_active_quest(self, quest_id: int):
+        # Only update and notify when the active quest changes
+        if self.current_quest_id != quest_id:
+            self.current_quest_id = quest_id
+            print(f"Navigator: Active quest set to {quest_id}")
+
+    def follow_path(self, steps: int):
+        """Follow the recorded quest path for the given number of steps."""
+        # Ensure navigation is idle before starting
+        if self.navigation_status != "idle":
+            print("Navigator: Cannot follow path, navigation in progress.")
+            return
+        # Snap back to nearest recorded path point if off-path
+        self.check_json_path_stagnation_and_assist()
+        executed = 0
+        # Follow path across maps for the requested number of steps
+        for _ in range(steps):
+            if not self.schedule_next_path_step():
+                print(f"Navigator: No more path steps at step {executed+1}.")
+                break
+            executed += 1
+            # Execute this scheduled step until complete
+            while self.navigation_status in ("planning", "navigating"):
+                msg, action_int, step_res = self.step()
+                if msg:
+                    print(msg)
+        print(f"Navigator: Completed follow_path for {executed} steps.")
+
+    def schedule_next_path_step(self) -> bool:
+        """Plan a single step along the recorded quest path. Returns True if planned, False if no more steps."""
+        # Ensure active quest is set
+        if self.current_quest_id is None:
+            print("Navigator: No active quest set.")
+            return False
+        # Load current map and path coordinates
+        current_map_id_str = self._get_current_map_id()
+        coords = self.quest_path_data.get(str(self.current_quest_id), {}).get(current_map_id_str, [])
+        if not coords:
+            warp = self.warp_path_data.get(current_map_id_str)
+            if warp:
+                # Initialize warp segment if needed
+                if self.current_warp_segment is None or self.current_warp_segment is not warp:
+                    self.current_warp_segment = warp
+                    self.current_warp_index = 0
+                # Schedule next warp step
+                if self.current_warp_index < len(self.current_warp_segment):
+                    raw_pt = self.current_warp_segment[self.current_warp_index]
+                    self.current_warp_index += 1
+                    # Use raw x,y in correct order
+                    target_gx, target_gy = raw_pt[0], raw_pt[1]
+                    local_grid = self._global_to_local_9x10(target_gx, target_gy)
+                    if local_grid:
+                        # Direct A* planning for warp movement
+                        status_msg, path_actions = self.find_the_navigational_path(local_grid[0], local_grid[1])
+                        if path_actions:
+                            self.current_path_actions = path_actions
+                            self.navigation_status = "navigating"
+                        else:
+                            print(f"Navigator: Warp A* planning failed to {local_grid}. {status_msg}")
+                            self.navigation_status = "failed"
+                    else:
+                        # Fallback to global guidance for off-screen warp target
+                        self.set_navigation_goal_global(target_gx, target_gy)
+                    return True
+                # Completed warp segment; clear and reset JSON index
+                self.current_warp_segment = None
+                self.current_warp_index = 0
+                self.current_json_path_target_idx = -1
+                # Reload coords after warp
+                coords = self.quest_path_data.get(str(self.current_quest_id), {}).get(current_map_id_str, [])
+                if not coords:
+                    print(f"Navigator: No path data for quest {self.current_quest_id} on map {current_map_id_str} after warp")
+                    return False
+            else:
+                print(f"Navigator: No path data for quest {self.current_quest_id} on map {current_map_id_str}")
+                return False
+        # Reset JSON path and warp when map changes
+        if self.last_map_id != current_map_id_str:
+            self.current_json_path_target_idx = -1  # so next idx+1 = 0
+            self.current_warp_segment = None
+            self.current_warp_index = 0
+            self.last_map_id = current_map_id_str
+        # Determine next index
+        idx = self.current_json_path_target_idx or 0
+        # Handle warp segment if at end of recorded path
+        if idx + 1 >= len(coords):
+            warp = self.warp_path_data.get(current_map_id_str)
+            if warp:
+                if self.current_warp_segment is None:
+                    self.current_warp_segment = warp
+                    self.current_warp_index = 0
+                if self.current_warp_index < len(self.current_warp_segment):
+                    raw_pt = self.current_warp_segment[self.current_warp_index]
+                    self.current_warp_index += 1
+                    # Use raw x,y in correct order
+                    target_gx, target_gy = raw_pt[0], raw_pt[1]
+                    local_grid = self._global_to_local_9x10(target_gx, target_gy)
+                    if local_grid:
+                        # Direct A* planning for warp movement
+                        status_msg, path_actions = self.find_the_navigational_path(local_grid[0], local_grid[1])
+                        if path_actions:
+                            self.current_path_actions = path_actions
+                            self.navigation_status = "navigating"
+                        else:
+                            print(f"Navigator: Warp A* planning failed to {local_grid}. {status_msg}")
+                            self.navigation_status = "failed"
+                    else:
+                        # Fallback to global guidance for off-screen warp target
+                        self.set_navigation_goal_global(target_gx, target_gy)
+                    return True
+                else:
+                    # Completed warp path; clear warp and reset JSON index for next map
+                    self.current_warp_segment = None
+                    self.current_warp_index = 0
+                    self.current_json_path_target_idx = -1
+            # Transition to next map's first point if available
+            quest_data = self.quest_path_data.get(str(self.current_quest_id), {})
+            map_keys = sorted(quest_data.keys(), key=int)
+            try:
+                current_index = map_keys.index(current_map_id_str)
+            except ValueError:
+                current_index = -1
+            if current_index + 1 < len(map_keys):
+                next_map_id_str = map_keys[current_index + 1]
+                next_coords = quest_data.get(next_map_id_str, [])
+                if next_coords:
+                    # Schedule navigation to first coordinate of next map
+                    self.current_json_path_target_idx = -1  # so next idx+1 = 0
+                    print(f"Navigator: Transitioning to next map {next_map_id_str}")
+                    raw_pt = next_coords[0]
+                    target_gx, target_gy = raw_pt[1], raw_pt[0]
+                    local_grid = self._global_to_local_9x10(target_gx, target_gy)
+                    if local_grid:
+                        self.set_navigation_goal_local_grid(*local_grid)
+                    else:
+                        self.set_navigation_goal_global(target_gx, target_gy)
+                    return True
+                else:
+                    print(f"Navigator: No path data for next map {next_map_id_str}")
+                    return False
+            # No further maps: end of full path
+            print(f"Navigator: Reached end of recorded path for quest {self.current_quest_id}.")
+            return False
+        raw_pt = coords[idx + 1]
+        # stored as (gy, gx)
+        target_gx, target_gy = raw_pt[1], raw_pt[0]
+        # Plan navigation to next point using local grid if possible
+        local_grid = self._global_to_local_9x10(target_gx, target_gy)
+        if local_grid:
+            self.set_navigation_goal_local_grid(*local_grid)
+        else:
+            self.set_navigation_goal_global(target_gx, target_gy)
+        # Advance target index
+        self.current_json_path_target_idx = idx + 1
+        return True

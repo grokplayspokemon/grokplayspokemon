@@ -1,0 +1,47 @@
+play.py : manually play the game. Load a save state or start from beginning. Records step-perfect, state-perfect action history, which can be used to exactly replay the run. Aggregates stats for the run and prints them at the end. Each emulator button press runs step() in environment.py once; every action is exactly 1 step. Each run saves emulator starting state, a json of every traveled coordinate, indexed by map ID, a json of a list of actions taken, and the ending emulator save state. 
+
+navigator.py : A\* logic and sophisticated tracking navigating system that snaps player to a set of preordained global map coordinates. Finds nearest coordinate pair on path and navigates player to those coordinates. Disables automatically when a dialog (menu, npc or sign interaction, battle) is active. Serve as grok's tesla in FSD. grok, ofc, will have the ability to do whatever it wants, but I suspect it will be mostly following the path. 
+
+nav_path.json : the coordinates required for a full playthrough of the game, in order, indexed by map ID. Needs to be cross-indexed with an events completion-by-map-ID dict. 
+
+required_completions.json : doesn't have to be a json. Can be anything, really. Just needs to be able to track mandatory events for story completion, down to the level of navigation, and include instructions on how to complete them. E.g. 
+
+Begin Quest: clear game starting screens. 
+Location: players house 2f.
+Game starts: spam start button until starting dialog with Oak is seen. 
+Choose 'new game'
+Name yourself and press start 
+Name your rival and press start
+Spam b to clear the menus until you see you are in players room 2f.
+End Quest: clear game starting screens.
+
+Begin Quest: go touch grass.
+Navigate to the stairs in the upper right corner. 
+
+Location: Players house 1f. Head down and a little left to exit the house. 
+End Quest: go touch grass. 
+
+
+Location: Pallet Town.
+Try to leave Pallet Town directly to the north. Oak will get you and bring you to his lab. 
+
+Location: Oaks Lab
+Pick a pokemon. charmander is closest to you.
+Try to leave and your rival will battle you. 
+Battle your rival, first using growl, then using scratch or tackle.
+Once the battle is over, progress through the dialogs.
+Leave Oaks Lab.
+
+Location: Pallet Town.
+Walk up to Rivals House and enter it.
+
+Location: Rivals House. 
+Talk to rival's sister to get the Town Map.
+Exit Rivals House.
+
+Location: Pallet Town.
+Walk up to exit Pallet Town.
+
+Location: Route 1.
+Walk up to the first NPC.
+Talk to the NPC.

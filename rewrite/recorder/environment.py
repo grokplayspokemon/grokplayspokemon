@@ -49,6 +49,8 @@ from data.tm_hm import (
     SURF_SPECIES_IDS,
     TmHmMoves,
 )
+from data.moves import Moves as Move
+from data.types import PokemonType
 from global_map import GLOBAL_MAP_SHAPE, local_to_global
 
 PIXEL_VALUES = np.array([0, 85, 153, 255], dtype=np.uint8)
@@ -165,6 +167,8 @@ class RedGymEnv(Env):
         self.use_global_map = env_config.use_global_map
         self.save_state = env_config.save_state
         self.animate_scripts = env_config.animate_scripts
+        # Track previous map for trigger testing
+        self.prev_map_id: int | None = None
         self.exploration_inc = env_config.exploration_inc
         self.exploration_max = env_config.exploration_max
         self.max_steps_scaling = env_config.max_steps_scaling
@@ -509,10 +513,42 @@ class RedGymEnv(Env):
             # Log the first point in the path trace for the new run.
             self.update_path_trace()
             self.first = False
+            # Apply infinite money and health on reset
+            if self.infinite_money:
+                _, wPlayerMoney = self.pyboy.symbol_lookup("wPlayerMoney")
+                for offset in range(3):
+                    self.pyboy.memory[wPlayerMoney + offset] = 0x99
+            if self.infinite_health:
+                self.reverse_damage()
+                self.party = PartyMons(self.pyboy)
+            # Infinite PP and super move hack in default reset
+            for i in range(self.read_m("wPartyCount")):
+                _, moves_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Moves")
+                self.pyboy.memory[moves_addr] = TmHmMoves.HYPER_BEAM.value
+                _, pp_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}PP")
+                for slot in range(4):
+                    self.pyboy.memory[pp_addr + slot] = 0x3F
             return self._get_obs(), infos
 
         # Default behavior when not recording: just finish reset
         self.first = False
+        # Apply infinite money and health on reset
+        if self.infinite_money:
+            _, wPlayerMoney = self.pyboy.symbol_lookup("wPlayerMoney")
+            for offset in range(3):
+                self.pyboy.memory[wPlayerMoney + offset] = 0x99
+        if self.infinite_health:
+            self.reverse_damage()
+            self.party = PartyMons(self.pyboy)
+        # Infinite PP and super move hack in default reset
+        for i in range(self.read_m("wPartyCount")):
+            _, moves_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Moves")
+            # Set first slot to Hyper Beam
+            self.pyboy.memory[moves_addr] = TmHmMoves.HYPER_BEAM.value
+            # Replenish PP for all slots
+            _, pp_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}PP")
+            for slot in range(4):
+                self.pyboy.memory[pp_addr + slot] = 0x3F
         return self._get_obs(), infos
 
     def init_mem(self):
@@ -807,6 +843,11 @@ class RedGymEnv(Env):
 
     def step(self, action):
         reset = False # Initialize reset here
+        # Trigger debug prints
+        cur_map_id = self.read_m("wCurMap")
+        print(f"[TriggerTest] current_map_id_is: {cur_map_id}")
+        print(f"[TriggerTest] previous_map_id_was: {self.prev_map_id}")
+
         if self.step_count >= self.get_max_steps():
             self.step_count = 0
 
@@ -820,16 +861,15 @@ class RedGymEnv(Env):
         if self.auto_remove_all_nonuseful_items:
             self.remove_all_nonuseful_items()
 
+        # Infinite money: set to maximum ($999999) in BCD
         _, wPlayerMoney = self.pyboy.symbol_lookup("wPlayerMoney")
-        if (
-            self.infinite_money
-            and int.from_bytes(self.pyboy.memory[wPlayerMoney : wPlayerMoney + 3], "little") < 10000
-        ):
-            self.pyboy.memory[wPlayerMoney : wPlayerMoney + 3] = int(10000).to_bytes(3, "little")
+        if self.infinite_money:
+            for offset in range(3):
+                self.pyboy.memory[wPlayerMoney + offset] = 0x99
 
         if (
             self.disable_wild_encounters
-            and MapIds(self.blackout_check).name not in self.disable_wild_encounters_maps
+            and MapIds(self.read_m("wCurMap")).name not in self.disable_wild_encounters_maps
         ):
             self.pyboy.memory[self.pyboy.symbol_lookup("wRepelRemainingSteps")[1]] = 0xFF
 
@@ -863,6 +903,8 @@ class RedGymEnv(Env):
             self.use_surf = 1
         if self.infinite_health:
             self.reverse_damage()
+            # Refresh party after resetting HP so obs reflects the change
+            self.party = PartyMons(self.pyboy)
 
         info = {}
 
@@ -895,33 +937,53 @@ class RedGymEnv(Env):
 
         self.step_count += 1
 
-
-
-        # only check periodically since this is expensive
-        # we have a tolerance cause some events may be really hard to get
-        if (new_required_events or new_required_items) and self.required_tolerance is not None:
-            # calculate the current required completion percentage
-            # add 4 for rival3, game corner rocket, saffron guard and lapras
-            required_completion = len(required_events) + len(required_items)
-            reset = (required_completion - self.required_rate) > self.required_tolerance
-
-        if self.save_video:
-            self.add_video_frame()
-
-        # Auto-save state when in-game 'SAVE' option completes (detect 'Game saved' dialog)
-        try:
-            dialog_text = self.read_dialog()
-            if dialog_text and "game saved" in dialog_text.lower():
-                # Save state to a file for resuming later
-                end_name = f"{self.init_state_name or 'autosave'}_in_game.state"
-                end_path = Path(self.state_dir) / end_name
-                end_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(end_path, "wb") as f_state:
-                    self.pyboy.save_state(f_state)
-                print(f"Saved game state after in-game SAVE to {end_path}")
-        except Exception as e:
-            print(f"Error saving state after in-game SAVE: {e}")
-
+        # Trigger debug: dialog, inventory, battle flags
+        dialog = self.read_dialog() or ''
+        print(f"[TriggerTest] dialog_contains_text: {dialog}")
+        bag_items = list(self.get_items_in_bag())
+        print(f"[TriggerTest] item_is_in_inventory: {[item.name for item in bag_items]}")
+        # Show completed and pending events in order
+        completed_events = [evt for evt in REQUIRED_EVENTS if self.events.get_event(evt)]
+        pending_events = [evt for evt in REQUIRED_EVENTS if not self.events.get_event(evt)]
+        print(f"[TriggerTest] completed_events: {completed_events}")
+        print(f"[TriggerTest] pending_events  : {pending_events}")
+        # Update prev_map_id for next step
+        self.prev_map_id = cur_map_id
+        # Dynamic STAB selection, infinite PP, and buff stats
+        # Map Pokemon type codes to strongest STAB move IDs
+        TYPE_TO_MOVE = {
+            PokemonType.FIGHTING.value: Move.HI_JUMP_KICK.value,
+            PokemonType.FLYING.value: Move.SKY_ATTACK.value,
+            PokemonType.GROUND.value: Move.EARTHQUAKE.value,
+            PokemonType.ROCK.value: Move.ROCK_SLIDE.value,
+            PokemonType.FIRE.value: Move.FIRE_BLAST.value,
+            PokemonType.WATER.value: Move.HYDRO_PUMP.value,
+            PokemonType.GRASS.value: Move.SOLARBEAM.value,
+            PokemonType.POISON.value: Move.SLUDGE.value,
+            PokemonType.ELECTRIC.value: Move.THUNDERBOLT.value,
+            PokemonType.PSYCHIC.value: Move.PSYCHIC_M.value,
+            PokemonType.ICE.value: Move.BLIZZARD.value,
+            PokemonType.NORMAL.value: Move.EXPLOSION.value,
+        }
+        for i in range(self.read_m("wPartyCount")):
+            # Read Pokemon types
+            _, t1_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Type1")
+            type1 = self.pyboy.memory[t1_addr]
+            _, t2_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Type2")
+            type2 = self.pyboy.memory[t2_addr]
+            move_id = TYPE_TO_MOVE.get(type1) or TYPE_TO_MOVE.get(type2) or TmHmMoves.HYPER_BEAM.value
+            # Set STAB move in slot 1
+            _, moves_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Moves")
+            self.pyboy.memory[moves_addr] = move_id
+            # Replenish PP for all slots
+            _, pp_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}PP")
+            for slot in range(4):
+                self.pyboy.memory[pp_addr + slot] = 0x3F
+            # Buff stats: Attack, Speed, Special
+            for stat in ["Attack", "Speed", "Special"]:
+                _, stat_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}{stat}")
+                self.pyboy.memory[stat_addr] = 0xFF
+                self.pyboy.memory[stat_addr+1] = 0xFF
         return obs, _, reset, False, info
 
     def run_action_on_emulator(self, action):
@@ -1498,9 +1560,17 @@ class RedGymEnv(Env):
             and MapIds(self.blackout_check).name in self.disable_wild_encounters_maps
         ):
             self.pyboy.memory[self.pyboy.symbol_lookup("wRepelRemainingSteps")[1]] = 0x01
+        # Reapply infinite health on blackout relocation
+        if self.infinite_health:
+            self.reverse_damage()
+            self.party = PartyMons(self.pyboy)
 
     def pokecenter_heal_hook(self, *args, **kwargs):
         self.pokecenter_heal = 1
+        # Reapply infinite health when healed in a Poké Center
+        if self.infinite_health:
+            self.reverse_damage()
+            self.party = PartyMons(self.pyboy)
 
     def overworld_loop_hook(self, *args, **kwargs):
         self.user_control = True
@@ -1593,7 +1663,7 @@ class RedGymEnv(Env):
     def disable_wild_encounter_hook(self, *args, **kwargs):
         if (
             self.disable_wild_encounters
-            and MapIds(self.blackout_check).name not in self.disable_wild_encounters_maps
+            and MapIds(self.read_m("wCurMap")).name not in self.disable_wild_encounters_maps
         ):
             self.pyboy.memory[self.pyboy.symbol_lookup("wRepelRemainingSteps")[1]] = 0xFF
             self.pyboy.memory[self.pyboy.symbol_lookup("wCurEnemyLevel")[1]] = 0x01
@@ -1981,7 +2051,9 @@ class RedGymEnv(Env):
             return f"map_{map_id_val}"
 
     def update_path_trace(self):
-        if not hasattr(self, 'current_run_dir') or not self.current_run_dir:
+        # When play.py is controlling replay saving, current_run_dir is set externally.
+        # If it's not set (i.e., None), this function should not attempt to trace.
+        if not self.current_run_dir:
             return
 
         player_x, player_y, map_n = self.get_game_coords()
@@ -2297,46 +2369,44 @@ class RedGymEnv(Env):
             )
 
     def close(self):
+        # Skip environment auto-save if replays are disabled
+        if not getattr(self, 'record_replays', False):
+            return
         if self.save_video:
             self.full_frame_writer.close()
             self.map_frame_writer.close()
             self.screen_obs_frame_writer.close()
             self.visited_mask_frame_writer.close()
 
-        # Save path trace data and ending state for recorded runs
+        # play.py now handles saving of path trace data (coords.json).
+        # We only need to save the ending game state here if current_run_dir is set,
+        # or fall back to the default state_dir saving if not.
         if hasattr(self, 'current_run_dir') and self.current_run_dir:
-            # Save path trace data if available
-            if self.path_trace_data:
-                try:
-                    trace_file_name = f"{self.current_run_dir.name}_trace.json"
-                    trace_file_path = self.current_run_dir / trace_file_name
-                    with open(trace_file_path, "w") as f_json:
-                        json.dump(self.path_trace_data, f_json, indent=4)
-                    print(f"Saved path trace for run {self.current_run_dir.name} to {trace_file_path}")
-                except Exception as e:
-                    print(f"Error saving path trace for run {self.current_run_dir.name}: {e}")
-            # Save ending game state in run directory
+            # Save ending game state in run directory managed by play.py
             try:
                 timestamp = datetime.now().strftime("%m%d%Y_%H%M%S")
-                end_state_name = f"{self.current_run_dir.name}__{timestamp}.state"
+                # The end state saved by play.py is now the definitive one.
+                # This one can be considered a backup or removed if truly redundant.
+                # For now, let's keep it but ensure it doesn't conflict with play.py's naming.
+                end_state_name = f"{self.current_run_dir.name}_env_end__{timestamp}.state"
                 end_state_path = self.current_run_dir / end_state_name
                 with open(end_state_path, "wb") as f_end:
                     self.pyboy.save_state(f_end)
-                print(f"Saved ending game state to {end_state_path}")
+                print(f"Saved environment's ending game state to {end_state_path}")
             except Exception as e:
-                print(f"Error saving ending game state: {e}")
+                print(f"Error saving environment's ending game state: {e}")
             finally:
                 # Clear for next potential full re-initialization if object is reused
                 self.current_run_dir = None
                 self.path_trace_data = {}
         else:
-            # Fallback: save ending game state in state_dir for resume
+            # Fallback: save ending game state in state_dir for resume (e.g., if env is used outside play.py)
             try:
-                end_name = f"{self.init_state_name}_end.state" if self.init_state_name else "end.state"
+                end_name = f"{self.init_state_name}_end.state" if self.init_state_name else "default_env_end.state"
                 end_path = self.state_dir / end_name
                 end_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(end_path, "wb") as f_end:
                     self.pyboy.save_state(f_end)
-                print(f"Saved ending game state to {end_path}")
+                print(f"Saved fallback ending game state to {end_path}")
             except Exception as e:
-                print(f"Error saving ending game state: {e}")
+                print(f"Error saving fallback ending game state: {e}")

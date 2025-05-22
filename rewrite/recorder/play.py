@@ -7,6 +7,12 @@ import sys # Added for sys.path manipulation
 import math # Added for custom rounding
 from pathlib import Path
 from typing import Optional
+from omegaconf import OmegaConf  # For loading YAML config overrides
+import threading
+import queue
+import tkinter as tk
+import tkinter.ttk as ttk
+from trigger_evaluator import TriggerEvaluator
 
 from environment import RedGymEnv
 from pyboy.utils import WindowEvent
@@ -21,6 +27,144 @@ sys.path.insert(0, str(project_root_path))
 # global_map is used by navigator.py now, but play.py's sys.path manipulation makes it available.
 # from global_map import local_to_global, global_to_local # No longer directly used in play.py
 
+# Load quest definitions
+QUESTS_FILE = Path(__file__).parent / "required_completions.json"
+with open(QUESTS_FILE, 'r') as f:
+    QUESTS = json.load(f)
+# Shared queue for UI updates
+status_queue = queue.Queue()
+
+# UI thread function
+def start_quest_ui():
+    root = tk.Tk()
+    # Make window large and non-resizable
+    root.title("Quest Progress")
+    # Maximize window height to show as many quests as possible
+    try:
+        root.state('zoomed')  # Works on Windows and some Linux window managers
+    except Exception:
+        try:
+            root.attributes('-zoomed', True)  # Fallback for other platforms
+        except Exception:
+            # Could not maximize, fall back to default size
+            root.geometry("1000x700")
+    root.minsize(800, 600)
+    root.resizable(True, True)
+    # Increase default font sizes
+    import tkinter.font as tkfont
+    default_font = tkfont.nametofont("TkDefaultFont")
+    default_font.configure(size=12)
+    header_font = tkfont.nametofont("TkHeadingFont") if "TkHeadingFont" in tkfont.names() else default_font
+    header_font.configure(size=12, weight="bold")
+    # Apply style for Treeview
+    style = ttk.Style(root)
+    style.configure("Treeview", rowheight=24, font=(default_font.actual('family'), 12))
+    style.configure("Treeview.Heading", font=(default_font.actual('family'), 12, 'bold'))
+    tree = ttk.Treeview(root, columns=('status',), show='tree headings')
+    tree.heading('#0', text='Description')
+    tree.heading('status', text='Status')
+    tree.column('status', width=100)
+    # Configure tree columns and tags for better visibility
+    tree.column('#0', width=120)
+    tree.tag_configure('done', foreground='green')
+    tree.tag_configure('pending', foreground='red')
+    # Add scrollbars to handle long quest lists
+    vsb = ttk.Scrollbar(root, orient='vertical', command=tree.yview)
+    vsb.pack(side='right', fill='y')
+    tree.configure(yscrollcommand=vsb.set)
+    hbar = ttk.Scrollbar(root, orient='horizontal', command=tree.xview)
+    hbar.pack(side='bottom', fill='x')
+    tree.configure(xscrollcommand=hbar.set)
+    tree.pack(fill='both', expand=True)
+    # Label for current location
+    location_label = tk.Label(root, text="Location: N/A")
+    location_label.pack(side='top', fill='x')
+
+    # Function to describe trigger criteria
+    def describe_trigger(trg):
+        ttype = trg.get('type')
+        if ttype == 'current_map_id_is':
+            return f"Map ID == {trg['map_id']}"
+        elif ttype == 'previous_map_id_was':
+            return f"Previous Map ID == {trg['map_id']}"
+        elif ttype == 'dialog_contains_text':
+            return f"Dialog contains \"{trg['text']}\""
+        elif ttype == 'party_size_is':
+            return f"Party size == {trg['size']}"
+        elif ttype == 'battle_won':
+            return f"Battle won vs {trg.get('opponent_identifier','')}"
+        elif ttype == 'item_received_dialog':
+            return f"Item received dialog \"{trg['text']}\""
+        elif ttype == 'item_is_in_inventory':
+            return f"Inventory has >= {trg.get('quantity_min',1)} x {trg.get('item_name','')}"
+        elif ttype == 'party_hp_is_full':
+            return "Party HP is full"
+        else:
+            return str(trg)
+
+    # Populate rows with quests and their criteria
+    for q in QUESTS:
+        qid = q['quest_id']
+        # Insert quest as parent with description
+        parent_text = f"Quest {qid}: {q.get('begin_quest_text','')}"
+        tree.insert('', 'end', iid=qid, text=parent_text, values=('Pending',))
+        # Insert criteria as children
+        for idx, trg in enumerate(q.get('event_triggers', [])):
+            trigger_id = f"{qid}_{idx}"
+            crit_text = describe_trigger(trg)
+            tree.insert(qid, 'end', iid=trigger_id, text=crit_text, values=('Pending',))
+    # Auto-expand all quests to show triggers
+    for q in QUESTS:
+        tree.item(q['quest_id'], open=True)
+
+    # Snap to first pending quest helper
+    def snap_to_current():
+        # Snap only among quests still present
+        root_ids = tree.get_children()
+        for q in QUESTS:
+            qid = q['quest_id']
+            if qid not in root_ids:
+                continue
+            if tree.set(qid, 'status') == 'Pending':
+                tree.see(qid)
+                break
+    # One-time snap flag for polling
+    snapped = [False]
+
+    # Poll update queue
+    def poll():
+        try:
+            while True:
+                item_id, data = status_queue.get_nowait()
+                if item_id == '__location__':
+                    gx, gy, map_id, map_name = data
+                    location_label.config(text=f"Location: ({gx}, {gy}), Map ID: {map_id}, {map_name}")
+                else:
+                    # Remove fully completed quests from display
+                    if '_' not in item_id and data:
+                        try:
+                            tree.delete(item_id)
+                        except Exception:
+                            pass
+                    else:
+                        status_text = 'Done' if data else 'Pending'
+                        try:
+                            tree.set(item_id, 'status', status_text)
+                            tree.item(item_id, tags=('done',) if data else ('pending',))
+                        except Exception:
+                            pass
+        except queue.Empty:
+            pass
+        # Perform one-time snap after initial statuses are set
+        if not snapped[0]:
+            snap_to_current()
+            snapped[0] = True
+        root.after(200, poll)
+    root.after(200, poll)
+    root.mainloop()
+
+# Start the UI thread
+threading.Thread(target=start_quest_ui, daemon=True).start()
 
 def process_frame_for_pygame(frame_from_env_render):
     if frame_from_env_render.ndim == 2: # Grayscale
@@ -38,7 +182,15 @@ def update_screen(screen, frame_rgb, target_width, target_height):
     screen.blit(obs_surface, (0, 0))
     pygame.display.flip()
 
-def get_default_config(rom_path, initial_state_path):
+def get_default_config(rom_path, initial_state_path, infinite_money=False, infinite_health=False, emulator_delay=11,
+                       disable_wild_encounters=False, auto_teach_cut=True, auto_use_cut=True, auto_teach_surf=True, auto_use_surf=True,
+                       auto_teach_strength=True, auto_use_strength=True, auto_solve_strength_puzzles=True,
+                       auto_remove_all_nonuseful_items=False, auto_pokeflute=True, auto_next_elevator_floor=False,
+                       skip_safari_zone=False, infinite_safari_steps=False, insert_saffron_guard_drinks=False,
+                       save_video=False, fast_video=False, n_record=0, perfect_ivs=False, reduce_res=False,
+                       log_frequency=1000, two_bit=False, auto_flash=False, required_tolerance=None,
+                       disable_ai_actions=True, use_global_map=False, save_state=True, animate_scripts=True, exploration_inc=0.01, exploration_max=1.0,
+                       max_steps_scaling=0.0, map_id_scalefactor=1.0):
     # For play.py, only use an initial state name if the file actually exists.
     init_state_name = None
     if initial_state_path:
@@ -60,46 +212,46 @@ def get_default_config(rom_path, initial_state_path):
 
     return {
         "video_dir": Path("./videos/play_sessions/"),
-        "emulator_delay": 11,
+        "emulator_delay": emulator_delay,
         "headless": False, # play.py is interactive, so headless is False
         "state_dir": Path("./states/new"), # Relative to play.py
         "init_state": init_state_name, # Use provided state, or None
         "action_freq": 24,
         "max_steps": 1_000_000,
-        "save_video": False,
-        "fast_video": False,
-        "n_record": 0,
-        "perfect_ivs": False,
-        "reduce_res": False,
+        "save_video": save_video,
+        "fast_video": fast_video,
+        "n_record": n_record,
+        "perfect_ivs": perfect_ivs,
+        "reduce_res": reduce_res,
         "gb_path": rom_path,
-        "log_frequency": 1000,
-        "two_bit": False,
-        "auto_flash": False,
-        "required_tolerance": None,
-        "disable_wild_encounters": False,
-        "disable_ai_actions": True, # AI actions likely disabled for interactive play
-        "auto_teach_cut": False,
-        "auto_teach_surf": False,
-        "auto_teach_strength": False,
-        "auto_use_cut": False,
-        "auto_use_strength": False,
-        "auto_use_surf": False,
-        "auto_solve_strength_puzzles": False,
-        "auto_remove_all_nonuseful_items": False,
-        "auto_pokeflute": False,
-        "auto_next_elevator_floor": False,
-        "skip_safari_zone": False,
-        "infinite_safari_steps": False,
-        "insert_saffron_guard_drinks": False,
-        "infinite_money": False,
-        "infinite_health": False,
-        "use_global_map": False,
-        "save_state": False,
-        "animate_scripts": True,
-        "exploration_inc": 0.01,
-        "exploration_max": 1.0,
-        "max_steps_scaling": 0.0,
-        "map_id_scalefactor": 1.0,
+        "log_frequency": log_frequency,
+        "two_bit": two_bit,
+        "auto_flash": auto_flash,
+        "required_tolerance": required_tolerance,
+        "disable_wild_encounters": disable_wild_encounters,
+        "disable_ai_actions": disable_ai_actions, # AI actions likely disabled for interactive play
+        "auto_teach_cut": auto_teach_cut,
+        "auto_teach_surf": auto_teach_surf,
+        "auto_teach_strength": auto_teach_strength,
+        "auto_use_cut": auto_use_cut,
+        "auto_use_strength": auto_use_strength,
+        "auto_use_surf": auto_use_surf,
+        "auto_solve_strength_puzzles": auto_solve_strength_puzzles,
+        "auto_remove_all_nonuseful_items": auto_remove_all_nonuseful_items,
+        "auto_pokeflute": auto_pokeflute,
+        "auto_next_elevator_floor": auto_next_elevator_floor,
+        "skip_safari_zone": skip_safari_zone,
+        "infinite_safari_steps": infinite_safari_steps,
+        "insert_saffron_guard_drinks": insert_saffron_guard_drinks,
+        "infinite_money": infinite_money,
+        "infinite_health": infinite_health,
+        "use_global_map": use_global_map,
+        "save_state": save_state,
+        "animate_scripts": animate_scripts,
+        "exploration_inc": exploration_inc,
+        "exploration_max": exploration_max,
+        "max_steps_scaling": max_steps_scaling,
+        "map_id_scalefactor": map_id_scalefactor,
     }
 
 VALID_ACTIONS_MANUAL = [ # Renamed to avoid conflict if navigator has its own
@@ -142,15 +294,76 @@ def handle_navigation_input_interactive(navigator: InteractiveNavigator):
     except Exception as e:
         print(f"Error setting global navigation target: {e}")
 
+def handle_follow_path_interactive(navigator: InteractiveNavigator):
+    """Prompt for number of steps, return to path, and walk step-by-step."""
+    try:
+        print("\n== FOLLOW RECORDED QUEST PATH STEPS ==")
+        steps = int(input("Enter number of steps to follow along recorded path: "))
+        # Ensure we're back on the recorded path before stepping
+        navigator.check_json_path_stagnation_and_assist()
+        # Step through each move one at a time
+        for i in range(steps):
+            print(f"-- Follow step {i+1}/{steps} --")
+            # Schedule next single step; stop if no more path
+            if not navigator.schedule_next_path_step():
+                break
+            # Execute this segment until complete
+            while navigator.navigation_status in ["planning", "navigating"]:
+                msg, action_int, step_res = navigator.step()
+                if msg:
+                    print(msg)
+        print("Navigator: Completed requested follow-path steps.")
+    except Exception as e:
+        print(f"Invalid input for follow_path: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description='Play Pokemon Red interactively and record actions')
     parser.add_argument('--rom', type=str, help='Path to the Game Boy ROM file', default="./PokemonRed.gb")
     parser.add_argument('--state', type=str, help='Path to the initial state file (e.g., xxx.state)', default="has_pokedex_nballs") # Default to name, RedGymEnv prepends dir
-    parser.add_argument('--name', type=str, help='Name for the output JSON action file', default="playthrough.json")
+    parser.add_argument('--name', type=str, help='Name for the output JSON action file (without extension)', default=None)
+    parser.add_argument('--infinite-money', action='store_true', help='Enable infinite money')
+    parser.add_argument('--infinite-health', action='store_true', help='Enable infinite health')
     args = parser.parse_args()
 
-    env_config_dict = get_default_config(args.rom, args.state)
+    # Load YAML config overrides
+    config_path = Path(__file__).parent.parent / 'config.yaml'
+    try:
+        yaml_cfg = OmegaConf.load(str(config_path))
+        yaml_env = yaml_cfg.env
+    except Exception:
+        yaml_env = None
+
+    # Determine infinite flags: YAML takes precedence unless CLI flag set
+    infinite_money_flag = (args.infinite_money or (yaml_env.infinite_money if yaml_env and 'infinite_money' in yaml_env else False))
+    infinite_health_flag = (args.infinite_health or (yaml_env.infinite_health if yaml_env and 'infinite_health' in yaml_env else False))
+
+    # Auto-increment run directories and set initial state
+    recordings_dir = Path(__file__).parent / "replays" / "recordings"
+    recordings_dir.mkdir(parents=True, exist_ok=True)
+    # Determine naming base: use provided --name or auto-incremented numeric ID
+    if args.name:
+        name_base = Path(args.name).stem
+    else:
+        existing_dirs = [d for d in recordings_dir.iterdir() if d.is_dir() and d.name.isdigit()]
+        max_id = max((int(d.name) for d in existing_dirs), default=0)
+        prev_id = f"{max_id:03d}"
+        next_id = f"{max_id+1:03d}"
+        # If a previous numeric run exists, load its end state
+        if max_id > 0:
+            prev_end = recordings_dir / prev_id / f"{prev_id}_end.state"
+            if prev_end.is_file():
+                args.state = str(prev_end)
+        name_base = next_id
+    # Create run directory named after name_base
+    run_dir = recordings_dir / name_base
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    env_config_dict = get_default_config(
+        args.rom,
+        args.state,
+        infinite_money=infinite_money_flag,
+        infinite_health=infinite_health_flag,
+    )
     
     # Convert to DictConfig for RedGymEnv if it expects it (optional based on RedGymEnv)
     # from omegaconf import DictConfig (add this import if needed)
@@ -158,13 +371,60 @@ def main():
     env_config = env_config_dict # Assuming RedGymEnv can take a dict
 
     env = RedGymEnv(env_config=env_config)
+    # Disable automatic environment replay directory creation; manual run_dir will be used
+    env.record_replays = False
     navigator = InteractiveNavigator(env) # Initialize navigator
     
     obs, info = env.reset() # Initial reset
-    # Capture the run directory for saving action JSON
-    run_dir = env.current_run_dir
+    # Use our play.py run_dir for path trace recording AFTER reset has cleared env.current_run_dir
+    env.current_run_dir = run_dir
+
+    # Save initial state to run directory
+    import io
+    start_buf = io.BytesIO()
+    env.pyboy.save_state(start_buf)
+    start_buf.seek(0)
+    # Name initial state file based on name_base
+    start_state_file = run_dir / f"{name_base}_start.state"
+    with open(start_state_file, "wb") as f:
+        f.write(start_buf.read())
+    print(f"Start state saved to {start_state_file}")
+    # Log initial coordinate in path trace
+    env.update_path_trace()
 
     recorded_playthrough = []
+    # Load persisted quest completion state from central file
+    central_status_file = recordings_dir / "quest_status.json"
+    if central_status_file.is_file():
+        with open(central_status_file) as f:
+            quest_completed = json.load(f)
+    else:
+        quest_completed = {q['quest_id']: False for q in QUESTS}
+    # Load or initialize persistent trigger completion state
+    trigger_status_file = recordings_dir / "trigger_status.json"
+    if trigger_status_file.is_file():
+        with open(trigger_status_file) as f:
+            trigger_completed = json.load(f)
+    else:
+        trigger_completed = {}
+        for q in QUESTS:
+            qid = q['quest_id']
+            for idx, trg in enumerate(q.get('event_triggers', [])):
+                tid = f"{qid}_{idx}"
+                # Inherit completed state from quest if quest already done
+                trigger_completed[tid] = quest_completed.get(qid, False)
+
+    # Seed UI with persisted trigger and quest statuses
+    evaluator = TriggerEvaluator(env)
+    evaluator.prev_map_id = env.get_game_coords()[2]
+    for q in QUESTS:
+        qid = q['quest_id']
+        triggers = q.get('event_triggers', [])
+        for idx, trg in enumerate(triggers):
+            tid = f"{qid}_{idx}"
+            status_queue.put((tid, trigger_completed.get(tid, False)))
+        # Update quest status
+        status_queue.put((qid, quest_completed.get(qid, False)))
     debounce_time = 0.1 # seconds for manual input debounce
     last_action_time = 0
 
@@ -191,6 +451,8 @@ def main():
     print("Press P to take a screenshot.")
     print("Press N to set Navigation Target.")
     print("Press X to reset/cancel Navigation.")
+    print("Press 4 to return to recorded quest path.")
+    print("Press 5 to follow path steps.")
     print("Press ESC to quit and save.")
 
     running = True
@@ -222,6 +484,29 @@ def main():
                     elif event.key == pygame.K_x: # Reset/Cancel Navigation
                         navigator.reset_navigation()
                         print("Navigation manually reset.")
+                    elif event.key == pygame.K_4: # Return to recorded quest path
+                        print("Returning to recorded quest path.")
+                        # Auto-select the quest whose path includes current map
+                        current_map_id = navigator._get_current_map_id()
+                        if current_map_id:
+                            for qid_str, path_dict in navigator.quest_path_data.items():
+                                if current_map_id in path_dict:
+                                    navigator.set_active_quest(int(qid_str))
+                                    break
+                        navigator.check_json_path_stagnation_and_assist()
+                    elif event.key == pygame.K_5: # Follow path steps
+                        # Only follow path when no dialog is active; Shift+5 for 10 steps, otherwise 5 steps
+                        raw_dialog = env.read_dialog() or ''
+                        if raw_dialog.strip():
+                            print("Navigation paused: dialog active, cannot follow path steps.")
+                        else:
+                            # Clear any in-progress navigation so follow_path can start
+                            navigator.reset_navigation()
+                            # Determine steps: Shift+5 => 10, otherwise 5
+                            mods = pygame.key.get_mods()
+                            steps = 10 if (mods & pygame.KMOD_SHIFT) else 5
+                            print(f"Navigator: Following recorded path for {steps} steps.")
+                            navigator.follow_path(steps)
                     # Check for manual game control keys ONLY if navigation is not actively overriding
                     elif navigator.navigation_status in ["idle", "completed", "failed"]:
                         if current_time_sec - last_action_time > debounce_time: # Check debounce for manual keys
@@ -249,6 +534,9 @@ def main():
             current_info = info # Preserve previous info
             current_reward, current_terminated, current_truncated = 0, False, False
 
+            # Automatic JSON path assist disabled; use follow_path tool explicitly when needed
+            # if recorded_playthrough and navigator.navigation_status == "idle":
+            #     navigator.check_json_path_stagnation_and_assist()
             # --- Navigation Step ---
             if navigator.navigation_status not in ["idle", "completed", "failed"]:
                 nav_status_msg, nav_executed_action_int, nav_step_results = navigator.step()
@@ -371,33 +659,101 @@ def main():
             current_raw_frame = env.render()
             processed_frame_rgb = process_frame_for_pygame(current_raw_frame)
             update_screen(screen, processed_frame_rgb, screen_width, screen_height)
+
+            # Print coordinates and map info only when changed
+            player_gx, player_gy = navigator._get_player_global_coords() or (None, None)
+            _, _, current_map_id = env.get_game_coords()  # local x, y, map_id
+            current_map_name = env.get_map_name_by_id(current_map_id)
+            # Track last printed global+map position
+            pos3 = (player_gx, player_gy, current_map_id)
+            if getattr(navigator, '_last_printed_position', None) != pos3:
+                print(f"Global Coords: ({player_gx}, {player_gy}), Map ID: {current_map_id}, Map Name: {current_map_name}")
+                navigator._last_printed_position = pos3
+            # Update UI with current location
+            status_queue.put(('__location__', (player_gx, player_gy, current_map_id, current_map_name)))
+
+            # Catch-up logic: scan all triggers across all quests and mark them complete if detected
+            for q in QUESTS:
+                qid_q = q['quest_id']
+                for idx, trg in enumerate(q.get('event_triggers', [])):
+                    tid_q = f"{qid_q}_{idx}"
+                    if not trigger_completed.get(tid_q, False) and evaluator.check_trigger(trg):
+                        trigger_completed[tid_q] = True
+                        with open(trigger_status_file, 'w') as f:
+                            json.dump(trigger_completed, f, indent=4)
+            # Update quest statuses based on completed triggers
+            for q in QUESTS:
+                qid_q = q['quest_id']
+                tids_list = [f"{qid_q}_{i}" for i in range(len(q.get('event_triggers', [])))]
+                if tids_list and all(trigger_completed.get(t_val, False) for t_val in tids_list):
+                    quest_completed[qid_q] = True
+            # Identify and set active quest for navigation (first incomplete)
+            active_i = next((i for i, q in enumerate(QUESTS) if not quest_completed[q['quest_id']]), None)
+            if active_i is not None:
+                active_q = QUESTS[active_i]
+                navigator.set_active_quest(active_q['quest_id'])
+
+            # Update UI: send all trigger and quest statuses
+            for tid, done in trigger_completed.items():
+                status_queue.put((tid, done))
+            for q in QUESTS:
+                status_queue.put((q['quest_id'], quest_completed[q['quest_id']]))
+            # Update prev_map_id for next evaluation
+            evaluator.prev_map_id = current_map_id
+
             clock.tick(30) # FPS
 
     except KeyboardInterrupt:
         print("\nPlay session interrupted by user.")
     finally:
-        env.close() # Ensure environment is closed
+        # Capture trace data and final state before closing (env.close clears them)
+        coords_data = env.path_trace_data.copy()
+        # Capture final emulator state
+        import io
+        end_buf = io.BytesIO()
+        env.pyboy.save_state(end_buf)
+        end_buf.seek(0)
+        # Close environment and pygame
+        env.close()
         pygame.quit()
-    
-    # Saving playthrough actions
-    if recorded_playthrough:
-        if run_dir:
-            # Save actions into the run directory using the CLI-specified name
-            actions_file = run_dir / args.name
-            # Ensure run directory exists
-            run_dir.mkdir(parents=True, exist_ok=True)
+
+        # Saving playthrough actions, coordinates, and end state
+        if recorded_playthrough:
+            # Determine filenames based on --name override
+            if args.name:
+                # Ensure actions filename ends with .json and derive base name
+                if args.name.lower().endswith('.json'):
+                    actions_filename = args.name
+                    name_base = Path(actions_filename).stem
+                else:
+                    actions_filename = args.name + '.json'
+                    name_base = args.name
+                actions_file = run_dir / actions_filename
+                coords_file = run_dir / f"{name_base}_coords.json"
+                end_state_file = run_dir / f"{name_base}_end.state"
+            else:
+                # Default numeric naming
+                actions_file = run_dir / f"quest_id_{name_base}.json"
+                coords_file = run_dir / f"{name_base}_coords.json"
+                end_state_file = run_dir / f"{name_base}_end.state"
             with open(actions_file, "w") as f:
                 json.dump(recorded_playthrough, f, indent=4)
             print(f"Playthrough actions saved to {actions_file}")
+            # Save coordinates trace
+            with open(coords_file, "w") as f:
+                json.dump(coords_data, f, indent=4)
+            print(f"Coordinates saved to {coords_file}")
+            # Save end state
+            with open(end_state_file, "wb") as f:
+                f.write(end_buf.read())
+            print(f"End state saved to {end_state_file}")
+            # Save persistent quest completion state
+            central_status_file = recordings_dir / "quest_status.json"
+            with open(central_status_file, "w") as f:
+                json.dump(quest_completed, f, indent=4)
+            print(f"Quest completion state saved to {central_status_file}")
         else:
-            # Fallback to CLI name in current directory
-            output_path = Path(args.name)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(output_path, "w") as f:
-                json.dump(recorded_playthrough, f, indent=4)
-            print(f"Playthrough actions saved to {output_path}")
-    else:
-        print("No actions recorded.")
+            print("No actions recorded.")
 
 if __name__ == "__main__":
     main()

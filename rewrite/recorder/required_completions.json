@@ -1,0 +1,1104 @@
+[
+    {
+        "quest_id": "001",
+        "begin_quest_text": "Clear game starting screens.",
+        "location_id": 38,
+        "location_name": "Players House Second Floor",
+        "subquest_list": [
+            "Game starts: spam start button until starting dialog with Oak is seen.",
+            "Choose 'New Game'",
+            "Name yourself and press START",
+            "Name your rival and press START",
+            "Spam B to clear the menus until you load into the game. You will find yourself in \"Players House Second Floor.\""
+        ],
+        "end_quest_text": "Clear game starting screens.",
+        "associated_coordinates_file": "001_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 38
+            },
+            {
+                "type": "dialog_contains_text",
+                "text": "awaits! Let's go!"
+            }
+        ]
+    },
+    {
+        "quest_id": "002",
+        "begin_quest_text": "go touch grass.",
+        "location_id": 37,
+        "location_name": "Players House First Floor",
+        "subquest_list": [
+            "Navigate to the stairs in the upper right corner.",
+            "Head down and a little left to exit the house."
+        ],
+        "end_quest_text": "go touch grass.",
+        "associated_coordinates_file": "002_coords.json",
+        "event_triggers": [
+            {
+                "type": "previous_map_id_was",
+                "map_id": 38
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 37
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 37
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 0
+            }
+        ]
+    },
+    {
+        "quest_id": "003",
+        "begin_quest_text": "Try to leave Pallet Town directly to the north. Oak will get you and bring you to his lab.",
+        "location_id": 0,
+        "location_name": "Pallet Town",
+        "subquest_list": [
+            "Try to leave Pallet Town directly to the north. Oak will get you and bring you to his lab."
+        ],
+        "end_quest_text": "Try to leave Pallet Town directly to the north. Oak will get you and bring you to his lab.",
+        "associated_coordinates_file": "003_coords.json",
+        "event_triggers": [
+            {
+                "type": "battle_won",
+                "event_name": "EVENT_FOLLOWED_OAK_INTO_LAB"
+            },
+            {
+                "type": "battle_won",
+                "event_name": "EVENT_FOLLOWED_OAK_INTO_LAB_2"
+            }
+        ]
+    },
+    {
+        "quest_id": "004",
+        "begin_quest_text": "Pick a pokemon. charmander is closest to you.",
+        "location_id": 40,
+        "location_name": "Oaks Lab",
+        "subquest_list": [
+            "Pick a pokemon. charmander is closest to you.",
+            "Try to leave and your rival will battle you.",
+            "Battle your rival, first using growl, then using scratch or tackle.",
+            "Once the battle is over, progress through the dialogs.",
+            "Leave Oaks Lab."
+        ],
+        "end_quest_text": "Get rekt, scrub. See ya, pops! Oh yeah, I'm gonna be the best there ever was, the best there ever will be!",
+        "associated_coordinates_file": "004_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 0
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 40
+            },
+            {
+                "type": "party_size_is",
+                "size": 1
+            },
+            {
+                "type": "battle_won",
+                "opponent_identifier": "RIVAL_OAKSLAB_1",
+                "event_name": "EVENT_BATTLED_RIVAL_IN_OAKS_LAB",
+                "comment": "Ensures rival battle in Oak's lab was won"
+            }
+        ]
+    },
+    {
+        "quest_id": "005",
+        "begin_quest_text": "Walk up to exit Pallet Town.",
+        "location_id": 0,
+        "location_name": "Pallet Town",
+        "subquest_list": [
+            "Walk up to exit Pallet Town."
+        ],
+        "end_quest_text": "Something tells me I haven't seen the last of this bucolic backwater.",
+        "associated_coordinates_file": "005_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 12
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 0
+            }
+        ]
+    },
+    {
+        "quest_id": "006",
+        "begin_quest_text": "Walk up Route 1 to the first NPC and talk to him.",
+        "location_id": 12,
+        "location_name": "Route 1",
+        "subquest_list": [
+            "Walk up Route 1 to the first NPC.",
+            "Talk to the NPC."
+        ],
+        "end_quest_text": "Sweet! Thanks for the potion, guy. Maybe I should check out Viridian City Poke Mart...",
+        "associated_coordinates_file": "006_coords.json",
+        "event_triggers": [
+            {
+                "type": "item_is_in_inventory",
+                "item_name": "POTION",
+                "quantity_min": 1
+            }
+        ]
+    },
+    {
+        "quest_id": "007",
+        "begin_quest_text": "Walk up Route 1 to Viridian City.",
+        "location_id": 12,
+        "location_name": "Route 1",
+        "subquest_list": [
+            "Follow Route 1 north.",
+            "Keep going until you get to Viridian City."
+        ],
+        "end_quest_text": "Route 1 has been traversed, and I find myself in Viridian City.",
+        "associated_coordinates_file": "007_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 1
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 12
+            }
+        ]
+    },
+    {
+        "quest_id": "008",
+        "begin_quest_text": "Find and enter the Poke Mart in Viridian City.",
+        "location_id": 1,
+        "location_name": "Viridian City",
+        "subquest_list": [
+            "Find the Poke Mart in Viridian City.",
+            "Walk up, past the Poke Center, and slightly to the right.",
+            "You will see the Poke Mart.",
+            "Enter the Poke Mart."
+        ],
+        "end_quest_text": "Thirsty. I guess Mom didn't pack me a drink.",
+        "associated_coordinates_file": "008_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 42
+            }
+        ]
+    },
+    {
+        "quest_id": "009",
+        "begin_quest_text": "Receive parcel from the Poke Mart clerk.",
+        "location_id": 42,
+        "location_name": "Pokemart Viridian",
+        "subquest_list": [
+            "Receive parcel from the Poke Mart clerk.",
+            "Then, leave the Poke Mart."
+        ],
+        "end_quest_text": "I'm not sure what I'm supposed to do with this parcel. I'll just hold onto it for now.",
+        "associated_coordinates_file": "009_coords.json",
+        "event_triggers": [
+            {
+                "type": "item_is_in_inventory",
+                "item_name": "OAKS_PARCEL",
+                "quantity_min": 1
+            }
+        ]
+    },
+    {
+        "quest_id": "010",
+        "begin_quest_text": "Leave Viridian City.",
+        "location_id": 1,
+        "location_name": "Viridian City",
+        "subquest_list": [
+            "Walk down and left to leave Viridian City.",
+            "You will be back on Route 1."
+        ],
+        "end_quest_text": "There's no such thing as a free lunch, huh?",
+        "associated_coordinates_file": "010_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 12
+            }
+        ]
+    },
+    {
+        "quest_id": "011",
+        "begin_quest_text": "Return to Pallet Town and enter Oak's Lab.",
+        "location_id": 12,
+        "location_name": "Route 1",
+        "subquest_list": [
+            "Head down Route 1 from Viridian City until you reach Pallet Town.",
+            "Once in Pallet Town, head down and to the right to find Professor Oak's Lab.",
+            "Enter Oak's Lab."
+        ],
+        "end_quest_text": "A wild sense of déjà vu washes over me—back to Oak's Lab, again.",
+        "associated_coordinates_file": "011_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 40
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 0,
+                "comment": "Ensures coming from Pallet Town for this specific return"
+            }
+        ]
+    },
+    {
+        "quest_id": "012",
+        "begin_quest_text": "Speak to Professor Oak to advance the plot.",
+        "location_id": 40,
+        "location_name": "Oaks Lab",
+        "subquest_list": [
+            "Walk straight up in Oak's Lab until you are standing in front of Oak.",
+            "Press A to interact with Professor Oak."
+        ],
+        "end_quest_text": "Professor Oak, dispensing wisdom—and plot devices.",
+        "associated_coordinates_file": "012_coords.json",
+        "event_triggers": [
+            {
+                "type": "dialog_contains_text",
+                "text": "Thank you!"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 40
+            }
+        ]
+    },
+    {
+        "quest_id": "013",
+        "begin_quest_text": "Leave Oak's Lab to return to Pallet Town.",
+        "location_id": 40,
+        "location_name": "Oaks Lab",
+        "subquest_list": [
+            "Travel downward in Oak's Lab until you walk out the door.",
+            "You will be back in Pallet Town."
+        ],
+        "end_quest_text": "Escape velocity achieved. Farewell, Oak's Lab!",
+        "associated_coordinates_file": "013_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 0
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 40
+            }
+        ]
+    },
+    {
+        "quest_id": "014",
+        "begin_quest_text": "Go to Blue's House to get the Town Map.",
+        "location_id": 39,
+        "location_name": "Blues House",
+        "subquest_list": [
+            "Navigate to Blues House, up and to the right from Oak's Lab.",
+            "Enter Blues House."
+        ],
+        "end_quest_text": "The journey of a thousand steps begins with a... map.",
+        "associated_coordinates_file": "014_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 39
+            }
+        ]
+    },
+    {
+        "quest_id": "015",
+        "begin_quest_text": "Get the Town Map from Blue's sister.",
+        "location_id": 39,
+        "location_name": "Blues House",
+        "subquest_list": [
+            "Go up in Blues House until you are standing in front of Blue's sister.",
+            "Press A to interact and receive the Town Map.",
+            "Leave Blues House."
+        ],
+        "end_quest_text": "If only real siblings were this helpful.",
+        "associated_coordinates_file": "015_coords.json",
+        "event_triggers": [
+            {
+                "type": "item_is_in_inventory",
+                "item_name": "TOWN MAP",
+                "quantity_min": 1
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 0
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 39
+            }
+        ]
+    },
+    {
+        "quest_id": "016",
+        "begin_quest_text": "Exit Pallet Town to the north.",
+        "location_id": 0,
+        "location_name": "Pallet Town",
+        "subquest_list": [
+            "Proceed to the left and north to exit Pallet Town.",
+            "You will be on Route 1."
+        ],
+        "end_quest_text": "Grass, bugs, and the open road: my adventure resumes.",
+        "associated_coordinates_file": "016_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 12
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 0
+            }
+        ]
+    },
+    {
+        "quest_id": "017",
+        "begin_quest_text": "Travel up Route 1 to reach Viridian City.",
+        "location_id": 12,
+        "location_name": "Route 1",
+        "subquest_list": [
+            "Proceed up Route 1.",
+            "Continue north until you reach Viridian City.",
+            "Enter the Viridian City Poke Center."
+        ],
+        "end_quest_text": "Made it to Viridian City—my Pokémon are crying for mercy.",
+        "associated_coordinates_file": "017_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 1
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 12
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 41
+            }
+        ]
+    },
+    {
+        "quest_id": "018",
+        "begin_quest_text": "Heal your Pokémon at the Viridian City Pokémon Center.",
+        "location_id": 41,
+        "location_name": "Pokecenter Viridian",
+        "subquest_list": [
+            "Walk straight up in the Poke Center until you are standing in front of Nurse Joy.",
+            "Press A to interact with Nurse Joy.",
+            "Press A a few more times to heal your Pokémon.",
+            "Exit the dialogue."
+        ],
+        "end_quest_text": "All patched up and ready for more bad decisions.",
+        "associated_coordinates_file": "018_coords.json",
+        "event_triggers": [
+            {
+                "type": "dialog_contains_text",
+                "text": "fighting fit!    ▼"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 41
+            }
+        ]
+    },
+    {
+        "quest_id": "019",
+        "begin_quest_text": "Leave the Viridian City Pokémon Center.",
+        "location_id": 41,
+        "location_name": "Pokecenter Viridian",
+        "subquest_list": [
+            "Proceed downwards to leave the Poke Center.",
+            "You will find yourself in Viridian City."
+        ],
+        "end_quest_text": "That distinct aroma of urban grass and commerce.",
+        "associated_coordinates_file": "019_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 1
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 41
+            }
+        ]
+    },
+    {
+        "quest_id": "020",
+        "begin_quest_text": "Find and enter the Viridian City Pokémart.",
+        "location_id": 1,
+        "location_name": "Viridian City",
+        "subquest_list": [
+            "Proceed to the right, then up to find the Viridian City Pokémart.",
+            "Walk up and right to get to the Viridian City Pokémart.",
+            "Enter the Pokémart."
+        ],
+        "end_quest_text": "Time to trade hard-earned cash for Pokéballs and dreams.",
+        "associated_coordinates_file": "020_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 42
+            }
+        ]
+    },
+    {
+        "quest_id": "021",
+        "begin_quest_text": "Buy items at the Viridian City Pokémart.",
+        "location_id": 42,
+        "location_name": "Pokemart Viridian",
+        "subquest_list": [
+            "Walk up to the counter and talk to the clerk.",
+            "Walk up two tiles and left one tile to be in front of the clerk.",
+            "Press A to interact with the clerk."
+        ],
+        "end_quest_text": "The sacred ritual of capitalism, Pokémon style.",
+        "associated_coordinates_file": "021_coords.json",
+        "event_triggers": [
+            {
+                "type": "dialog_contains_text",
+                "text": "May I help you?"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 42
+            }
+        ]
+    },
+    {
+        "quest_id": "022",
+        "begin_quest_text": "Purchase Pokéballs.",
+        "location_id": 42,
+        "location_name": "Pokemart Viridian",
+        "subquest_list": [
+            "Select 'Buy' by pressing A when the cursor is on Buy.",
+            "Move the cursor to Pokéball and press A.",
+            "Press the up arrow until 5 is selected.",
+            "Press A to confirm the purchase.",
+            "Press A again to finalize the Pokéball purchase.",
+            "Exit the dialogue and the Pokémart."
+        ],
+        "end_quest_text": "Shopping spree complete. My wallet is empty but my bag is full.",
+        "associated_coordinates_file": "022_coords.json",
+        "event_triggers": [
+            {
+                "type": "item_is_in_inventory",
+                "item_name": "POKE_BALL",
+                "quantity_min": 4
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 1
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 42
+            }
+        ]
+    },
+    {
+        "quest_id": "023",
+        "begin_quest_text": "Catch a Nidoran♂ on Route 22.",
+        "location_id": 33,
+        "location_name": "Route 22",
+        "subquest_list": [
+            "Head left from Viridian City to Route 22.",
+            "Walk in the grass surrounded by a fence, a ledge, and a wall.",
+            "If a wild Pokémon appears and it's a Nidoran♂: attack it with Scratch twice, then catch it with a Pokéball.",
+            "If it is not a Nidoran♂, defeat it in battle.",
+            "If your Pokémon gets low in health, use a Potion.",
+            "Repeat until you have caught a Nidoran♂."
+        ],
+        "end_quest_text": "Welcome to the squad, Nidoran♂! Sorry, Pidgey.",
+        "associated_coordinates_file": "023_coords.json",
+        "event_triggers": [
+            {
+                "type": "party_pokemon_species_is",
+                "species_name": "NIDORAN_M"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 33
+            }
+        ]
+    },
+    {
+        "quest_id": "024",
+        "begin_quest_text": "Trigger the rival battle on Route 22.",
+        "location_id": 33,
+        "location_name": "Route 22",
+        "subquest_list": [
+            "Walk up through the gap in the ledge, then left.",
+            "Your rival will intercept you."
+        ],
+        "end_quest_text": "Can't take two steps without being challenged. Classic.",
+        "associated_coordinates_file": "024_coords.json",
+        "event_triggers": [
+            {
+                "type": "dialog_contains_text",
+                "text": "get any stronger?"
+            },
+            {
+                "type": "battle_type_is",
+                "battle_type_name": "TRAINER"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 33
+            }
+        ]
+    },
+    {
+        "quest_id": "025",
+        "begin_quest_text": "Defeat your rival on Route 22.",
+        "location_id": 33,
+        "location_name": "Route 22",
+        "subquest_list": [
+            "For each of your rival's Pokémon, use Growl first, once.",
+            "Then use Scratch until that Pokémon faints.",
+            "If your Pokémon gets low on health, use a Potion instead of attacking.",
+            "Repeat until your rival has no Pokémon left."
+        ],
+        "end_quest_text": "Rival has been served a hot plate of humble pie.",
+        "associated_coordinates_file": "025_coords.json",
+        "event_triggers": [
+            {
+                "type": "battle_won",
+                "opponent_identifier": "RIVAL_ROUTE22_1",
+                "event_name": "EVENT_BEAT_ROUTE22_RIVAL_1ST_BATTLE"
+            }
+        ]
+    },
+    {
+        "quest_id": "026",
+        "begin_quest_text": "Head north from Viridian City toward Viridian Forest.",
+        "location_id": 1,
+        "location_name": "Viridian City",
+        "subquest_list": [
+            "Walk back to the middle of Viridian City.",
+            "Heal at the Pokecenter as usual.",
+            "Travel north from the center of Viridian City onto Route 2.",
+            "As you travel north, approach the cuttable tree to your left.",
+            "Press A at the tree to receive a free Potion.",
+            "Return to the main path and continue north until you reach the guardhouse.",
+            "Enter the guardhouse."
+        ],
+        "end_quest_text": "Nature hike complete. One free Potion richer.",
+        "associated_coordinates_file": "026_coords.json",
+        "event_triggers": [
+            {
+                "type": "coordinates_are",
+                "x_min": 90
+            },
+            {
+                "type": "party_hp_is_full"
+            },
+            {
+                "type": "item_received_dialog",
+                "text": "found POTION!"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 50
+            }
+        ]
+    },
+    {
+        "quest_id": "027",
+        "begin_quest_text": "Proceed through the guardhouse to Viridian Forest.",
+        "location_id": 49,
+        "location_name": "Route 2 Guardhouse",
+        "subquest_list": [
+            "Proceed straight up through the guardhouse and exit out the north door.",
+            "You will enter Viridian Forest."
+        ],
+        "end_quest_text": "I've emerged in Viridian Forest, where every bush rustles menacingly.",
+        "associated_coordinates_file": "027_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 51
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 50
+            }
+        ]
+    },
+    {
+        "quest_id": "028",
+        "begin_quest_text": "Begin exploring Viridian Forest.",
+        "location_id": 51,
+        "location_name": "Viridian Forest",
+        "subquest_list": [
+            "Proceed slightly north in Viridian Forest.",
+            "Go to the right, stopping when you see the second NPC."
+        ],
+        "end_quest_text": "Dodged a few Weedles, but there's more bug-catching to come.",
+        "associated_coordinates_file": "028_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 51,
+                "comment": "Player has navigated to the area of the second NPC / first trainer battle of quest 029. Precise coord check or pre-battle dialog for trainer 1 would be better."
+            }
+        ]
+    },
+    {
+        "quest_id": "029",
+        "begin_quest_text": "Battle the first trainer in Viridian Forest.",
+        "location_id": 51,
+        "location_name": "Viridian Forest",
+        "subquest_list": [
+            "Proceed north from the second NPC.",
+            "A trainer will see you and initiate a battle.",
+            "Use Ember (which Charmander should now know) to quickly defeat all bug Pokémon.",
+            "Heal with Potions if necessary."
+        ],
+        "end_quest_text": "Charcoal grilled: bug Pokémon edition.",
+        "associated_coordinates_file": "029_coords.json",
+        "event_triggers": [
+            {
+                "type": "battle_won",
+                "opponent_identifier": "BUG_CATCHER_VF1",
+                "event_name": "EVENT_BEAT_VIRIDIAN_FOREST_TRAINER_0"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 51
+            }
+        ]
+    },
+    {
+        "quest_id": "030",
+        "begin_quest_text": "Battle the next trainer in Viridian Forest.",
+        "location_id": 51,
+        "location_name": "Viridian Forest",
+        "subquest_list": [
+            "Proceed north and engage the next trainer you encounter.",
+            "Use Ember or your strongest moves to win.",
+            "Heal if needed."
+        ],
+        "end_quest_text": "Another trainer, another burnt offering.",
+        "associated_coordinates_file": "030_coords.json",
+        "event_triggers": [
+            {
+                "type": "battle_won",
+                "opponent_identifier": "BUG_CATCHER_VF2",
+                "event_name": "EVENT_BEAT_VIRIDIAN_FOREST_TRAINER_1"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 51
+            }
+        ]
+    },
+    {
+        "quest_id": "031",
+        "begin_quest_text": "Navigate to the exit of Viridian Forest.",
+        "location_id": 51,
+        "location_name": "Viridian Forest",
+        "subquest_list": [
+            "Go up all the way you can, then left all the way you can, then down, then left, then up, then left, then down, then left, then up.",
+            "Battle the last trainer, then proceed straight up and keep going to exit Viridian Forest."
+        ],
+        "end_quest_text": "Light at the end of the forest. Goodbye, bug catchers.",
+        "associated_coordinates_file": "031_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 47
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 51
+            }
+        ]
+    },
+    {
+        "quest_id": "032",
+        "begin_quest_text": "Travel through Route 2 to Pewter City.",
+        "location_id": 13,
+        "location_name": "Route 2",
+        "subquest_list": [
+            "Proceed north through Route 2 after exiting Viridian Forest.",
+            "Continue north and a little east to reach Pewter City.",
+            "Find the Poke Center and enter it."
+        ],
+        "end_quest_text": "Now entering Pewter City: Home of big rocks and bigger egos.",
+        "associated_coordinates_file": "032_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 2
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 13
+            }
+        ]
+    },
+    {
+        "quest_id": "033",
+        "begin_quest_text": "Heal your Pokémon at Pewter City's Pokémon Center.",
+        "location_id": 58,
+        "location_name": "Pewter City Pokémon Center",
+        "subquest_list": [
+            "Once in Pewter City, enter the Pokémon Center (left side of the city).",
+            "Walk straight up to Nurse Joy.",
+            "Press A to interact and heal your Pokémon.",
+            "Exit the dialogue.",
+            "Leave the Poke Center."
+        ],
+        "end_quest_text": "Back to the familiar embrace of free healthcare.",
+        "associated_coordinates_file": "033_coords.json",
+        "event_triggers": [
+            {
+                "type": "dialog_contains_text",
+                "text": "Your POKéMON are fighting fit!"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 58
+            }
+        ]
+    },
+    {
+        "quest_id": "034",
+        "begin_quest_text": "Visit Pewter City's Pokémon Mart.",
+        "location_id": 56,
+        "location_name": "Pewter City Pokémart",
+        "subquest_list": [
+            "Proceed to the right and north in Pewter City to the Pokémart.",
+            "Enter the Pokémart.",
+            "Walk up to the clerk and press A to interact."
+        ],
+        "end_quest_text": "A new city, a new chance to stimulate the local economy.",
+        "associated_coordinates_file": "034_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 56
+            }
+        ]
+    },
+    {
+        "quest_id": "035",
+        "begin_quest_text": "Stock up on Potions at Pewter City's Pokémart.",
+        "location_id": 56,
+        "location_name": "Pewter City Pokémart",
+        "subquest_list": [
+            "Buy as many Potions as possible.",
+            "Leave the Pokémart."
+        ],
+        "end_quest_text": "I own more Potions than the local hospital.",
+        "associated_coordinates_file": "035_coords.json",
+        "event_triggers": [
+            {
+                "type": "item_is_in_inventory",
+                "item_name": "POTION",
+                "quantity_min": 5
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 2
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 56
+            }
+        ]
+    },
+    {
+        "quest_id": "036",
+        "begin_quest_text": "Approach Pewter City Gym.",
+        "location_id": 2,
+        "location_name": "Pewter City",
+        "subquest_list": [
+            "Proceed left to clear the Pokémart.",
+            "Proceed north to clear the Gym.",
+            "Proceed left to walk behind the Gym.",
+            "Proceed down to walk beside the Gym.",
+            "Proceed right to walk in front of the Gym to the Gym door.",
+            "Proceed up to enter the Gym."
+        ],
+        "end_quest_text": "This is it. Gym 1. Time to rock.",
+        "associated_coordinates_file": "036_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 54
+            }
+        ]
+    },
+    {
+        "quest_id": "037",
+        "begin_quest_text": "Battle the first trainer in Pewter City Gym.",
+        "location_id": 54,
+        "location_name": "Pewter City Gym",
+        "subquest_list": [
+            "Proceed straight up to the first trainer in the Gym.",
+            "For each Pokémon the trainer has, use Growl first, then your strongest attack.",
+            "Heal if necessary.",
+            "After winning, return to the Pokémon Center if you need to heal.",
+            "Retrace your path from the Gym to the Pokémon Center.",
+            "Heal your Pokémon at the Pewter City Pokémon Center.",
+            "When healed, return to the Gym to battle the next trainer."
+        ],
+        "end_quest_text": "First Gym trainer down—momentum is building.",
+        "associated_coordinates_file": "037_coords.json",
+        "event_triggers": [
+            {
+                "type": "battle_won",
+                "opponent_identifier": "JR_TRAINER_M_PEWTERGYM",
+                "event_name": "EVENT_BEAT_PEWTER_GYM_TRAINER_0"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 54
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 58
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 2
+            },
+            {
+                "type": "dialog_contains_text",
+                "text": "Your POKéMON are fighting fit!"
+            }
+        ]
+    },
+    {
+        "quest_id": "038",
+        "begin_quest_text": "Return to Pewter City Gym for your badge battle.",
+        "location_id": 2,
+        "location_name": "Pewter City",
+        "subquest_list": [
+            "Leave the Pokecenter.",
+            "Retrace your steps from the Pokémon Center back to Pewter City Gym.",
+            "Enter the Gym."
+        ],
+        "end_quest_text": "The rematch: it's time for Brock.",
+        "associated_coordinates_file": "038_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 54
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 2
+            }
+        ]
+    },
+    {
+        "quest_id": "039",
+        "begin_quest_text": "Challenge and defeat Brock at Pewter City Gym.",
+        "location_id": 54,
+        "location_name": "Pewter City Gym",
+        "subquest_list": [
+            "Proceed straight up to Brock until you are directly in front of him.",
+            "Press A to challenge Brock.",
+            "Defeat Brock using your best tactics.",
+            "Exit all dialogues and leave the Gym to the south."
+        ],
+        "end_quest_text": "Rock solid victory. One badge down, a bunch more to go.",
+        "associated_coordinates_file": "039_coords.json",
+        "event_triggers": [
+            {
+                "type": "badge_is_obtained",
+                "badge_name": "BOULDER"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 2
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 54
+            }
+        ]
+    },
+    {
+        "quest_id": "040",
+        "begin_quest_text": "Heal at the Pokémon Center in Pewter City after your badge win.",
+        "location_id": 2,
+        "location_name": "Pewter City",
+        "subquest_list": [
+            "Head to the Pokémon Center and enter it."
+        ],
+        "end_quest_text": "Healing: an essential post-gym ritual.",
+        "associated_coordinates_file": "040_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 58
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 2
+            }
+        ]
+    },
+    {
+        "quest_id": "041",
+        "begin_quest_text": "Restore your Pokémon at Pewter City's Pokémon Center.",
+        "location_id": 58,
+        "location_name": "Pewter City Pokémon Center",
+        "subquest_list": [
+            "Heal at the Pokémon Center.",
+            "When done, leave the Pokémon Center."
+        ],
+        "end_quest_text": "Team is healed. Ready to roll.",
+        "associated_coordinates_file": "041_coords.json",
+        "event_triggers": [
+            {
+                "type": "dialog_contains_text",
+                "text": "Your POKéMON are fighting fit!"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 2
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 58
+            }
+        ]
+    },
+    {
+        "quest_id": "042",
+        "begin_quest_text": "Exit Pewter City to the right onto Route 3.",
+        "location_id": 2,
+        "location_name": "Pewter City",
+        "subquest_list": [
+            "Exit Pewter City by heading right.",
+            "You will enter Route 3."
+        ],
+        "end_quest_text": "New zone, new challenges. Route 3, here we come.",
+        "associated_coordinates_file": "042_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 14
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 2
+            }
+        ]
+    },
+    {
+        "quest_id": "043",
+        "begin_quest_text": "Begin your journey across Route 3.",
+        "location_id": 14,
+        "location_name": "Route 3",
+        "subquest_list": [
+            "Proceed right on Route 3.",
+            "Battle trainers along the way.",
+            "Level up your Nidoran using switch training: start with Charmander, use Scratch, then switch to Nidoran and use Tackle.",
+            "Don't let Nidoran faint. If needed, heal with Potions.",
+            "Continue until you reach the far right of Route 3."
+        ],
+        "end_quest_text": "Nidoran is beefing up, trainers are in tears.",
+        "associated_coordinates_file": "043_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 14,
+                "comment": "Player has reached the eastern end of Route 3, ready for Route 4 transition. This may need to be tied to defeating all/most trainers on Route 3 or Nidoran reaching a certain level."
+            },
+            {
+                "type": "coordinates_are",
+                "x_min": 173
+            }
+        ]
+    },
+    {
+        "quest_id": "044",
+        "begin_quest_text": "Transition from Route 3 to Route 4.",
+        "location_id": 14,
+        "location_name": "Route 3",
+        "subquest_list": [
+            "At the end of Route 3, backtrack slightly in not aligned with the doorway lead up.",
+            "Align with the doorway leading up, and walk upwards.",
+            "Continue north until you reach Route 4."
+        ],
+        "end_quest_text": "Stepping into Route 4—almost time for a mountain adventure.",
+        "associated_coordinates_file": "044_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 15
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 14
+            }
+        ]
+    },
+    {
+        "quest_id": "045",
+        "begin_quest_text": "Travel up Route 4 to the Mt. Moon Pokémon Center.",
+        "location_id": 15,
+        "location_name": "Route 4",
+        "subquest_list": [
+            "Proceed upwards on Route 4.",
+            "Enter the Mt. Moon Pokémon Center."
+        ],
+        "end_quest_text": "Rest stop before the infamous Mt. Moon grind.",
+        "associated_coordinates_file": "045_coords.json",
+        "event_triggers": [
+            {
+                "type": "current_map_id_is",
+                "map_id": 68
+            }
+        ]
+    },
+    {
+        "quest_id": "046",
+        "begin_quest_text": "Heal and buy a Magikarp at the Mt. Moon Pokémon Center.",
+        "location_id": 68,
+        "location_name": "Mt. Moon Pokémon Center",
+        "subquest_list": [
+            "Heal at the Pokémon Center as usual.",
+            "Talk to the man walking around inside the Pokémon Center.",
+            "Buy the Magikarp from him.",
+            "Exit the Pokémon Center."
+        ],
+        "end_quest_text": "Now the proud owner of a flopping Magikarp. What could go wrong?",
+        "associated_coordinates_file": "046_coords.json",
+        "event_triggers": [
+            {
+                "type": "party_pokemon_species_is",
+                "species_name": "MAGIKARP"
+            },
+            {
+                "type": "current_map_id_is",
+                "map_id": 15
+            },
+            {
+                "type": "previous_map_id_was",
+                "map_id": 68
+            }
+        ]
+    }
+]

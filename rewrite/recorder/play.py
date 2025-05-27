@@ -1,14 +1,14 @@
-# play.py
+# play.py - CLEANED VERSION (showing only key functions)
 import argparse
 import numpy as np
 import json
 import pygame
 import time
-import sys # Added for sys.path manipulation
-import math # Added for custom rounding
+import sys
+import math
 from pathlib import Path
 from typing import Optional
-from omegaconf import OmegaConf  # For loading YAML config overrides
+from omegaconf import OmegaConf
 import threading
 import queue
 import tkinter as tk
@@ -16,28 +16,327 @@ import tkinter.ttk as ttk
 from trigger_evaluator import TriggerEvaluator
 from datetime import datetime
 
-from environment import RedGymEnv, VALID_ACTIONS
+from environment import RedGymEnv, VALID_ACTIONS, PATH_FOLLOW_ACTION
 from pyboy.utils import WindowEvent
 from global_map import local_to_global
-from navigator import InteractiveNavigator # Added import for the navigator class
+from navigator import InteractiveNavigator
+from saver import save_initial_state, save_loop_state, save_final_state
+from warp_tracker import record_warp_step, backtrack_warp_sequence
+from quest_manager import QuestManager
 
 # Add project root for global_map import if play.py is in a subdirectory
-# Assuming play.py is in DATAPlaysPokemon/rewrite/recorder/
 project_root_path = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_root_path))
-
-# global_map is used by navigator.py now, but play.py's sys.path manipulation makes it available.
-# from global_map import local_to_global, global_to_local # No longer directly used in play.py
 
 # Load quest definitions
 QUESTS_FILE = Path(__file__).parent / "required_completions.json"
 with open(QUESTS_FILE, 'r') as f:
     QUESTS = json.load(f)
+
 # Shared queue for UI updates
 status_queue = queue.Queue()
 
-# UI thread function
+def diagnose_environment_coordinate_loading(env, navigator):
+    """Diagnostic protocol for environment coordinate loading accuracy"""
+    
+    print("\n" + "="*60)
+    print("ENVIRONMENT COORDINATE LOADING DIAGNOSTIC")
+    print("="*60)
+    
+    quest_ids_to_test = [12, 13, 14]
+    
+    for quest_id in quest_ids_to_test:
+        print(f"\n--- QUEST {quest_id:03d} ENVIRONMENT LOADING TEST ---")
+        
+        # STEP 1: Direct file content reading
+        quest_dir_name = f"{quest_id:03d}"
+        quest_file_name = f"{quest_dir_name}_coords.json"
+        file_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name
+        
+        if file_path.exists():
+            with open(file_path, 'r') as f:
+                file_content = json.load(f)
+            
+            # Flatten file coordinates for comparison
+            file_coordinates = []
+            for map_coords in file_content.values():
+                file_coordinates.extend([tuple(coord) for coord in map_coords])
+            
+            print(f"File content: {len(file_coordinates)} coordinates")
+            print(f"  Maps: {list(file_content.keys())}")
+            print(f"  First coordinate: {file_coordinates[0] if file_coordinates else 'None'}")
+            print(f"  Last coordinate: {file_coordinates[-1] if file_coordinates else 'None'}")
+            
+            # STEP 2: Environment loading test
+            print(f"\nTesting environment loading...")
+            
+            # Store current environment state
+            original_path = getattr(env, 'combined_path', []).copy()
+            original_quest_id = getattr(env, 'current_loaded_quest_id', None)
+            original_index = getattr(env, 'current_path_target_index', 0)
+            
+            # Test environment coordinate loading
+            env_load_success = env.load_coordinate_path(quest_id)
+            
+            if env_load_success and hasattr(env, 'combined_path') and env.combined_path:
+                env_coordinates = [tuple(coord) for coord in env.combined_path]
+                
+                print(f"Environment loaded: {len(env_coordinates)} coordinates")
+                print(f"  First coordinate: {env_coordinates[0] if env_coordinates else 'None'}")
+                print(f"  Last coordinate: {env_coordinates[-1] if env_coordinates else 'None'}")
+                
+                # STEP 3: Content comparison
+                if file_coordinates == env_coordinates:
+                    print(f"  ✓ MATCH: Environment loaded coordinates match file content exactly")
+                else:
+                    print(f"  ⚠ MISMATCH: Environment coordinates differ from file content")
+                    print(f"    File coords: {len(file_coordinates)}")
+                    print(f"    Env coords: {len(env_coordinates)}")
+                    
+                    # Show first few differences
+                    for i, (file_coord, env_coord) in enumerate(zip(file_coordinates, env_coordinates)):
+                        if file_coord != env_coord:
+                            print(f"    Diff at index {i}: File={file_coord}, Env={env_coord}")
+                            if i >= 3:  # Limit output
+                                break
+            else:
+                print(f"  ✗ Environment loading failed")
+            
+            # STEP 4: Navigator loading test
+            print(f"\nTesting navigator loading...")
+            
+            # Store current navigator state
+            nav_original_coords = navigator.sequential_coordinates.copy() if navigator.sequential_coordinates else []
+            nav_original_index = navigator.current_coordinate_index
+            nav_original_quest_id = getattr(navigator, 'active_quest_id', None)
+            
+            # Test navigator coordinate loading
+            nav_load_success = navigator.load_coordinate_path(quest_id)
+            
+            if nav_load_success and navigator.sequential_coordinates:
+                nav_coordinates = [tuple(coord) for coord in navigator.sequential_coordinates]
+                
+                print(f"Navigator loaded: {len(nav_coordinates)} coordinates")
+                print(f"  First coordinate: {nav_coordinates[0] if nav_coordinates else 'None'}")
+                print(f"  Last coordinate: {nav_coordinates[-1] if nav_coordinates else 'None'}")
+                
+                # STEP 5: Navigator-Environment comparison
+                if hasattr(env, 'combined_path') and env.combined_path:
+                    if nav_coordinates == env_coordinates:
+                        print(f"  ✓ Navigator-Environment coordination: SYNCHRONIZED")
+                    else:
+                        print(f"  ⚠ Navigator-Environment coordination: DESYNCHRONIZED")
+                
+                # STEP 6: Navigator-File comparison
+                if nav_coordinates == file_coordinates:
+                    print(f"  ✓ Navigator-File accuracy: ACCURATE")
+                else:
+                    print(f"  ⚠ Navigator-File accuracy: INACCURATE")
+            else:
+                print(f"  ✗ Navigator loading failed")
+            
+            # Restore states
+            env.combined_path = original_path
+            env.current_loaded_quest_id = original_quest_id
+            env.current_path_target_index = original_index
+            
+            navigator.sequential_coordinates = nav_original_coords
+            navigator.current_coordinate_index = nav_original_index
+            navigator.active_quest_id = nav_original_quest_id
+            
+        else:
+            print(f"✗ Coordinate file not found: {file_path}")
+    
+    print("\n" + "="*60)
+    print("DIAGNOSTIC COMPLETE")
+    print("="*60)
+
+def debug_coordinate_system(env, navigator):
+    """Comprehensive debug of the coordinate system with synchronized path checking"""
+    print("\n" + "="*60)
+    print("COORDINATE SYSTEM DEBUG")
+    print("="*60)
+    
+    # Get current player position
+    try:
+        player_x, player_y, map_n = env.get_game_coords()
+        current_gy, current_gx = local_to_global(player_y, player_x, map_n)
+        print(f"Current Player Position: ({current_gy}, {current_gx}) on map {map_n}")
+    except Exception as e:
+        print(f"ERROR getting player position: {e}")
+        return
+    
+    # Check navigator coordinates
+    print(f"\n--- NAVIGATOR STATUS ---")
+    print(f"Navigator coordinates loaded: {len(navigator.sequential_coordinates)}")
+    if navigator.sequential_coordinates:
+        print(f"Navigator first coordinate: {navigator.sequential_coordinates[0]}")
+        print(f"Navigator current index: {navigator.current_coordinate_index}")
+        if navigator.current_coordinate_index < len(navigator.sequential_coordinates):
+            target = navigator.sequential_coordinates[navigator.current_coordinate_index]
+            print(f"Navigator current target: {target}")
+            distance = abs(target[0] - current_gy) + abs(target[1] - current_gx)
+            print(f"Distance to navigator target: {distance}")
+    else:
+        print("Navigator: NO COORDINATES LOADED!")
+    
+    # Check environment coordinates
+    print(f"\n--- ENVIRONMENT STATUS ---")
+    if hasattr(env, 'combined_path') and env.combined_path:
+        print(f"Environment path length: {len(env.combined_path)}")
+        print(f"Environment first coordinate: {env.combined_path[0]}")
+        print(f"Environment current index: {env.current_path_target_index}")
+        if env.current_path_target_index < len(env.combined_path):
+            target = env.combined_path[env.current_path_target_index]
+            print(f"Environment current target: {target}")
+            distance = abs(target[0] - current_gy) + abs(target[1] - current_gx)
+            print(f"Distance to environment target: {distance}")
+    else:
+        print("Environment: NO PATH LOADED!")
+    
+    # CORRECTED: Check coordinate file accessibility using navigator's actual search paths
+    print(f"\n--- COORDINATE FILE VALIDATION ---")
+    quest_ids_to_check = [12, 13, 14]
+    
+    for quest_id in quest_ids_to_check:
+        quest_dir_name = f"{quest_id:03d}"
+        quest_file_name = f"{quest_dir_name}_coords.json"
+        
+        # Use same path logic as navigator
+        primary_quest_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name
+        
+        file_status = "EXISTS" if primary_quest_path.exists() else "MISSING"
+        print(f"Quest file {quest_file_name}: {file_status}")
+        
+        # Additional content validation if file exists
+        if primary_quest_path.exists():
+            try:
+                with open(primary_quest_path, 'r') as f:
+                    content = json.load(f)
+                map_keys = list(content.keys())
+                total_coords = sum(len(coords) for coords in content.values())
+                print(f"  → Content: {len(map_keys)} maps, {total_coords} total coordinates")
+                print(f"  → Maps: {map_keys}")
+            except Exception as e:
+                print(f"  → Content Error: {e}")
+
+def verify_quest_system_integrity(env, navigator):
+    """Comprehensive quest system validation protocol with content verification"""
+    
+    # Phase 1: File System Verification with correct paths
+    quest_files = ['012_coords.json', '013_coords.json', '014_coords.json']
+    print("=== COORDINATE FILE ACCESSIBILITY VERIFICATION ===")
+    
+    for quest_id, file_name in zip([12, 13, 14], quest_files):
+        quest_dir_name = f"{quest_id:03d}"
+        file_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / file_name
+        
+        status = "EXISTS" if file_path.exists() else "MISSING"
+        print(f"Quest file {file_name}: {status}")
+        
+        if file_path.exists():
+            # Validate content structure
+            try:
+                with open(file_path, 'r') as f:
+                    content = json.load(f)
+                print(f"  → Structure: {list(content.keys())} maps")
+                for map_id, coords in content.items():
+                    print(f"    Map {map_id}: {len(coords)} coordinates")
+                    if coords:
+                        print(f"      First: {coords[0]}, Last: {coords[-1]}")
+            except Exception as e:
+                print(f"  → Content validation error: {e}")
+    
+    # Phase 2: Quest Load Sequence Testing with content verification
+    print(f"\n=== QUEST LOADING CONTENT VERIFICATION ===")
+    for quest_id in [12, 13, 14]:
+        print(f"\n--- TESTING QUEST {quest_id:03d} LOAD ---")
+        
+        # Store original navigator state
+        original_coords = navigator.sequential_coordinates.copy() if navigator.sequential_coordinates else []
+        original_index = navigator.current_coordinate_index
+        original_quest_id = getattr(navigator, 'active_quest_id', None)
+        
+        # Test quest loading
+        success = navigator.load_coordinate_path(quest_id)
+        if success:
+            print(f"✓ Quest {quest_id:03d}: {len(navigator.sequential_coordinates)} coordinates loaded")
+            if navigator.sequential_coordinates:
+                print(f"  First: {navigator.sequential_coordinates[0]}")
+                print(f"  Last: {navigator.sequential_coordinates[-1]}")
+                
+                # Content uniqueness verification
+                coord_set = set(navigator.sequential_coordinates)
+                print(f"  Unique coordinates: {len(coord_set)}/{len(navigator.sequential_coordinates)}")
+                
+                # Validate against expected content
+                quest_dir_name = f"{quest_id:03d}"
+                quest_file_name = f"{quest_dir_name}_coords.json"
+                file_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name
+                
+                if file_path.exists():
+                    with open(file_path, 'r') as f:
+                        expected_content = json.load(f)
+                    
+                    # Flatten expected coordinates for comparison
+                    expected_coords = []
+                    for map_coords in expected_content.values():
+                        expected_coords.extend([tuple(coord) for coord in map_coords])
+                    
+                    loaded_coords = [tuple(coord) for coord in navigator.sequential_coordinates]
+                    
+                    if loaded_coords == expected_coords:
+                        print(f"  ✓ Content matches file exactly")
+                    else:
+                        print(f"  ⚠ Content mismatch detected")
+                        print(f"    Expected: {len(expected_coords)} coords")
+                        print(f"    Loaded: {len(loaded_coords)} coords")
+        else:
+            print(f"✗ Quest {quest_id:03d}: LOAD FAILED")
+        
+        # Restore original navigator state
+        navigator.sequential_coordinates = original_coords
+        navigator.current_coordinate_index = original_index
+        navigator.active_quest_id = original_quest_id
+    
+    # Phase 3: Position Alignment Verification  
+    current_pos = navigator._get_player_global_coords()
+    print(f"\nCurrent player position: {current_pos}")
+    
+    return True
+
+def determine_starting_quest(player_pos, map_id, completed_quests, quest_ids_all):
+    """Determine the most appropriate starting quest based on player position and game state"""
+    
+    # Position-based quest recommendations
+    if map_id == 40:  # Oak's Lab
+        if player_pos and player_pos in [(356, 110), (355, 110), (354, 110), (353, 110), (352, 110), (351, 110), (350, 110), (349, 110), (348, 110)]:
+            # Player is on Quest 012 path coordinates
+            if not completed_quests.get(12, False):
+                return 12
+            elif not completed_quests.get(13, False):
+                return 13
+        # Default Oak's Lab quest
+        for quest_id in [12, 13]:
+            if not completed_quests.get(quest_id, False):
+                return quest_id
+    
+    elif map_id == 0:  # Pallet Town
+        # Check if player is on quest 13 or 14 coordinates
+        if not completed_quests.get(13, False):
+            return 13
+        elif not completed_quests.get(14, False):
+            return 14
+    
+    # Fallback: First uncompleted quest
+    for quest_id in quest_ids_all:
+        if not completed_quests.get(quest_id, False):
+            return quest_id
+    
+    return quest_ids_all[0]  # Ultimate fallback
+
 def start_quest_ui():
+    """Start the quest progress UI in a separate thread"""
     root = tk.Tk()
     # Make window large and non-resizable
     root.title("Quest Progress")
@@ -81,6 +380,9 @@ def start_quest_ui():
     # Label for current location
     location_label = tk.Label(root, text="Location: N/A")
     location_label.pack(side='top', fill='x')
+    # Label for displaying current quest ID
+    quest_label = tk.Label(root, text="Current Quest: N/A")
+    quest_label.pack(side='top', fill='x')
 
     # Function to describe trigger criteria
     def describe_trigger(trg):
@@ -104,18 +406,23 @@ def start_quest_ui():
         else:
             return str(trg)
 
-    # Populate rows with quests and their criteria
+    # Populate rows with quests, subquests, and their criteria
     for q in QUESTS:
         qid = q['quest_id']
         # Insert quest as parent with description
         parent_text = f"Quest {qid}: {q.get('begin_quest_text','')}"
         tree.insert('', 'end', iid=qid, text=parent_text, values=('Pending',))
+        # Insert subquests (step descriptions) as children
+        for sidx, step in enumerate(q.get('subquest_list', [])):
+            sub_id = f"{qid}_step_{sidx}"
+            sub_text = f"Step {sidx+1}: {step}"
+            tree.insert(qid, 'end', iid=sub_id, text=sub_text, values=('Pending',))
         # Insert criteria as children
         for idx, trg in enumerate(q.get('event_triggers', [])):
             trigger_id = f"{qid}_{idx}"
             crit_text = describe_trigger(trg)
             tree.insert(qid, 'end', iid=trigger_id, text=crit_text, values=('Pending',))
-    # Auto-expand all quests to show triggers
+    # Auto-expand all quests to show triggers and steps
     for q in QUESTS:
         tree.item(q['quest_id'], open=True)
 
@@ -127,8 +434,11 @@ def start_quest_ui():
             qid = q['quest_id']
             if qid not in root_ids:
                 continue
+            print(f"play.py: snap_to_current(): quest_id={qid} (checking)")
             if tree.set(qid, 'status') == 'Pending':
                 tree.see(qid)
+                print(f"play.py: snap_to_current(): quest_id={qid} (snapped)")
+                status_queue.put(('__current_quest__', qid))
                 break
     # One-time snap flag for polling
     snapped = [False]
@@ -141,6 +451,11 @@ def start_quest_ui():
                 if item_id == '__location__':
                     gx, gy, map_id, map_name = data
                     location_label.config(text=f"Location: ({gx}, {gy}), Map ID: {map_id}, {map_name}")
+                elif item_id == '__current_quest__':
+                    print(f"play.py: poll(): data: Current quest: {data}")
+                    # Always display a zero-padded quest ID or N/A if None
+                    quest_str = str(data).zfill(3) if data is not None else 'N/A'
+                    quest_label.config(text=f"Current Quest: {quest_str}")
                 else:
                     # Remove fully completed quests from display
                     if '_' not in item_id and data:
@@ -164,9 +479,6 @@ def start_quest_ui():
         root.after(200, poll)
     root.after(200, poll)
     root.mainloop()
-
-# Start the UI thread
-threading.Thread(target=start_quest_ui, daemon=True).start()
 
 def process_frame_for_pygame(frame_from_env_render):
     if frame_from_env_render.ndim == 2: # Grayscale
@@ -210,7 +522,6 @@ def get_default_config(rom_path, initial_state_path, infinite_money=False, infin
             else:
                 print(f"Initial state file not found at {state_file}, starting new game.")
                 init_state_name = None
-
 
     return {
         "video_dir": Path("./videos/play_sessions/"),
@@ -264,52 +575,8 @@ ACTION_MAPPING_PYGAME_TO_INT = {
     pygame.K_a: VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_A),
     pygame.K_s: VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_B),
     pygame.K_RETURN: VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_START),
+    pygame.K_5: PATH_FOLLOW_ACTION,
 }
-
-# InteractiveNavigator CLASS DEFINITION SHOULD BE ENTIRELY REMOVED FROM HERE #
-# (Ensuring the diff removes the whole class from its original start to end)
-
-# Function to handle navigation input, to be called from main Pygame loop
-def handle_navigation_input_interactive(navigator: InteractiveNavigator):
-    try:
-        print("\n== SET NAVIGATION TARGET (GLOBAL COORDINATES) ==")
-        gx_str = input("Enter target GLOBAL X coordinate: ")
-        gy_str = input("Enter target GLOBAL Y coordinate: ")
-        target_gx = int(gx_str)
-        target_gy = int(gy_str)
-        
-        # Basic validation if needed, e.g., are they reasonable numbers?
-        # For now, we'll assume valid integers.
-        
-        navigator.set_navigation_goal_global(target_gx, target_gy)
-        # The set_navigation_goal_global method will print its own confirmation.
-
-    except ValueError:
-        print("Invalid input. Please enter numbers for global X and Y coordinates.")
-    except Exception as e:
-        print(f"Error setting global navigation target: {e}")
-
-def handle_follow_path_interactive(navigator: InteractiveNavigator):
-    """Prompt for number of steps, return to path, and walk step-by-step."""
-    try:
-        print("\n== FOLLOW RECORDED QUEST PATH STEPS ==")
-        steps = int(input("Enter number of steps to follow along recorded path: "))
-        # Ensure we're back on the recorded path before stepping
-        navigator.check_json_path_stagnation_and_assist()
-        # Step through each move one at a time
-        for i in range(steps):
-            print(f"-- Follow step {i+1}/{steps} --")
-            # Schedule next single step; stop if no more path
-            if not navigator.schedule_next_path_step():
-                break
-            # Execute this segment until complete
-            while navigator.navigation_status in ["planning", "navigating"]:
-                msg, action_int, step_res = navigator.step()
-                if msg:
-                    print(msg)
-        print("Navigator: Completed requested follow-path steps.")
-    except Exception as e:
-        print(f"Invalid input for follow_path: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description='Play Pokemon Red interactively and record actions')
@@ -335,16 +602,22 @@ def main():
     # Set up run directory for quest/trigger persistence
     recordings_dir = Path(__file__).parent / "replays" / "recordings"
     recordings_dir.mkdir(parents=True, exist_ok=True)
+    # Track previous run directory for status loading
+    prev_dir = None
     # Determine naming base: use provided --name or reuse latest numeric run
     if args.name:
         name_base = Path(args.name).stem
     else:
         existing_dirs = [d for d in recordings_dir.iterdir() if d.is_dir() and d.name.isdigit()]
         if existing_dirs:
-            max_id = max((int(d.name) for d in existing_dirs))
-            name_base = f"{max_id:03d}"
-            # If an end state exists from the last run, load it
-            prev_end = recordings_dir / name_base / f"{name_base}_end.state"
+            max_id = max(int(d.name) for d in existing_dirs)
+            # Increment to create a new run ID
+            next_id = max_id + 1
+            name_base = f"{next_id:03d}"
+            # Remember the previous run directory for status loading
+            prev_dir = recordings_dir / f"{max_id:03d}"
+            # If an end state exists from the last run, load it from the previous ID
+            prev_end = recordings_dir / f"{max_id:03d}" / f"{max_id:03d}_end.state"
             if prev_end.is_file():
                 args.state = str(prev_end)
         else:
@@ -370,69 +643,151 @@ def main():
     # Disable automatic environment replay directory creation; manual run_dir will be used
     env.record_replays = False
     navigator = InteractiveNavigator(env) # Initialize navigator
-    
+    # Make navigator available to QuestManager for current quest tracking
+    env.navigator = navigator
+    # Initialize quest manager to enforce quest-specific rules
+    quest_manager = QuestManager(env)
+
     obs, info = env.reset() # Initial reset
     # Use our play.py run_dir for path trace recording AFTER reset has cleared env.current_run_dir
     env.current_run_dir = run_dir
 
     # Save initial state to run directory
-    import io
-    start_buf = io.BytesIO()
-    env.pyboy.save_state(start_buf)
-    start_buf.seek(0)
-    # Name initial state file based on name_base
-    start_state_file = run_dir / f"{name_base}_start.state"
-    with open(start_state_file, "wb") as f:
-        f.write(start_buf.read())
-    print(f"Start state saved to {start_state_file}")
+    save_initial_state(env, run_dir, name_base)
     # Log initial coordinate in path trace
     env.update_path_trace()
 
     recorded_playthrough = []
-    # Initialize fresh completion state for this run (ignore JSON defaults)
-    quest_completed = {q['quest_id']: False for q in QUESTS}
+    # Track quest completion by integer quest IDs
+    quest_completed = {int(q['quest_id']): False for q in QUESTS}
     trigger_completed = {}
     for q in QUESTS:
         qid = q['quest_id']
-        for idx, trg in enumerate(q.get('event_triggers', [])):
+        for idx, _ in enumerate(q.get('event_triggers', [])):
             tid = f"{qid}_{idx}"
             trigger_completed[tid] = False
-    # Clear completed flags in QUESTS definitions to reflect fresh run
-    for q in QUESTS:
-        q['completed'] = False
-        for trg in q.get('event_triggers', []):
-            trg['completed'] = False
-
-    # Override with persisted statuses if available
-    qstatus_file = run_dir / "quest_status.json"
+    # Determine status directory: previous run dir if exists, else current run dir
+    status_dir = prev_dir if prev_dir is not None else run_dir
+    # Load persisted quest statuses
+    qstatus_file = status_dir / "quest_status.json"
     if qstatus_file.is_file():
         try:
-            with open(qstatus_file) as f:
-                loaded_q = json.load(f)
-            for qid, val in loaded_q.items():
-                if qid in quest_completed:
-                    quest_completed[qid] = bool(val)
+            loaded_q = json.load(qstatus_file.open())
+            for qid_str, val in loaded_q.items():
+                qid_int = int(qid_str)
+                if qid_int in quest_completed:
+                    quest_completed[qid_int] = bool(val)
         except Exception:
             pass
-    tstatus_file = run_dir / "trigger_status.json"
+    # Load persisted trigger statuses
+    tstatus_file = status_dir / "trigger_status.json"
     if tstatus_file.is_file():
         try:
-            with open(tstatus_file) as f:
-                loaded_t = json.load(f)
+            loaded_t = json.load(tstatus_file.open())
             for tid, val in loaded_t.items():
                 if tid in trigger_completed:
                     trigger_completed[tid] = bool(val)
         except Exception:
             pass
-
-    # Sync in-memory QUESTS definitions with loaded statuses
+    # Reflect loaded statuses in QUESTS definitions
     for q in QUESTS:
-        qid = q['quest_id']
-        q['completed'] = quest_completed.get(qid, False)
+        qid_str = q['quest_id']
+        qid_int = int(qid_str)
+        q['completed'] = quest_completed.get(qid_int, False)
         for idx, trg in enumerate(q.get('event_triggers', [])):
-            tid = f"{qid}_{idx}"
+            tid = f"{qid_str}_{idx}"
             trg['completed'] = trigger_completed.get(tid, False)
 
+    # ------------------------------------------------------------------
+    # CORRECTED: Determine and initialize the current quest based on completion and map availability
+    # Capture current map for initial quest selection
+    current_map_id_for_init = env.get_game_coords()[2]
+    current_player_pos = None
+    try:
+        player_x, player_y, _ = env.get_game_coords()
+        current_player_pos = local_to_global(player_y, player_x, current_map_id_for_init)
+    except Exception:
+        current_player_pos = None
+
+    # Dynamically determine all quest IDs from definitions
+    quest_ids_all = sorted(int(q['quest_id']) for q in QUESTS)
+
+    # CORRECTED: Intelligent quest selection with position analysis
+    recommended_quest = determine_starting_quest(current_player_pos, current_map_id_for_init, quest_completed, quest_ids_all)
+    # Persist quest across reloads: if resuming from a previous run, resume next pending quest
+    if prev_dir is not None:
+        for qid in quest_ids_all:
+            if not quest_completed.get(qid, False):
+                recommended_quest = qid
+                print(f"Resuming quest: {recommended_quest:03d} from previous session")
+                break
+    start_checking_from_idx = quest_ids_all.index(recommended_quest) if recommended_quest in quest_ids_all else 0
+
+    print("Attempting to find and load initial quest path...")
+    print(f"Player position: {current_player_pos} on map {current_map_id_for_init}")
+    print(f"Recommended starting quest: {recommended_quest:03d}")
+    print(f"Starting quest search from Quest {quest_ids_all[start_checking_from_idx]:03d}")
+
+    # ENHANCED: Primary quest loading sequence with comprehensive validation and content verification
+    # Track which quest we actually load for UI tracking
+    initial_loaded_quest_id = None
+    for i in range(start_checking_from_idx, len(quest_ids_all)):
+        q_id_int = quest_ids_all[i]
+        quest_detail = next((q for q in QUESTS if q['quest_id'] == q_id_int), None)
+
+        if quest_detail and not quest_completed.get(q_id_int, False):
+            print(f"Attempting to load coordinates for Quest {q_id_int:03d}...")
+            
+            # VALIDATION: Pre-check coordinate file existence with correct path structure
+            quest_dir_name = f"{q_id_int:03d}"
+            quest_file_name = f"{quest_dir_name}_coords.json"
+            coord_file_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name
+            
+            if not coord_file_path.exists():
+                print(f"WARNING: Coordinate file {quest_file_name} not found at {coord_file_path}")
+                continue
+                
+            # CONTENT VALIDATION: Verify coordinate file structure before loading
+            try:
+                with open(coord_file_path, 'r') as f:
+                    coord_content = json.load(f)
+                
+                total_coords = sum(len(coords) for coords in coord_content.values())
+                map_keys = list(coord_content.keys())
+                print(f"  → Coordinate file structure: {len(map_keys)} maps, {total_coords} coordinates")
+                
+                if total_coords == 0:
+                    print(f"  → WARNING: No coordinates found in file")
+                    continue
+                    
+            except Exception as e:
+                print(f"  → ERROR: Failed to validate coordinate file content: {e}")
+                continue
+                
+            # Attempt coordinate loading with validated file
+            if navigator.load_coordinate_path(q_id_int):
+                # Remember this as the loaded quest for correct ID tracking
+                initial_loaded_quest_id = q_id_int
+                print(f"Successfully loaded initial path for Quest {q_id_int:03d} on map {current_map_id_for_init}.")
+                
+                # CONTENT VERIFICATION: Ensure loaded coordinates match file content
+                loaded_coord_count = len(navigator.sequential_coordinates)
+                if loaded_coord_count == total_coords:
+                    print(f"  ✓ Coordinate count verification passed: {loaded_coord_count} coordinates")
+                else:
+                    print(f"  ⚠ Coordinate count mismatch: loaded {loaded_coord_count}, expected {total_coords}")
+                
+                break
+            else:
+                print(f"Could not load or process coordinate file for Quest {q_id_int:03d} on map {current_map_id_for_init}. Trying next quest.")
+
+    # Ensure we always have a quest ID for UI
+    if initial_loaded_quest_id is None:
+        initial_loaded_quest_id = recommended_quest
+    # Sync to environment, navigator, and QuestManager
+    env.current_loaded_quest_id = initial_loaded_quest_id
+    navigator.active_quest_id = initial_loaded_quest_id
+    quest_manager.current_quest_id = initial_loaded_quest_id
     # Seed UI with persisted trigger and quest statuses
     evaluator = TriggerEvaluator(env)
     evaluator.prev_map_id = env.get_game_coords()[2]
@@ -443,7 +798,9 @@ def main():
             tid = f"{qid}_{idx}"
             status_queue.put((tid, trigger_completed.get(tid, False)))
         # Update quest status
-        status_queue.put((qid, quest_completed.get(qid, False)))
+        status_queue.put((qid, quest_completed.get(int(qid), False)))
+    # Launch the Quest Progress HUD in its own thread
+    threading.Thread(target=start_quest_ui, daemon=True).start()
     debounce_time = 0.1 # seconds for manual input debounce
     last_action_time = 0
 
@@ -475,6 +832,7 @@ def main():
     print("Press 4 to return to recorded quest path.")
     print("Press 5 to follow path steps.")
     print("Press ESC to quit and save.")
+    print("Press 7 to backtrack warp sequence.")
 
     running = True
     try:
@@ -483,7 +841,6 @@ def main():
             current_time_sec = pygame.time.get_ticks() / 1000.0
             keys_pressed_this_frame = False
 
-            # Handle Pygame events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
@@ -496,89 +853,70 @@ def main():
                         pygame.image.save(screen, str(screenshot_path))
                         print(f"Screenshot saved to {screenshot_path}")
 
-                    elif event.key == pygame.K_4: # Snap to nearest recorded path coordinate
-                        print("Navigator: Snapping to nearest coordinate on recorded path.")
-                        if navigator.snap_to_nearest_coordinate():
-                            print("Navigator: Successfully snapped to nearest coordinate.")
-                        else:
-                            print("Navigator: Failed to snap to nearest coordinate.")
+                    elif event.key == pygame.K_7:
+                        backtrack_warp_sequence(env, navigator)
+                        
 
-                    elif event.key == pygame.K_5: # Move to next coordinate in sequence with automatic warp traversal
+                    elif event.key == pygame.K_d:  # NEW: Debug coordinate system
+                        print("\n" + "="*60)
+                        print("DEBUG KEY PRESSED - ANALYZING COORDINATE SYSTEM")
+                        print("="*60)
+                        
+                        # Run comprehensive debug
+                        debug_coordinate_system(env, navigator)
+                        verify_quest_system_integrity(env, navigator)
+                        diagnose_environment_coordinate_loading(env, navigator)
+                        
+                        # Check if coordinates need to be loaded
+                        if len(navigator.sequential_coordinates) == 0:
+                            print("\nNavigator has no coordinates - attempting to load...")
+                            navigator.load_coordinate_path(12)
+                        
+                        if not hasattr(env, 'combined_path') or not env.combined_path:
+                            print("\nEnvironment has no path - attempting to load quest 12...")
+                            env.load_coordinate_path(quest_id=12)
+                        
+                        # Final status check
+                        print("\n--- FINAL STATUS AFTER DEBUG ---")
+                        debug_coordinate_system(env, navigator)
+
+                    # On '4' key: Snap navigator and environment to the nearest coordinate in the current quest path
+                    elif event.key == pygame.K_4:  # Snap to nearest recorded path coordinate
+                        # Check if dialog/battle is active
                         raw_dialog = env.read_dialog() or ''
-                        if raw_dialog.strip():
+                        in_battle = env.read_m("wIsInBattle") != 0
+                        if raw_dialog.strip() and in_battle:
+                            print("Navigation paused: dialog/battle active, cannot snap to path.")
+                        else:
+                            print("play.py: main(): Snapping to nearest coordinate on recorded path.")
+                            # Ensure current quest is loaded
+                            if not navigator.sequential_coordinates:
+                                qid = quest_ids_all[start_checking_from_idx]
+                                navigator.load_coordinate_path(int(qid))
+                            # Snap navigator and environment
+                            if navigator.snap_to_nearest_coordinate():
+                                if hasattr(env, 'snap_to_nearest_path_coordinate'):
+                                    env.snap_to_nearest_path_coordinate()
+                                print(navigator.get_current_status())
+                            else:
+                                print("Navigator: Failed to snap to nearest coordinate.")
+
+                    # On '5' key: Move to next coordinate (quest path)
+                    elif event.key == pygame.K_5:  # Move to next coordinate (quest path)
+                        # Pause if dialog/battle active
+                        raw_dialog = env.read_dialog() or ''
+                        in_battle = env.read_m("wIsInBattle") != 0
+                        if raw_dialog.strip() and in_battle:
                             print("Navigation paused: dialog active, cannot move to next coordinate.")
                         else:
-                            # First check for warps that need traversal (including adjacent ones)
-                            is_adjacent_warp, adjacent_warp_info, required_direction = navigator._find_adjacent_warp_for_navigation()
-                            
-                            if is_adjacent_warp and adjacent_warp_info and required_direction is not None:
-                                # Automatic adjacent warp traversal logic
-                                try:
-                                    # Map direction values to pygame keys and action descriptions
-                                    direction_to_key_and_name = {
-                                        0: (pygame.K_DOWN, "DOWN"),     # direction 0 = down
-                                        4: (pygame.K_UP, "UP"),         # direction 4 = up  
-                                        8: (pygame.K_LEFT, "LEFT"),     # direction 8 = left
-                                        12: (pygame.K_RIGHT, "RIGHT")   # direction 12 = right
-                                    }
-                                    
-                                    warp_target = adjacent_warp_info.get('target_map_name', 'unknown')
-                                    
-                                    if required_direction in direction_to_key_and_name:
-                                        pygame_key, direction_name = direction_to_key_and_name[required_direction]
-                                        print(f"Navigator: Adjacent warp detected. Moving {direction_name} to traverse warp to {warp_target}")
-                                        
-                                        if pygame_key in ACTION_MAPPING_PYGAME_TO_INT:
-                                            warp_action = ACTION_MAPPING_PYGAME_TO_INT[pygame_key]
-                                            obs, reward, terminated, truncated, info = env.step(warp_action)
-                                            executed_action_this_frame = warp_action
-                                            
-                                            # Record the warp traversal action
-                                            recorded_playthrough.append(executed_action_this_frame)
-                                            
-                                            print(f"Navigator: Adjacent warp traversal completed to {warp_target}")
-                                            
-                                            # Update navigator's position tracking after warp
-                                            navigator.last_position = None  # Force position update on next check
-                                        else:
-                                            print(f"Navigator: Error - Direction key {pygame_key} not found in action mapping")
-                                    else:
-                                        print(f"Navigator: Error - Unknown required direction {required_direction}")
-                                        
-                                except Exception as e:
-                                    print(f"Navigator: Error during adjacent warp traversal: {e}")
-                                    # Fall back to normal navigation
-                                    print("Navigator: Adjacent warp traversal failed. Attempting normal coordinate navigation.")
-                                    is_adjacent_warp = False  # Force fallback to normal navigation
-                            
-                            # If no adjacent warp needs traversal, proceed with normal coordinate navigation
-                            if not is_adjacent_warp:
-                                # Check if Shift is held for multiple steps
-                                mods = pygame.key.get_mods()
-                                if mods & pygame.KMOD_SHIFT:
-                                    # Shift+5: Move 5 steps forward
-                                    steps = 5
-                                    print(f"Navigator: Moving {steps} steps forward in coordinate sequence.")
-                                    success_count = 0
-                                    for i in range(steps):
-                                        if navigator.move_to_next_coordinate():
-                                            success_count += 1
-                                            print(f"Navigator: Step {i+1}/{steps} completed.")
-                                        else:
-                                            print(f"Navigator: Step {i+1}/{steps} failed - stopping sequence.")
-                                            break
-                                    print(f"Navigator: Completed {success_count}/{steps} coordinate movements.")
-                                else:
-                                    # Regular 5: Move one step forward
-                                    print("Navigator: Moving to next coordinate in sequence.")
-                                    if navigator.move_to_next_coordinate():
-                                        current_pos = navigator._get_player_global_coords()
-                                        index = navigator.current_coordinate_index
-                                        total = len(navigator.sequential_coordinates)
-                                        print(f"Navigator: Successfully moved to coordinate {current_pos} (index {index}/{total}).")
-                                    else:
-                                        print("Navigator: Failed to move to next coordinate.")
-                    
+                            print("Navigator: Moving one step along current-map segment")
+                            # Attempt to move to next coordinate; do not exit on failure
+                            moved = navigator.move_to_next_coordinate()
+                            if moved:
+                                print(navigator.get_current_status())
+                            else:
+                                print("Navigator: No next coordinate or move failed (path complete).")
+
                     # Check for manual game control keys ONLY if navigation is not actively overriding
                     elif navigator.navigation_status in ["idle", "completed", "failed"]:
                         if current_time_sec - last_action_time > debounce_time: # Check debounce for manual keys
@@ -586,7 +924,8 @@ def main():
                                 manual_action_to_take = ACTION_MAPPING_PYGAME_TO_INT[event.key]
                                 last_action_time = current_time_sec
                                 keys_pressed_this_frame = True # Indicate a key was pressed for this type of input
-                    # K_s: Save current game state manually
+                    
+                    # K_s: Save current game state manually (with Ctrl)
                     elif event.key == pygame.K_s and pygame.key.get_mods() & pygame.KMOD_CTRL:
                         state_name = f"manual_save_{datetime.now().strftime('%Y%m%d_%H%M%S')}.state"
                         state_path = env.current_run_dir / state_name if env.current_run_dir else Path(f"./{state_name}")
@@ -600,6 +939,9 @@ def main():
                     pygame.event.pump() # Ensure queue is processed for get_pressed()
                     keys = pygame.key.get_pressed()
                     for key_code, mapped_action_int in ACTION_MAPPING_PYGAME_TO_INT.items():
+                        # Skip fallback for the 5 key (path-follow) to avoid sending None to PyBoy
+                        if key_code == pygame.K_5:
+                            continue
                         if keys[key_code]:
                             manual_action_to_take = mapped_action_int
                             last_action_time = current_time_sec
@@ -619,8 +961,10 @@ def main():
             # --- Manual Action Step ---
             action_taken_by_player_this_turn = False
             if manual_action_to_take != -1:
-                current_obs, current_reward, current_terminated, current_truncated, current_info = env.step(manual_action_to_take)
-                executed_action_this_frame = manual_action_to_take
+                # Filter action through quest manager
+                filtered_action = quest_manager.filter_action(manual_action_to_take)
+                current_obs, current_reward, current_terminated, current_truncated, current_info = env.step(filtered_action)
+                executed_action_this_frame = filtered_action
                 action_taken_by_player_this_turn = True
             
             # Update global obs, info etc. based on what happened
@@ -629,96 +973,6 @@ def main():
             # --- Record Action if one was taken ---
             if executed_action_this_frame is not None:
                 recorded_playthrough.append(executed_action_this_frame)
-
-            # # === Post-action Navigation Status Check ===
-            # if navigator.navigation_status == "completed":
-            #     nav_target_display = ""
-            #     final_player_coords_str = "Player Coords: N/A"
-            #     player_gx, player_gy = navigator._get_player_global_coords() or (None, None)
-            #     if player_gx is not None and player_gy is not None:
-            #         final_player_coords_str = f"Player Coords: ({player_gx},{player_gy})"
-
-            #     current_global_target_at_completion = navigator.current_navigation_target_global
-
-            #     if current_global_target_at_completion:
-            #         nav_target_display = f"GLOBAL {current_global_target_at_completion}"
-            #         glob_tgt_gx, glob_tgt_gy = current_global_target_at_completion
-                    
-            #         if player_gx is not None and abs(player_gx - glob_tgt_gx) <=1 and abs(player_gy - glob_tgt_gy) <=1: 
-            #             print(f"Player has reached global target {current_global_target_at_completion}. {final_player_coords_str}. Resetting navigator.")
-            #             navigator.astar_segment_no_global_progress_count = 0 # Reset for future goals
-            #             navigator.reset_navigation() # This will clear current_navigation_target_global
-            #         else:
-            #             # Global target not reached
-            #             increment_fail_counter = False
-            #             current_player_coords = None
-            #             if player_gx is not None and player_gy is not None:
-            #                 current_player_coords = (player_gx, player_gy)
-            #                 # Add to history if we are pursuing a global target and have valid current coordinates
-            #                 if navigator.current_navigation_target_global: 
-            #                     navigator.add_to_global_nav_history(current_player_coords)
-                        
-            #             # Condition 1: Check Manhattan distance progress
-            #             if navigator.last_global_pos_before_astar_segment and current_global_target_at_completion and current_player_coords:
-            #                 last_pos = navigator.last_global_pos_before_astar_segment
-            #                 # current_player_coords is already (player_gx, player_gy)
-            #                 global_target = current_global_target_at_completion
-
-            #                 dist_before = navigator._manhattan_distance(last_pos, global_target)
-            #                 dist_after = navigator._manhattan_distance(current_player_coords, global_target)
-
-            #                 if dist_after >= dist_before:
-            #                     print(f"Nav Info: No strict distance decrease. Dist before: {dist_before}, after: {dist_after}. Pos before: {last_pos}, after: {current_player_coords}")
-            #                     increment_fail_counter = True
-            #             elif not navigator.last_global_pos_before_astar_segment and current_player_coords:
-            #                 # First segment attempt for this global goal, no 'before' distance to compare for this segment.
-            #                 # However, oscillation can still be checked if it's the *very first* move for a new global target
-            #                 # and it lands in a spot that was part of a previous failed attempt's history for the *same* target (if history wasn't cleared properly)
-            #                 # But set_navigation_goal_global clears history, so this specific sub-case is less likely.
-            #                 # The primary check here is for oscillations using the history that's now populated with current_player_coords.
-            #                 pass 
-
-            #             # Condition 2: Check for oscillation, even if distance seemed to improve or it was the first segment
-            #             if current_player_coords and navigator.check_recent_oscillation(current_player_coords, count=2):
-            #                 print(f"Nav Info: Oscillation detected for position {current_player_coords}. History: {navigator.global_nav_short_history}")
-            #                 increment_fail_counter = True # Mark as failure if oscillating
-
-            #             if increment_fail_counter:
-            #                 navigator.astar_segment_no_global_progress_count += 1
-            #                 print(f"A* segment completed with no significant progress or oscillation. Fail count: {navigator.astar_segment_no_global_progress_count}/{navigator.ASTAR_SEGMENT_NO_GLOBAL_PROGRESS_THRESHOLD}")
-            #                 if navigator.astar_segment_no_global_progress_count >= navigator.ASTAR_SEGMENT_NO_GLOBAL_PROGRESS_THRESHOLD:
-            #                     print(f"GLOBAL NAV FAILED: No progress/oscillation after {navigator.ASTAR_SEGMENT_NO_GLOBAL_PROGRESS_THRESHOLD} attempts for target {current_global_target_at_completion}. {final_player_coords_str}")
-            #                     navigator.reset_navigation() # Full reset, clears global target and history
-            #                 else:
-            #                     print(f"Global target {current_global_target_at_completion} not yet reached. Re-initiating planning (retry {navigator.astar_segment_no_global_progress_count}). {final_player_coords_str}")
-            #                     navigator.navigation_status = "planning" # Re-plan for the same global goal
-            #             else:
-            #                 # Progress was made (distance decreased AND no oscillation detected)
-            #                 navigator.astar_segment_no_global_progress_count = 0 
-            #                 print(f"Global target {current_global_target_at_completion} not yet reached. Re-initiating planning. {final_player_coords_str}")
-            #                 navigator.navigation_status = "planning" # Re-plan
-            #     elif navigator.current_navigation_target_local_grid: # Completed a local grid nav
-            #         nav_target_display = f"LOCAL {navigator.current_navigation_target_local_grid}"
-            #         print(f"Navigation path segment towards {nav_target_display} completed. {final_player_coords_str}")
-            #         navigator.reset_navigation() 
-            #     else: # Should not happen if a target was set
-            #         nav_target_display = "UNKNOWN TARGET"
-            #         print(f"Navigation path segment towards {nav_target_display} completed (no global/local target found?). {final_player_coords_str}")
-            #         navigator.reset_navigation()
-            
-            # elif navigator.navigation_status == "failed":
-            #     nav_target_display = ""
-            #     final_player_coords_str = "Player Coords: N/A"
-            #     player_gx, player_gy = navigator._get_player_global_coords() or (None, None)
-            #     if player_gx is not None and player_gy is not None:
-            #         final_player_coords_str = f"Player Coords: ({player_gx},{player_gy})"
-
-            #     if navigator.current_navigation_target_global:
-            #         nav_target_display = f"GLOBAL {navigator.current_navigation_target_global}"
-            #     elif navigator.current_navigation_target_local_grid:
-            #         nav_target_display = f"LOCAL {navigator.current_navigation_target_local_grid}"
-            #     print(f"Navigation failed for {nav_target_display}. {final_player_coords_str}. Navigator reset to idle.")
-            #     navigator.reset_navigation()
 
             # Render screen
             current_raw_frame = env.render()
@@ -732,10 +986,12 @@ def main():
             # Track last printed global+map position
             pos3 = (player_gx, player_gy, current_map_id)
             if getattr(navigator, '_last_printed_position', None) != pos3:
-                print(f"Global Coords: ({player_gx}, {player_gy}), Map ID: {current_map_id}, Map Name: {current_map_name}")
+                print(f"play.py: main(): player_coords=({player_gx},{player_gy}), map_id={current_map_id}, map_name={current_map_name}")
                 navigator._last_printed_position = pos3
-            # Update UI with current location
-            status_queue.put(('__location__', (player_gx, player_gy, current_map_id, current_map_name)))
+                # Update UI with current location
+                status_queue.put(('__location__', (player_gx, player_gy, current_map_id, current_map_name)))
+                # Also display current quest ID (reflect environment's current_loaded_quest_id)
+                status_queue.put(('__current_quest__', getattr(env, 'current_loaded_quest_id', None)))
 
             # Prepare for 'previous_map_id_was' triggers by capturing the current map before evaluation
             current_map_id = env.get_game_coords()[2]
@@ -750,13 +1006,27 @@ def main():
                         status_queue.put((tid_q, True))
             # Update quest statuses based on completed triggers
             for q in QUESTS:
-                qid_q = q['quest_id']
-                tids_list = [f"{qid_q}_{i}" for i in range(len(q.get('event_triggers', [])))]
+                qid_str = q['quest_id']
+                qid_int = int(qid_str)
+                tids_list = [f"{qid_str}_{i}" for i in range(len(q.get('event_triggers', [])))]
                 if tids_list and all(trigger_completed.get(t, False) for t in tids_list):
-                    if not quest_completed.get(qid_q, False):
-                        quest_completed[qid_q] = True
-                        status_queue.put((qid_q, True))
+                    if not quest_completed.get(qid_int, False):
+                        quest_completed[qid_int] = True
+                        # Use string ID for UI updates
+                        status_queue.put((qid_str, True))
                     q['completed'] = True
+                # Automatically complete the prerequisite subquest in the *next* quest only
+                try:
+                    next_q_num = int(qid_str) + 1
+                    next_qid = str(next_q_num).zfill(3)
+                    next_quest = next(q for q in QUESTS if q['quest_id'] == next_qid)
+                    for sidx, step_text in enumerate(next_quest.get('subquest_list', [])):
+                        if step_text.strip() == f"Complete quest {qid_str}.":
+                            step_id = f"{next_qid}_step_{sidx}"
+                            status_queue.put((step_id, True))
+                except (StopIteration, ValueError):
+                    # No next quest found or invalid qid_q, skip
+                    pass
             # Sync in-memory QUESTS definitions with updated statuses
             # Update trigger completion flags in QUESTS list
             for q in QUESTS:
@@ -767,95 +1037,68 @@ def main():
                         trg['completed'] = True
             # Update quest completion flags in QUESTS list
             for q in QUESTS:
-                qid_q = q['quest_id']
-                tids_list = [f"{qid_q}_{i}" for i in range(len(q.get('event_triggers', [])))]
+                qid_str = q['quest_id']
+                qid_int = int(qid_str)
+                tids_list = [f"{qid_str}_{i}" for i in range(len(q.get('event_triggers', [])))]
                 if tids_list and all(trigger_completed.get(t, False) for t in tids_list):
                     q['completed'] = True
+
+            # Automatically complete any "Complete quest XXX." subquests
+            for sidx, step_text in enumerate(q.get('subquest_list', [])):
+                if step_text.startswith("Complete quest "):
+                    # Extract quest id (third token) and strip trailing period
+                    parts = step_text.split()
+                    if len(parts) >= 3:
+                        prev_qid = parts[2].rstrip('.')
+                        if quest_completed.get(int(prev_qid), False):
+                            step_id = f"{qid_str}_step_{sidx}"
+                            status_queue.put((step_id, True))
 
             # After processing triggers and quests, update evaluator.prev_map_id for the next iteration
             evaluator.prev_map_id = current_map_id
 
             # Persist updated statuses to per-run status files
             try:
+                # Save statuses to the current run directory
                 with open(run_dir / "trigger_status.json", "w") as f:
                     json.dump(trigger_completed, f, indent=4)
                 with open(run_dir / "quest_status.json", "w") as f:
-                    json.dump(quest_completed, f, indent=4)
+                    # Persist int keys as zero-padded strings
+                    json.dump({str(qid).zfill(3): val for qid, val in quest_completed.items()}, f, indent=4)
             except Exception as e:
                 print(f"Error writing status files to {run_dir}: {e}")
             
+            # Advance to next uncompleted quest if current quest completed
+            current_qid = getattr(quest_manager, 'current_quest_id', None)
+            if current_qid is not None and quest_completed.get(current_qid, False):
+                # Find next quest in order that is not completed
+                next_qid = None
+                for qid in quest_ids_all:
+                    if not quest_completed.get(qid, False):
+                        next_qid = qid
+                        break
+                if next_qid is not None and next_qid != current_qid:
+                    quest_manager.current_quest_id = next_qid
+                    navigator.active_quest_id = next_qid
+                    env.current_loaded_quest_id = next_qid
+                    # Update UI with new current quest
+                    status_queue.put(('__current_quest__', next_qid))
             clock.tick(30) # FPS
 
-            # Save recorded actions to JSON in the run directory
-            if env.current_run_dir:
-                actions_file_path = env.current_run_dir / f"{env.current_run_dir.name}_actions.json"
-                try:
-                    with open(actions_file_path, "w") as f_actions:
-                        # Save the entire list of actions (integers or dicts)
-                        json.dump(recorded_playthrough, f_actions, indent=4)
-                    # print(f"Saved {len(recorded_playthrough)} actions to {actions_file_path}")
-                except Exception as e:
-                    print(f"Error saving actions to {actions_file_path}: {e}")
-
-                # Save path trace data from environment if it exists and there's a run directory
-                if hasattr(env, 'path_trace_data') and env.path_trace_data:
-                    coords_file_path = env.current_run_dir / f"{env.current_run_dir.name}_coords.json"
-                    try:
-                        with open(coords_file_path, "w") as f_coords:
-                            json.dump(env.path_trace_data, f_coords, indent=4)
-                        # print(f"Saved path trace data to {coords_file_path}")
-                    except Exception as e:
-                        print(f"Error saving path trace data to {coords_file_path}: {e}")
-            else:
-                # print("Warning: env.current_run_dir is not set. Actions and path trace not saved to a run-specific directory.")
-                pass # Not in a recording session, or current_run_dir not managed by env
+            # Save recorded actions and path trace data during loop
+            save_loop_state(env, recorded_playthrough)
 
     except KeyboardInterrupt:
         print("\nPlay session interrupted by user.")
     finally:
         # Capture trace data and final state before closing (env.close clears them)
         coords_data = env.path_trace_data.copy()
-        # Capture final emulator state
-        import io
-        end_buf = io.BytesIO()
-        env.pyboy.save_state(end_buf)
-        end_buf.seek(0)
         # Close environment and pygame
         env.close()
         pygame.quit()
 
-        # Saving playthrough actions, coordinates, and end state
-        if recorded_playthrough:
-            # Determine filenames based on --name override
-            if args.name:
-                # Ensure actions filename ends with .json and derive base name
-                if args.name.lower().endswith('.json'):
-                    actions_filename = args.name
-                    name_base = Path(actions_filename).stem
-                else:
-                    actions_filename = args.name + '.json'
-                    name_base = args.name
-                actions_file = run_dir / actions_filename
-                coords_file = run_dir / f"{name_base}_coords.json"
-                end_state_file = run_dir / f"{name_base}_end.state"
-            else:
-                # Default numeric naming
-                actions_file = run_dir / f"quest_id_{name_base}.json"
-                coords_file = run_dir / f"{name_base}_coords.json"
-                end_state_file = run_dir / f"{name_base}_end.state"
-            with open(actions_file, "w") as f:
-                json.dump(recorded_playthrough, f, indent=4)
-            print(f"Playthrough actions saved to {actions_file}")
-            # Save coordinates trace
-            with open(coords_file, "w") as f:
-                json.dump(coords_data, f, indent=4)
-            print(f"Coordinates saved to {coords_file}")
-            # Save end state
-            with open(end_state_file, "wb") as f:
-                f.write(end_buf.read())
-            print(f"End state saved to {end_state_file}")
-        else:
-            print("No actions recorded.")
+        # Always save playthrough actions, coordinates, and end state
+        save_final_state(env, run_dir, recorded_playthrough, coords_data, args.name, name_base)
 
 if __name__ == "__main__":
     main()

@@ -37,7 +37,7 @@ env:
   # If true, disable the need for Flash.
   auto_flash: False
   # If true, disable wild encounters with repels.
-  disable_wild_encounters: False
+  disable_wild_encounters: True
   # If true, disable AI input. Useful for debugging.
   disable_ai_actions: True
   # If true, teach cut if possible.

@@ -33,6 +33,7 @@
         "location_id": 37,
         "location_name": "Players House First Floor",
         "subquest_list": [
+            "Complete quest 001.",
             "Navigate to the stairs in the upper right corner.",
             "Head down and a little left to exit the house."
         ],
@@ -60,7 +61,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "001"
+        ]
     },
     {
         "quest_id": "003",
@@ -68,6 +72,7 @@
         "location_id": 0,
         "location_name": "Pallet Town",
         "subquest_list": [
+            "Complete quest 002.",
             "Try to leave Pallet Town directly to the north. Oak will get you and bring you to his lab."
         ],
         "end_quest_text": "Try to leave Pallet Town directly to the north. Oak will get you and bring you to his lab.",
@@ -84,7 +89,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "002"
+        ]
     },
     {
         "quest_id": "004",
@@ -92,6 +100,7 @@
         "location_id": 40,
         "location_name": "Oaks Lab",
         "subquest_list": [
+            "Complete quest 003.",
             "Pick a pokemon. charmander is closest to you.",
             "Try to leave and your rival will battle you.",
             "Battle your rival, first using growl, then using scratch or tackle.",
@@ -124,7 +133,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "003"
+        ]
     },
     {
         "quest_id": "005",
@@ -132,6 +144,7 @@
         "location_id": 0,
         "location_name": "Pallet Town",
         "subquest_list": [
+            "Complete quest 004.",
             "Walk up to exit Pallet Town."
         ],
         "end_quest_text": "Something tells me I haven't seen the last of this bucolic backwater.",
@@ -148,7 +161,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "004"
+        ]
     },
     {
         "quest_id": "006",
@@ -156,6 +172,7 @@
         "location_id": 12,
         "location_name": "Route 1",
         "subquest_list": [
+            "Complete quest 005.",
             "Walk up Route 1 to the first NPC.",
             "Talk to the NPC."
         ],
@@ -169,7 +186,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "005"
+        ]
     },
     {
         "quest_id": "007",
@@ -177,6 +197,7 @@
         "location_id": 12,
         "location_name": "Route 1",
         "subquest_list": [
+            "Complete quest 006.",
             "Follow Route 1 north.",
             "Keep going until you get to Viridian City."
         ],
@@ -194,7 +215,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "006"
+        ]
     },
     {
         "quest_id": "008",
@@ -202,6 +226,7 @@
         "location_id": 1,
         "location_name": "Viridian City",
         "subquest_list": [
+            "Complete quest 007.",
             "Find the Poke Mart in Viridian City.",
             "Walk up, past the Poke Center, and slightly to the right.",
             "You will see the Poke Mart.",
@@ -216,7 +241,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "007"
+        ]
     },
     {
         "quest_id": "009",
@@ -224,6 +252,7 @@
         "location_id": 42,
         "location_name": "Pokemart Viridian",
         "subquest_list": [
+            "Complete quest 008.",
             "Receive parcel from the Poke Mart clerk.",
             "Then, leave the Poke Mart."
         ],
@@ -237,7 +266,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "008"
+        ]
     },
     {
         "quest_id": "010",
@@ -245,6 +277,7 @@
         "location_id": 1,
         "location_name": "Viridian City",
         "subquest_list": [
+            "Complete quest 009.",
             "Walk down and left to leave Viridian City.",
             "You will be back on Route 1."
         ],
@@ -257,7 +290,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "009"
+        ]
     },
     {
         "quest_id": "011",
@@ -265,6 +301,7 @@
         "location_id": 12,
         "location_name": "Route 1",
         "subquest_list": [
+            "Complete quest 010.",
             "Head down Route 1 from Viridian City until you reach Pallet Town.",
             "Once in Pallet Town, head down and to the right to find Professor Oak's Lab.",
             "Enter Oak's Lab."
@@ -284,7 +321,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "010"
+        ]
     },
     {
         "quest_id": "012",
@@ -292,6 +332,7 @@
         "location_id": 40,
         "location_name": "Oaks Lab",
         "subquest_list": [
+            "Complete quest 011.",
             "Walk straight up in Oak's Lab until you are standing in front of Oak.",
             "Press A to interact with Professor Oak."
         ],
@@ -309,7 +350,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "011"
+        ]
     },
     {
         "quest_id": "013",
@@ -317,6 +361,7 @@
         "location_id": 40,
         "location_name": "Oaks Lab",
         "subquest_list": [
+            "Complete quest 012.",
             "Travel downward in Oak's Lab until you walk out the door.",
             "You will be back in Pallet Town."
         ],
@@ -334,7 +379,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "012"
+        ]
     },
     {
         "quest_id": "014",
@@ -342,6 +390,7 @@
         "location_id": 39,
         "location_name": "Blues House",
         "subquest_list": [
+            "Complete quest 013.",
             "Navigate to Blues House, up and to the right from Oak's Lab.",
             "Enter Blues House."
         ],
@@ -354,7 +403,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "013"
+        ]
     },
     {
         "quest_id": "015",
@@ -362,6 +414,7 @@
         "location_id": 39,
         "location_name": "Blues House",
         "subquest_list": [
+            "Complete quest 014.",
             "Go up in Blues House until you are standing in front of Blue's sister.",
             "Press A to interact and receive the Town Map.",
             "Leave Blues House."
@@ -386,7 +439,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "014"
+        ]
     },
     {
         "quest_id": "016",
@@ -394,12 +450,19 @@
         "location_id": 0,
         "location_name": "Pallet Town",
         "subquest_list": [
+            "Complete quest 015.",
             "Proceed to the left and north to exit Pallet Town.",
             "You will be on Route 1."
         ],
         "end_quest_text": "Grass, bugs, and the open road: my adventure resumes.",
         "associated_coordinates_file": "016_coords.json",
         "event_triggers": [
+            {
+                "type": "item_is_in_inventory",
+                "item_name": "TOWN MAP",
+                "quantity_min": 1,
+                "completed": true
+            },
             {
                 "type": "current_map_id_is",
                 "map_id": 12,
@@ -411,7 +474,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "015"
+        ]
     },
     {
         "quest_id": "017",
@@ -419,6 +485,7 @@
         "location_id": 12,
         "location_name": "Route 1",
         "subquest_list": [
+            "Complete quest 016.",
             "Proceed up Route 1.",
             "Continue north until you reach Viridian City.",
             "Enter the Viridian City Poke Center."
@@ -442,7 +509,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "016"
+        ]
     },
     {
         "quest_id": "018",
@@ -450,6 +520,7 @@
         "location_id": 41,
         "location_name": "Pokecenter Viridian",
         "subquest_list": [
+            "Complete quest 017.",
             "Walk straight up in the Poke Center until you are standing in front of Nurse Joy.",
             "Press A to interact with Nurse Joy.",
             "Press A a few more times to heal your Pok\u00e9mon.",
@@ -469,7 +540,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "017"
+        ]
     },
     {
         "quest_id": "019",
@@ -477,6 +551,7 @@
         "location_id": 41,
         "location_name": "Pokecenter Viridian",
         "subquest_list": [
+            "Complete quest 018.",
             "Proceed downwards to leave the Poke Center.",
             "You will find yourself in Viridian City."
         ],
@@ -494,7 +569,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "018"
+        ]
     },
     {
         "quest_id": "020",
@@ -502,6 +580,7 @@
         "location_id": 1,
         "location_name": "Viridian City",
         "subquest_list": [
+            "Complete quest 019.",
             "Proceed to the right, then up to find the Viridian City Pok\u00e9mart.",
             "Walk up and right to get to the Viridian City Pok\u00e9mart.",
             "Enter the Pok\u00e9mart."
@@ -515,7 +594,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "019"
+        ]
     },
     {
         "quest_id": "021",
@@ -523,6 +605,7 @@
         "location_id": 42,
         "location_name": "Pokemart Viridian",
         "subquest_list": [
+            "Complete quest 020.",
             "Walk up to the counter and talk to the clerk.",
             "Walk up two tiles and left one tile to be in front of the clerk.",
             "Press A to interact with the clerk."
@@ -541,7 +624,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "020"
+        ]
     },
     {
         "quest_id": "022",
@@ -549,6 +635,7 @@
         "location_id": 42,
         "location_name": "Pokemart Viridian",
         "subquest_list": [
+            "Complete quest 021.",
             "Select 'Buy' by pressing A when the cursor is on Buy.",
             "Move the cursor to Pok\u00e9ball and press A.",
             "Press the up arrow until 5 is selected.",
@@ -576,7 +663,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "021"
+        ]
     },
     {
         "quest_id": "023",
@@ -584,6 +674,7 @@
         "location_id": 33,
         "location_name": "Route 22",
         "subquest_list": [
+            "Complete quest 022.",
             "Head left from Viridian City to Route 22.",
             "Walk in the grass surrounded by a fence, a ledge, and a wall.",
             "If a wild Pok\u00e9mon appears and it's a Nidoran\u2642: attack it with Scratch twice, then catch it with a Pok\u00e9ball.",
@@ -605,7 +696,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "022"
+        ]
     },
     {
         "quest_id": "024",
@@ -613,6 +707,7 @@
         "location_id": 33,
         "location_name": "Route 22",
         "subquest_list": [
+            "Complete quest 023.",
             "Walk up through the gap in the ledge, then left.",
             "Your rival will intercept you."
         ],
@@ -635,7 +730,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "023"
+        ]
     },
     {
         "quest_id": "025",
@@ -643,6 +741,7 @@
         "location_id": 33,
         "location_name": "Route 22",
         "subquest_list": [
+            "Complete quest 024.",
             "For each of your rival's Pok\u00e9mon, use Growl first, once.",
             "Then use Scratch until that Pok\u00e9mon faints.",
             "If your Pok\u00e9mon gets low on health, use a Potion instead of attacking.",
@@ -658,7 +757,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "024"
+        ]
     },
     {
         "quest_id": "026",
@@ -666,6 +768,7 @@
         "location_id": 1,
         "location_name": "Viridian City",
         "subquest_list": [
+            "Complete quest 025.",
             "Walk back to the middle of Viridian City.",
             "Heal at the Pokecenter as usual.",
             "Travel north from the center of Viridian City onto Route 2.",
@@ -697,7 +800,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "025"
+        ]
     },
     {
         "quest_id": "027",
@@ -705,6 +811,7 @@
         "location_id": 49,
         "location_name": "Route 2 Guardhouse",
         "subquest_list": [
+            "Complete quest 026.",
             "Proceed straight up through the guardhouse and exit out the north door.",
             "You will enter Viridian Forest."
         ],
@@ -722,7 +829,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "026"
+        ]
     },
     {
         "quest_id": "028",
@@ -730,6 +840,7 @@
         "location_id": 51,
         "location_name": "Viridian Forest",
         "subquest_list": [
+            "Complete quest 027.",
             "Proceed slightly north in Viridian Forest.",
             "Go to the right, stopping when you see the second NPC."
         ],
@@ -743,7 +854,10 @@
                 "completed": true
             }
         ],
-        "completed": true
+        "completed": true,
+        "required_completions": [
+            "027"
+        ]
     },
     {
         "quest_id": "029",
@@ -751,6 +865,7 @@
         "location_id": 51,
         "location_name": "Viridian Forest",
         "subquest_list": [
+            "Complete quest 028.",
             "Proceed north from the second NPC.",
             "A trainer will see you and initiate a battle.",
             "Use Ember (which Charmander should now know) to quickly defeat all bug Pok\u00e9mon.",
@@ -771,7 +886,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "028"
+        ]
     },
     {
         "quest_id": "030",
@@ -779,6 +897,7 @@
         "location_id": 51,
         "location_name": "Viridian Forest",
         "subquest_list": [
+            "Complete quest 029.",
             "Proceed north and engage the next trainer you encounter.",
             "Use Ember or your strongest moves to win.",
             "Heal if needed."
@@ -798,7 +917,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "029"
+        ]
     },
     {
         "quest_id": "031",
@@ -806,6 +928,7 @@
         "location_id": 51,
         "location_name": "Viridian Forest",
         "subquest_list": [
+            "Complete quest 030.",
             "Go up all the way you can, then left all the way you can, then down, then left, then up, then left, then down, then left, then up.",
             "Battle the last trainer, then proceed straight up and keep going to exit Viridian Forest."
         ],
@@ -823,7 +946,10 @@
                 "completed": true
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "030"
+        ]
     },
     {
         "quest_id": "032",
@@ -831,6 +957,7 @@
         "location_id": 13,
         "location_name": "Route 2",
         "subquest_list": [
+            "Complete quest 031.",
             "Proceed north through Route 2 after exiting Viridian Forest.",
             "Continue north and a little east to reach Pewter City.",
             "Find the Poke Center and enter it."
@@ -849,7 +976,10 @@
                 "completed": true
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "031"
+        ]
     },
     {
         "quest_id": "033",
@@ -857,6 +987,7 @@
         "location_id": 58,
         "location_name": "Pewter City Pok\u00e9mon Center",
         "subquest_list": [
+            "Complete quest 032.",
             "Once in Pewter City, enter the Pok\u00e9mon Center (left side of the city).",
             "Walk straight up to Nurse Joy.",
             "Press A to interact and heal your Pok\u00e9mon.",
@@ -877,7 +1008,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "032"
+        ]
     },
     {
         "quest_id": "034",
@@ -885,6 +1019,7 @@
         "location_id": 56,
         "location_name": "Pewter City Pok\u00e9mart",
         "subquest_list": [
+            "Complete quest 033.",
             "Proceed to the right and north in Pewter City to the Pok\u00e9mart.",
             "Enter the Pok\u00e9mart.",
             "Walk up to the clerk and press A to interact."
@@ -898,7 +1033,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "033"
+        ]
     },
     {
         "quest_id": "035",
@@ -906,6 +1044,7 @@
         "location_id": 56,
         "location_name": "Pewter City Pok\u00e9mart",
         "subquest_list": [
+            "Complete quest 034.",
             "Buy as many Potions as possible.",
             "Leave the Pok\u00e9mart."
         ],
@@ -929,7 +1068,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "034"
+        ]
     },
     {
         "quest_id": "036",
@@ -937,6 +1079,7 @@
         "location_id": 2,
         "location_name": "Pewter City",
         "subquest_list": [
+            "Complete quest 035.",
             "Proceed left to clear the Pok\u00e9mart.",
             "Proceed north to clear the Gym.",
             "Proceed left to walk behind the Gym.",
@@ -953,7 +1096,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "035"
+        ]
     },
     {
         "quest_id": "037",
@@ -961,6 +1107,7 @@
         "location_id": 54,
         "location_name": "Pewter City Gym",
         "subquest_list": [
+            "Complete quest 036.",
             "Proceed straight up to the first trainer in the Gym.",
             "For each Pok\u00e9mon the trainer has, use Growl first, then your strongest attack.",
             "Heal if necessary.",
@@ -999,7 +1146,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "036"
+        ]
     },
     {
         "quest_id": "038",
@@ -1007,6 +1157,7 @@
         "location_id": 2,
         "location_name": "Pewter City",
         "subquest_list": [
+            "Complete quest 037.",
             "Leave the Pokecenter.",
             "Retrace your steps from the Pok\u00e9mon Center back to Pewter City Gym.",
             "Enter the Gym."
@@ -1025,7 +1176,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "037"
+        ]
     },
     {
         "quest_id": "039",
@@ -1033,6 +1187,7 @@
         "location_id": 54,
         "location_name": "Pewter City Gym",
         "subquest_list": [
+            "Complete quest 038.",
             "Proceed straight up to Brock until you are directly in front of him.",
             "Press A to challenge Brock.",
             "Defeat Brock using your best tactics.",
@@ -1057,7 +1212,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "038"
+        ]
     },
     {
         "quest_id": "040",
@@ -1065,6 +1223,7 @@
         "location_id": 2,
         "location_name": "Pewter City",
         "subquest_list": [
+            "Complete quest 039.",
             "Head to the Pok\u00e9mon Center and enter it."
         ],
         "end_quest_text": "Healing: an essential post-gym ritual.",
@@ -1081,7 +1240,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "039"
+        ]
     },
     {
         "quest_id": "041",
@@ -1089,6 +1251,7 @@
         "location_id": 58,
         "location_name": "Pewter City Pok\u00e9mon Center",
         "subquest_list": [
+            "Complete quest 040.",
             "Heal at the Pok\u00e9mon Center.",
             "When done, leave the Pok\u00e9mon Center."
         ],
@@ -1111,7 +1274,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "040"
+        ]
     },
     {
         "quest_id": "042",
@@ -1119,6 +1285,7 @@
         "location_id": 2,
         "location_name": "Pewter City",
         "subquest_list": [
+            "Complete quest 041.",
             "Exit Pewter City by heading right.",
             "You will enter Route 3."
         ],
@@ -1136,7 +1303,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "041"
+        ]
     },
     {
         "quest_id": "043",
@@ -1144,6 +1314,7 @@
         "location_id": 14,
         "location_name": "Route 3",
         "subquest_list": [
+            "Complete quest 042.",
             "Proceed right on Route 3.",
             "Battle trainers along the way.",
             "Level up your Nidoran using switch training: start with Charmander, use Scratch, then switch to Nidoran and use Tackle.",
@@ -1165,7 +1336,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "042"
+        ]
     },
     {
         "quest_id": "044",
@@ -1173,6 +1347,7 @@
         "location_id": 14,
         "location_name": "Route 3",
         "subquest_list": [
+            "Complete quest 043.",
             "At the end of Route 3, backtrack slightly in not aligned with the doorway lead up.",
             "Align with the doorway leading up, and walk upwards.",
             "Continue north until you reach Route 4."
@@ -1191,7 +1366,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "043"
+        ]
     },
     {
         "quest_id": "045",
@@ -1199,6 +1377,7 @@
         "location_id": 15,
         "location_name": "Route 4",
         "subquest_list": [
+            "Complete quest 044.",
             "Proceed upwards on Route 4.",
             "Enter the Mt. Moon Pok\u00e9mon Center."
         ],
@@ -1211,7 +1390,10 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "044"
+        ]
     },
     {
         "quest_id": "046",
@@ -1219,6 +1401,7 @@
         "location_id": 68,
         "location_name": "Mt. Moon Pok\u00e9mon Center",
         "subquest_list": [
+            "Complete quest 045.",
             "Heal at the Pok\u00e9mon Center as usual.",
             "Talk to the man walking around inside the Pok\u00e9mon Center.",
             "Buy the Magikarp from him.",
@@ -1243,6 +1426,9 @@
                 "completed": false
             }
         ],
-        "completed": false
+        "completed": false,
+        "required_completions": [
+            "045"
+        ]
     }
 ]

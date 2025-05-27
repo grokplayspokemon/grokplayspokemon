@@ -991,6 +991,12 @@ class RedGymEnv(Env):
                 self._handling_warp = False
 
         reset = False # Initialize reset here
+        # Detect active battle dialog: pause only for auto path-follow action
+        raw_dialog = self.read_dialog() or ''
+        in_battle = self.read_m("wIsInBattle") != 0
+        if raw_dialog.strip() and in_battle and action == PATH_FOLLOW_ACTION:
+            print("Navigation paused: dialog active, cannot move to next coordinate.")
+            return self._get_obs(), 0.0, reset, False, {}
 
         # --- BEGIN FIXED QUEST 12 PATH FOLLOWING LOGIC ---
         # Use discrete action PATH_FOLLOW_ACTION (index 7) to follow quest 12 path

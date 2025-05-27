@@ -308,16 +308,15 @@ def verify_quest_system_integrity(env, navigator):
 def determine_starting_quest(player_pos, map_id, completed_quests, quest_ids_all):
     """Determine the most appropriate starting quest based on player position and game state"""
     
-    # Position-based quest recommendations
     if map_id == 40:  # Oak's Lab
+        # If standing on Quest 12 return path in Lab, prioritize it
         if player_pos and player_pos in [(356, 110), (355, 110), (354, 110), (353, 110), (352, 110), (351, 110), (350, 110), (349, 110), (348, 110)]:
-            # Player is on Quest 012 path coordinates
             if not completed_quests.get(12, False):
                 return 12
             elif not completed_quests.get(13, False):
                 return 13
-        # Default Oak's Lab quest
-        for quest_id in [12, 13]:
+        # Default Oak's Lab quests: try Quest 11 first, then 12 and 13
+        for quest_id in [11, 12, 13]:
             if not completed_quests.get(quest_id, False):
                 return quest_id
     
@@ -996,63 +995,37 @@ def main():
             # Prepare for 'previous_map_id_was' triggers by capturing the current map before evaluation
             current_map_id = env.get_game_coords()[2]
 
-            # Catch-up logic: scan all triggers across all quests and mark them complete if detected
-            for q in QUESTS:
-                qid_q = q['quest_id']
-                for idx, trg in enumerate(q.get('event_triggers', [])):
-                    tid_q = f"{qid_q}_{idx}"
-                    if not trigger_completed.get(tid_q, False) and evaluator.check_trigger(trg):
-                        trigger_completed[tid_q] = True
-                        status_queue.put((tid_q, True))
-            # Update quest statuses based on completed triggers
-            for q in QUESTS:
-                qid_str = q['quest_id']
-                qid_int = int(qid_str)
-                tids_list = [f"{qid_str}_{i}" for i in range(len(q.get('event_triggers', [])))]
-                if tids_list and all(trigger_completed.get(t, False) for t in tids_list):
-                    if not quest_completed.get(qid_int, False):
-                        quest_completed[qid_int] = True
-                        # Use string ID for UI updates
-                        status_queue.put((qid_str, True))
-                    q['completed'] = True
-                # Automatically complete the prerequisite subquest in the *next* quest only
-                try:
-                    next_q_num = int(qid_str) + 1
-                    next_qid = str(next_q_num).zfill(3)
-                    next_quest = next(q for q in QUESTS if q['quest_id'] == next_qid)
-                    for sidx, step_text in enumerate(next_quest.get('subquest_list', [])):
-                        if step_text.strip() == f"Complete quest {qid_str}.":
-                            step_id = f"{next_qid}_step_{sidx}"
-                            status_queue.put((step_id, True))
-                except (StopIteration, ValueError):
-                    # No next quest found or invalid qid_q, skip
-                    pass
-            # Sync in-memory QUESTS definitions with updated statuses
-            # Update trigger completion flags in QUESTS list
-            for q in QUESTS:
-                qid_q = q['quest_id']
-                for idx, trg in enumerate(q.get('event_triggers', [])):
-                    tid_q = f"{qid_q}_{idx}"
-                    if trigger_completed.get(tid_q, False):
-                        trg['completed'] = True
-            # Update quest completion flags in QUESTS list
-            for q in QUESTS:
-                qid_str = q['quest_id']
-                qid_int = int(qid_str)
-                tids_list = [f"{qid_str}_{i}" for i in range(len(q.get('event_triggers', [])))]
-                if tids_list and all(trigger_completed.get(t, False) for t in tids_list):
-                    q['completed'] = True
+            # Catch-up logic: scan only triggers for the active quest
+            current_qid = getattr(quest_manager, 'current_quest_id', None)
+            if current_qid is not None:
+                active_quest = next((qq for qq in QUESTS if int(qq['quest_id']) == current_qid), None)
+                if active_quest:
+                    for idx, trg in enumerate(active_quest.get('event_triggers', [])):
+                        tid = f"{active_quest['quest_id']}_{idx}"
+                        if not trigger_completed.get(tid, False) and evaluator.check_trigger(trg):
+                            trigger_completed[tid] = True
+                            status_queue.put((tid, True))
+            # Update status for the active quest only
+            if current_qid is not None and active_quest:
+                tids = [f"{active_quest['quest_id']}_{i}" for i in range(len(active_quest.get('event_triggers', [])))]
+                if tids and all(trigger_completed.get(t, False) for t in tids):
+                    if not quest_completed.get(current_qid, False):
+                        quest_completed[current_qid] = True
+                        status_queue.put((active_quest['quest_id'], True))
+                    active_quest['completed'] = True
 
-            # Automatically complete any "Complete quest XXX." subquests
-            for sidx, step_text in enumerate(q.get('subquest_list', [])):
-                if step_text.startswith("Complete quest "):
-                    # Extract quest id (third token) and strip trailing period
-                    parts = step_text.split()
-                    if len(parts) >= 3:
-                        prev_qid = parts[2].rstrip('.')
-                        if quest_completed.get(int(prev_qid), False):
-                            step_id = f"{qid_str}_step_{sidx}"
-                            status_queue.put((step_id, True))
+            # Automatically complete any "Complete quest XXX." subquests for the active quest
+            current_qid = getattr(quest_manager, 'current_quest_id', None)
+            if current_qid is not None and active_quest:
+                qid_str = active_quest['quest_id']
+                for sidx, step_text in enumerate(active_quest.get('subquest_list', [])):
+                    if step_text.startswith("Complete quest "):
+                        parts = step_text.split()
+                        if len(parts) >= 3:
+                            prev_qid = parts[2].rstrip('.')
+                            if quest_completed.get(int(prev_qid), False):
+                                step_id = f"{qid_str}_step_{sidx}"
+                                status_queue.put((step_id, True))
 
             # After processing triggers and quests, update evaluator.prev_map_id for the next iteration
             evaluator.prev_map_id = current_map_id

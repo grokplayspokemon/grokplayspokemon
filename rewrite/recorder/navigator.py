@@ -574,6 +574,7 @@ class InteractiveNavigator:
             except RuntimeError as e:
                 print(f"Navigator: snap_to_nearest_coordinate: {e}")
                 return False
+        
         cur_map = self.env.get_game_coords()[2]
         cur_pos = self._get_player_global_coords()
         if not cur_pos:
@@ -581,20 +582,16 @@ class InteractiveNavigator:
             return False
         candidate_ids = [i for i, m in enumerate(self.coord_map_ids) if m == cur_map]
         if not candidate_ids:
-            print(f"Navigator: No path points on current map {cur_map}, attempting to load segment for current quest")
+            print(f"Navigator: No path points on current map {cur_map}, attempting to load segment for current map")
             try:
-                # Update active quest from environment for dynamic quest changes
-                env_qid = getattr(self.env, 'current_loaded_quest_id', None)
-                if env_qid is not None:
-                    self.active_quest_id = env_qid
                 self.load_segment_for_current_map()
-                # Recalculate candidate_ids after loading
-                candidate_ids = [i for i, m in enumerate(self.coord_map_ids) if m == cur_map]
-                if not candidate_ids:
-                    print(f"Navigator: No path points on current map {cur_map} after loading segment")
-                    return False
             except RuntimeError as e:
                 print(f"Navigator: snap_to_nearest_coordinate: {e}")
+                return False
+            # Recompute candidate_ids after loading segment
+            candidate_ids = [i for i, m in enumerate(self.coord_map_ids) if m == cur_map]
+            if not candidate_ids:
+                print(f"Navigator: No path points on current map {cur_map} after loading segment")
                 return False
         
         # Find the closest coordinate to the player
@@ -677,10 +674,25 @@ class InteractiveNavigator:
                 breakpoint()
                 return False
 
-            # Only warp if target map is part of the current quest's path
-            if target_map_id not in set(self.coord_map_ids):
-                print(f"navigator.py: warp_tile_handler(): warp to map {target_map_id} not in current path, skipping warp")
-                return False
+            # Detect if this is a door warp (two adjacent warp tiles)
+            door_warp = any(
+                self._manhattan(nearest_warp, wt2) == 1
+                for wt2 in warp_tiles
+                if wt2 != nearest_warp
+            )
+
+            # New: allow tile warps into any map specified in the current quest JSON
+            if not door_warp:
+                base = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046"
+                quest_id = self.active_quest_id
+                file_path = base / f"{quest_id:03d}" / f"{quest_id:03d}_coords.json"
+                try:
+                    data = json.loads(file_path.read_text())
+                except Exception:
+                    data = {}
+                if target_map_id not in {int(k) for k in data.keys()}:
+                    print(f"navigator.py: warp_tile_handler(): warp to map {target_map_id} not in quest {quest_id:03d} JSON, skipping warp")
+                    return False
 
         # --- 4. Determine Warp Type (Door or Tile) for the Nearest Warp ---
         is_door = False
@@ -781,20 +793,28 @@ class InteractiveNavigator:
 
         # If current quest path complete, advance to next quest based on the last loaded quest
         if self.current_coordinate_index >= len(self.sequential_coordinates):
+            # New: attempt to load next map segment for the same quest
+            base = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046"
+            quest_id = self.active_quest_id
+            file_path = base / f"{quest_id:03d}" / f"{quest_id:03d}_coords.json"
+            try:
+                data = json.loads(file_path.read_text())
+                map_keys = list(data.keys())
+                cur_map_str = str(self.env.get_game_coords()[2])
+                if cur_map_str in map_keys:
+                    idx = map_keys.index(cur_map_str)
+                    if idx < len(map_keys) - 1:
+                        next_map_str = map_keys[idx+1]
+                        coords = data[next_map_str]
+                        self.sequential_coordinates = [(gy, gx) for gy, gx in coords]
+                        self.coord_map_ids = [int(next_map_str)] * len(coords)
+                        self.current_coordinate_index = 0
+                        print(f"Navigator: loaded next segment for Quest {quest_id:03d} on map {next_map_str} ({len(coords)} steps)")
+                        return True
+            except Exception as e:
+                print(f"Navigator: error loading next segment for Quest {quest_id:03d}: {e}")
+            # fall back to loading next quest
             self.quest_locked = False
-            # Use the internally recorded loaded quest, not any external override
-            base_qid = getattr(self, '_last_loaded_quest_id', self.active_quest_id) or 0
-            start_q = base_qid + 1
-            for qid in range(start_q, 47):  # try each quest from next up to max
-                print(f"Navigator: quest {base_qid:03d} complete, attempting to load Quest {qid:03d}")
-                if not self.load_coordinate_path(qid):
-                    print(f"Navigator: failed to load Quest {qid:03d}, skipping")
-                    continue
-                print(f"Navigator: successfully loaded Quest {qid:03d}")
-                return self.move_to_next_coordinate()
-            print(f"Navigator: no further quest paths available after {base_qid:03d}")
-            return False
-
         # Handle multi-map quests: if map has changed (e.g., warp to new map segment), reload that segment
         cur_map = self.env.get_game_coords()[2]
         prev_map = getattr(self.env, 'prev_map_id', None)

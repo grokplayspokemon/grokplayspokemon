@@ -881,13 +881,12 @@ def main():
 
                     # On '4' key: Snap navigator and environment to the nearest coordinate in the current quest path
                     elif event.key == pygame.K_4:  # Snap to nearest recorded path coordinate
-                        # Check if dialog/battle is active
+                        # Pause snapping if any dialog is active
                         raw_dialog = env.read_dialog() or ''
-                        in_battle = env.read_m("wIsInBattle") != 0
-                        if raw_dialog.strip() and in_battle:
-                            print("Navigation paused: dialog/battle active, cannot snap to path.")
+                        if raw_dialog.strip():
+                            print("play.py: main(): '4' key: Navigation paused: dialog active, cannot snap to path.")
                         else:
-                            print("play.py: main(): Snapping to nearest coordinate on recorded path.")
+                            print("play.py: main(): '4' key: Snapping to nearest coordinate on recorded path.")
                             # Ensure current quest is loaded
                             if not navigator.sequential_coordinates:
                                 qid = quest_ids_all[start_checking_from_idx]
@@ -902,19 +901,28 @@ def main():
 
                     # On '5' key: Move to next coordinate (quest path)
                     elif event.key == pygame.K_5:  # Move to next coordinate (quest path)
-                        # Pause if dialog/battle active
+                        # Pause movement if any dialog is active
                         raw_dialog = env.read_dialog() or ''
-                        in_battle = env.read_m("wIsInBattle") != 0
-                        if raw_dialog.strip() and in_battle:
-                            print("Navigation paused: dialog active, cannot move to next coordinate.")
+                        if raw_dialog.strip():
+                            print("play.py: main(): '5' key:Navigation paused: dialog active, cannot move to next coordinate.")
                         else:
-                            print("Navigator: Moving one step along current-map segment")
-                            # Attempt to move to next coordinate; do not exit on failure
-                            moved = navigator.move_to_next_coordinate()
-                            if moved:
-                                print(navigator.get_current_status())
+                            print("play.py: main(): '5' key: Moving one step along current-map segment")
+                            # Apply quest-specific overrides (e.g., force A press for quest 015)
+                            desired = quest_manager.filter_action(PATH_FOLLOW_ACTION)
+                            if desired == PATH_FOLLOW_ACTION:
+                                # Attempt to move to next coordinate; do not exit on failure
+                                moved = navigator.move_to_next_coordinate()
+                                if moved:
+                                    print(navigator.get_current_status())
+                                else:
+                                    print("Navigator: No next coordinate or move failed (path complete).")
                             else:
-                                print("Navigator: No next coordinate or move failed (path complete).")
+                                # Override with quest-specific emulator action (e.g., A press)
+                                current_obs, current_reward, current_terminated, current_truncated, current_info = env.step(desired)
+                                # Record the override action
+                                recorded_playthrough.append(desired)
+                                # Update observation and info for this frame
+                                obs, reward, terminated, truncated, info = current_obs, current_reward, current_terminated, current_truncated, current_info
 
                     # Check for manual game control keys ONLY if navigation is not actively overriding
                     elif navigator.navigation_status in ["idle", "completed", "failed"]:

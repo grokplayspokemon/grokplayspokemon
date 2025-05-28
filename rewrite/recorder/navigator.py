@@ -491,6 +491,7 @@ import json
 from pathlib import Path
 import time
 from typing import List, Optional, Tuple
+import random
 
 from pyboy.utils import WindowEvent
 
@@ -525,7 +526,9 @@ class InteractiveNavigator:
             "right": 2,
             "up": 3,
         }
-        
+        # Track how many times each map's segment has been loaded (for multi-segment maps)
+        self.map_segment_count: dict[int, int] = {}
+
         self.door_warp = False
         self.last_warp_time = 0.0  # timestamp of last warp to enforce cooldown
         self.WARP_COOLDOWN_SECONDS = 0.5  # seconds between warp attempts (shorter to avoid bounce)
@@ -671,7 +674,6 @@ class InteractiveNavigator:
                 return False
             target_map_id = warp_entry.get('target_map_id')
             if target_map_id == self.last_warp_origin_map:
-                breakpoint()
                 return False
 
             # Detect if this is a door warp (two adjacent warp tiles)
@@ -690,7 +692,7 @@ class InteractiveNavigator:
                     data = json.loads(file_path.read_text())
                 except Exception:
                     data = {}
-                if target_map_id not in {int(k) for k in data.keys()}:
+                if target_map_id not in {int(k.split('_')[0]) for k in data.keys()}:
                     print(f"navigator.py: warp_tile_handler(): warp to map {target_map_id} not in quest {quest_id:03d} JSON, skipping warp")
                     return False
 
@@ -774,6 +776,17 @@ class InteractiveNavigator:
             print(f"Navigator: Attempted warp but map did not change (Prev:{prev_map}, Post:{post_step_map_id}).")
             return False
 
+    def roam_in_grass(self) -> bool:
+        """Roam randomly in grass area for quest 23."""
+        direction_str = random.choice(list(self.ACTION_MAPPING_STR_TO_INT.keys()))
+        action = self.ACTION_MAPPING_STR_TO_INT[direction_str]
+        moved = self._execute_movement(action)
+        if moved:
+            print(f"Navigator: Roaming in grass: moved {direction_str}")
+        else:
+            print(f"Navigator: Roaming in grass: movement {direction_str} failed")
+        return True
+
     # ...............................................................
     #  M O V E
     # ...............................................................
@@ -783,31 +796,46 @@ class InteractiveNavigator:
         Load and flatten the full coordinate list for the current quest, then step sequentially.
         Automatically load the next quest's path on completion.
         """
+        # If the quest ID changed since we last loaded, reset so we load the new path
+        env_qid = getattr(self.env, 'current_loaded_quest_id', None)
+        if hasattr(self, '_last_loaded_quest_id') and self._last_loaded_quest_id != env_qid:
+            self._reset_state()
         # Ensure path loaded for current quest
         if not self.sequential_coordinates:
             env_qid = getattr(self.env, 'current_loaded_quest_id', None)
             if env_qid is None:
                 return False
+            # Load the quest's coordinates if we haven't yet
             if not self.load_coordinate_path(env_qid):
                 return False
-
+        # For Quest 012, once you reach Oak's spot, halt movement so player can press A
+        if self.active_quest_id == 12:
+            pos = self._get_player_global_coords()
+            # global (gy, gx) for Oak interaction tile
+            if pos == (348, 110):
+                return False
         # If current quest path complete, advance to next quest based on the last loaded quest
         if self.current_coordinate_index >= len(self.sequential_coordinates):
+            if self.active_quest_id == 23:
+                return self.roam_in_grass()
             # New: attempt to load next map segment for the same quest
             base = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046"
             quest_id = self.active_quest_id
             file_path = base / f"{quest_id:03d}" / f"{quest_id:03d}_coords.json"
             try:
                 data = json.loads(file_path.read_text())
-                map_keys = list(data.keys())
+                # Preserve segment order as in the JSON file
+                ordered_keys = list(data.keys())
                 cur_map_str = str(self.env.get_game_coords()[2])
-                if cur_map_str in map_keys:
-                    idx = map_keys.index(cur_map_str)
-                    if idx < len(map_keys) - 1:
-                        next_map_str = map_keys[idx+1]
+                if cur_map_str in ordered_keys:
+                    idx = ordered_keys.index(cur_map_str)
+                    if idx < len(ordered_keys) - 1:
+                        next_map_str = ordered_keys[idx+1]
                         coords = data[next_map_str]
                         self.sequential_coordinates = [(gy, gx) for gy, gx in coords]
-                        self.coord_map_ids = [int(next_map_str)] * len(coords)
+                        # Normalize segment key to integer map id
+                        norm_key = next_map_str.split('_')[0]
+                        self.coord_map_ids = [int(norm_key)] * len(coords)
                         self.current_coordinate_index = 0
                         print(f"Navigator: loaded next segment for Quest {quest_id:03d} on map {next_map_str} ({len(coords)} steps)")
                         return True
@@ -815,6 +843,7 @@ class InteractiveNavigator:
                 print(f"Navigator: error loading next segment for Quest {quest_id:03d}: {e}")
             # fall back to loading next quest
             self.quest_locked = False
+
         # Handle multi-map quests: if map has changed (e.g., warp to new map segment), reload that segment
         cur_map = self.env.get_game_coords()[2]
         prev_map = getattr(self.env, 'prev_map_id', None)
@@ -919,6 +948,8 @@ class InteractiveNavigator:
             print(f"Navigator: Quest {self.active_quest_id} locked; can't switch")
             return False
 
+        # Reset per-map segment counters on full quest load
+        self.map_segment_count = {}
         base = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046"
         file_path = base / f"{quest_id:03d}" / f"{quest_id:03d}_coords.json"
         if not file_path.exists():
@@ -935,7 +966,8 @@ class InteractiveNavigator:
         coords: List[Tuple[int, int]] = []
         map_ids: List[int] = []
         for map_id_str, coord_list in data.items():
-            mid = int(map_id_str)
+            # Normalize key: use integer part before any underscore
+            mid = int(map_id_str.split('_')[0])
             for gy, gx in coord_list:
                 coords.append((gy, gx))
                 map_ids.append(mid)
@@ -980,14 +1012,37 @@ class InteractiveNavigator:
                 continue
             try:
                 data = json.loads(fp.read_text())
-                if str(map_id) in data:
-                    coords = data[str(map_id)]
-                    self.sequential_coordinates = [(c[0], c[1]) for c in coords]
-                    self.coord_map_ids = [map_id] * len(coords)
-                    self.current_coordinate_index = 0
-                    self.active_quest_id = qid
-                    print(f"Navigator: Loaded quest {qid:03d} for map {map_id} ({len(coords)} steps)")
-                    return
+                # DEBUG: Quest 26 segment parsing
+                if qid == 26:
+                    print(f"DEBUG: Quest {qid:03d} - load_segment_for_current_map: map_id={map_id}, data.keys()={list(data.keys())}")
+                # Collect all segment keys for this map, ordered by integer prefix then insertion
+                # Preserve the order of segments as they appear in the JSON file
+                segment_keys = [k for k in data.keys() if int(k.split('_')[0]) == map_id]
+                if qid == 26:
+                    print(f"DEBUG: Quest 026 - segment_keys = {segment_keys}")
+                if not segment_keys:
+                    continue
+                # Determine which segment to load based on how many times we've loaded this map
+                count = self.map_segment_count.get(map_id, 0)
+                if qid == 26:
+                    print(f"DEBUG: Quest 026 - current count for map {map_id} = {count}")
+                idx = count if count < len(segment_keys) else len(segment_keys) - 1
+                if qid == 26:
+                    print(f"DEBUG: Quest 026 - idx = {idx}")
+                selected_key = segment_keys[idx]
+                if qid == 26:
+                    print(f"DEBUG: Quest 026 - selected_key = '{selected_key}'")
+                # Increment counter for next time
+                self.map_segment_count[map_id] = count + 1
+                coords = data[selected_key]
+                if qid == 26:
+                    print(f"DEBUG: Quest 026 - coords for selected_key '{selected_key}' first 5 entries = {coords[:5]}, total entries = {len(coords)}")
+                self.sequential_coordinates = [(c[0], c[1]) for c in coords]
+                self.coord_map_ids = [map_id] * len(coords)
+                self.current_coordinate_index = 0
+                self.active_quest_id = qid
+                print(f"Navigator: Loaded quest {qid:03d} segment '{selected_key}' on map {map_id} ({len(coords)} steps)")
+                return
             except Exception as e:
                 print(f"Navigator: Error reading quest {qid:03d}: {e}")
                 continue

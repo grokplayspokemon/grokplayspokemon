@@ -553,7 +553,7 @@
         "subquest_list": [
             "Complete quest 018.",
             "Proceed downwards to leave the Poke Center.",
-            "You will find yourself in Viridian City."
+            "You will find yourself back in Viridian City."
         ],
         "end_quest_text": "That distinct aroma of urban grass and commerce.",
         "associated_coordinates_file": "019_coords.json",
@@ -638,7 +638,7 @@
             "Complete quest 021.",
             "Select 'Buy' by pressing A when the cursor is on Buy.",
             "Move the cursor to Pok\u00e9ball and press A.",
-            "Press the up arrow until 5 is selected.",
+            "Press the up arrow until 4 is selected.",
             "Press A to confirm the purchase.",
             "Press A again to finalize the Pok\u00e9ball purchase.",
             "Exit the dialogue and the Pok\u00e9mart."
@@ -796,6 +796,11 @@
             },
             {
                 "type": "current_map_id_is",
+                "map_id": 13,
+                "completed": true
+            },
+            {
+                "type": "current_map_id_is",
                 "map_id": 50,
                 "completed": true
             }
@@ -861,7 +866,7 @@
     },
     {
         "quest_id": "029",
-        "begin_quest_text": "Battle the first trainer in Viridian Forest.",
+        "begin_quest_text": "Eliminate the first trainer in Viridian Forest.",
         "location_id": 51,
         "location_name": "Viridian Forest",
         "subquest_list": [
@@ -893,7 +898,7 @@
     },
     {
         "quest_id": "030",
-        "begin_quest_text": "Battle the next trainer in Viridian Forest.",
+        "begin_quest_text": "Take out the next trainer in Viridian Forest.",
         "location_id": 51,
         "location_name": "Viridian Forest",
         "subquest_list": [
@@ -938,6 +943,12 @@
             {
                 "type": "current_map_id_is",
                 "map_id": 47,
+                "completed": false
+            },
+            {
+                "type": "battle_won",
+                "opponent_identifier": "BUG_CATCHER_VF3",
+                "event_name": "EVENT_BEAT_VIRIDIAN_FOREST_TRAINER_2",
                 "completed": false
             },
             {

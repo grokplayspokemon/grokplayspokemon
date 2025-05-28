@@ -1,0 +1,142 @@
+Understood. Here is a concise, technically precise summary of the xAI API and its workflow—specifically written for o4-mini (or any agentic coding LLM) to ensure all coding and logic for Grok Plays Pokémon Red will strictly adhere to the xAI API specification.
+This is formatted as a direct system prompt or internal doc for LLM alignment.
+xAI API Protocol — Concise Reference for Agentic Coding LLMs (o4-mini)
+1. API Is Stateless
+
+    Every API request must include the entire message history (messages array) needed for context—do not rely on prior state.
+
+    Each message is an object with a role (system, user, assistant, tool) and content.
+
+    Message order is flexible: you may mix and match roles in any sequence as context requires.
+
+2. Roles and Message Content
+
+    system: High-level instructions, behavioral rules, or code/project constraints.
+
+    user: End-user requests, project commands, or task context.
+
+    assistant: Model/LLM output (text, plans, explanations, or tool_call instructions).
+
+    tool: Contains the JSON-encoded result of any function (tool) call. Must reference the tool_call_id from the triggering assistant/tool_call message.
+
+3. Function Calling (Tool Use)
+
+    Function/tool calls are a core part of the xAI workflow.
+
+    When the assistant requires an external action (code execution, file I/O, game API call, etc), it returns a tool_call in its response, specifying:
+
+        The tool/function name
+
+        Arguments (as JSON)
+
+        A unique id
+
+    The controller/server executes the tool, then appends a new message:
+
+        role: "tool"
+
+        content: JSON output of the function/tool
+
+        tool_call_id: must match the call id from assistant/tool_call
+
+Cycle:
+
+    User/system/assistant message (request or context)
+
+    Assistant tool_call (function requested)
+
+    Controller executes function → adds tool message (result)
+
+    Continue conversation or further tool calls
+
+    Multiple tool calls can be returned and handled in a single step.
+
+4. Function/Tool Definitions (Schemas)
+
+    Every tool/function the LLM can call must be defined up-front in the request as part of the tools array.
+
+    Each tool definition includes:
+
+        Name
+
+        Description
+
+        Parameters (schema: type, required fields, constraints), typically using Pydantic or JSON Schema format
+
+    LLM must only call tools as described in the schema. Arguments must match parameter spec.
+
+5. Structured Outputs
+
+    If structured output is required (e.g., valid JSON object), LLM must conform exactly to the provided schema/type.
+
+    Schema enforcement ensures type-safe outputs for downstream processing.
+
+    Use this when parsing documents, extracting entities, or generating data for the game/coding tasks.
+
+6. Streaming Responses
+
+    Setting stream: true enables chunked, real-time output via Server-Sent Events (SSE).
+
+    Each chunk contains incremental assistant output; designed for interactive UIs.
+
+7. Function Calling Modes
+
+    tool_choice: "auto": Model decides whether/when to call tools.
+
+    tool_choice: "required": Model must call a function/tool, even if arguments may be guessed/hallucinated.
+
+    tool_choice: {"type": "function", "function": {"name": ...}}: Force a specific tool.
+
+    tool_choice: "none": No tool call—just assistant text output.
+
+8. Best Practices for Coding (Grok Plays Pokémon Red Project)
+
+    Expose every action/state relevant to gameplay as a function tool (move, button press, read memory, etc).
+
+    Maintain strict state in your message history, including every assistant, user, system, and tool message in proper order.
+
+    When writing code, always adhere to the function schemas and API statelessness.
+
+    Use structured outputs when coding tasks require machine-parseable results.
+
+    Wait for each tool result (role: tool) before advancing conversation or state in the project.
+
+    For debugging, include all relevant context in every request (stateless).
+
+    If the API is upgraded or schema changes, update tool definitions and arguments to match.
+
+9. Minimal Coding Example
+
+(Python, OpenAI client, but logic applies for any implementation)
+
+messages = [ ... ]        # includes system, user, assistant, tool messages as needed
+tools = [ ... ]           # function definitions (name, description, schema)
+response = client.chat.completions.create(
+    model="grok-3-latest",
+    messages=messages,
+    tools=tools,
+    tool_choice="auto",   # or other mode as needed
+    stream=True           # optional, for real-time output
+)
+# On tool_call in response: execute function, append result as tool message, continue
+
+Summary Instruction for o4-mini
+
+    Always generate code and message flows that:
+
+        Respect xAI API statelessness (include all needed history per request)
+
+        Use correct roles and content per the above
+
+        Invoke tools/function calls only as defined by schemas
+
+        Wait for tool results before continuing logic
+
+        Use structured outputs when required
+
+        Follow function calling modes as specified
+
+        Never assume state outside of message history
+
+Paste this as an instruction/system prompt or use as an internal reference for any LLM (including o4-mini) generating code for xAI API projects.
+This ensures full compliance, no ambiguity, and robust function-calling behavior for Grok Plays Pokémon Red or similar applications.

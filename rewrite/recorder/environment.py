@@ -183,6 +183,9 @@ class RedGymEnv(Env):
         self.door_warp = False
         self.on_a_warp_tile = False
         self.next_to_warp_tile = False
+        self.action_taken = None
+        self.last_dialog = ''
+        self.current_dialog = ''
 
         # For saving replays
         self.replays_base_dir = Path(__file__).parent / "replays" / "recordings"
@@ -905,6 +908,9 @@ class RedGymEnv(Env):
         return False
 
     def is_next_to_warp_tile(self):
+        if self.read_m("wIsInBattle") != 0 or self.read_dialog() != "":
+            return False
+        
         cur = self.get_game_coords()
         if cur is None:
             return False
@@ -921,15 +927,15 @@ class RedGymEnv(Env):
         # iterate through warp entries to get all tiles that are warps on the current map
         warp_tiles = []
         for i in range(len(warp_entries)): 
-            print(f"navigator.py: warp_tile_handler(): warp_entries[{i}]={warp_entries[i]}")
+            print(f"environment.py: is_next_to_warp_tile(): warp_entries[{i}]={warp_entries[i]}")
             x, y = warp_entries[i].get('x', None), warp_entries[i].get('y', None)
             if x is not None and y is not None:
                 warp_tiles.append((x, y))
                 continue
             else:
-                print(f"navigator.py: warp_tile_handler(): warp_entries[{i}]={warp_entries[i]} has no x or y")
+                print(f"environment.py: is_next_to_warp_tile(): warp_entries[{i}]={warp_entries[i]} has no x or y")
                 break
-        print(f"navigator.py: warp_tile_handler(): warp_tiles={warp_tiles}")
+        print(f"environment.py: is_next_to_warp_tile(): warp_tiles={warp_tiles}")
         
         # before we determine which direction to press, we need to see if this is a door warp
         # to do that, we see if there are side-by-side warp tiles on the current map
@@ -941,10 +947,10 @@ class RedGymEnv(Env):
                 if distance_between_tiles == 1 and\
                     (self.navigator._manhattan(local, warp_tiles[i]) == 1 or self.navigator._manhattan(local, warp_tiles[j]) == 1):
                     self.door_warp = True
-                    print(f"navigator.py: warp_tile_handler(): side-by-side warp tiles found, this is a door warp")
+                    print(f"environment.py: is_next_to_warp_tile(): side-by-side warp tiles found, this is a door warp")
                 else:
                     self.door_warp = False
-                    print(f"navigator.py: warp_tile_handler(): no side-by-side warp tiles found, this is a tile warp")
+                    print(f"environment.py: is_next_to_warp_tile(): no side-by-side warp tiles found, this is a tile warp")
 
         # now that we have all the warp tiles for this map:
         # for each warp tile, check if the player is 1 tile away from it.
@@ -969,9 +975,10 @@ class RedGymEnv(Env):
         return False
     
     def step(self, action):
+        self.action_taken = action
+        
         dialog = self.read_dialog() or ''
-        # --- AUTO–DOOR/WARP HANDLING (with re-entrancy guard) ---
-        print(f"environment.py: step(): dialog=={dialog}")
+        print(f"environment.py: step(): dialog at top of step() == {dialog}\n")
 
         self.next_to_warp_tile = self.is_next_to_warp_tile()
         print(f"environment.py: step(): self.next_to_warp_tile=={self.next_to_warp_tile}")
@@ -991,11 +998,10 @@ class RedGymEnv(Env):
                 self._handling_warp = False
 
         reset = False # Initialize reset here
-        # Detect active battle dialog: pause only for auto path-follow action
+        # Detect any active dialog: pause path-follow for any dialog
         raw_dialog = self.read_dialog() or ''
-        in_battle = self.read_m("wIsInBattle") != 0
-        if raw_dialog.strip() and in_battle and action == PATH_FOLLOW_ACTION:
-            print("Navigation paused: dialog active, cannot move to next coordinate.")
+        if raw_dialog.strip() and action == PATH_FOLLOW_ACTION:
+            print("environment.py: step(): Navigation paused: dialog active, cannot move to next coordinate.")
             return self._get_obs(), 0.0, reset, False, {}
 
         # --- BEGIN FIXED QUEST 12 PATH FOLLOWING LOGIC ---
@@ -1183,6 +1189,7 @@ class RedGymEnv(Env):
 
         # Trigger debug: dialog, inventory, battle flags
         dialog = self.read_dialog() or ''
+        self.last_dialog = dialog
         debug_print(f"[TriggerTest] dialog_contains_text: {dialog}")
         bag_items = list(self.get_items_in_bag())
         debug_print(f"[TriggerTest] item_is_in_inventory: {[item.name for item in bag_items]}")
@@ -1230,6 +1237,9 @@ class RedGymEnv(Env):
                 _, stat_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}{stat}")
                 self.pyboy.memory[stat_addr] = 0xFF
                 self.pyboy.memory[stat_addr+1] = 0xFF
+
+        print(f"environment.py: step(): dialog after path follow=={self.read_dialog()}")
+        self.current_dialog = self.read_dialog()
         return obs, 0.0, reset, False, info
 
     def run_action_on_emulator(self, action):
@@ -1253,7 +1263,7 @@ class RedGymEnv(Env):
             if not self.read_m("wJoyIgnore"):
                 break
             self.pyboy.button("a", 8)
-            self.pyboy.tick(self.action_freq, render=False)
+            self.pyboy.tick(self.action_freq, render=True)
 
         if self.events.get_event("EVENT_GOT_HM01"):
             if self.auto_teach_cut and not self.check_if_party_has_hm(TmHmMoves.CUT.value):
@@ -2711,7 +2721,8 @@ class RedGymEnv(Env):
             
             # COORDINATE FLATTENING: Convert map-specific coordinates to sequential list
             flattened_coordinates = []
-            for map_id in sorted(coordinate_data.keys(), key=int):
+            # Normalize keys by integer part before underscore when sorting
+            for map_id in sorted(coordinate_data.keys(), key=lambda k: int(k.split('_')[0])):
                 map_coords = coordinate_data[map_id]
                 for coord in map_coords:
                     if isinstance(coord, list) and len(coord) == 2:

@@ -1,8 +1,0 @@
-einops==0.6.0
-gymnasium==0.29.0
-matplotlib==3.7.1
-pygame==2.4.0
-scikit-image==0.24.0
-pyboy==2.4.1
-mediapy==1.2.2
-numpy<2.0

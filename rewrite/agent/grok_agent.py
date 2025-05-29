@@ -18,6 +18,9 @@ from tools.retry import retry_on_exception
 from agent_logging.logger import get_logger
 logger = get_logger(__name__)
 
+# Validator
+from validator import validate_messages, validate_tools, validate_function_call
+
 class GrokAgent:
     """
     Synchronous AI agent for turn-by-turn control.  
@@ -90,6 +93,8 @@ class GrokAgent:
             args = json.loads(raw_args)
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in function_call arguments: {raw_args}") from e
+        # Validate the extracted function call
+        validate_function_call({"name": name, "arguments": args})
         # Save reasoning and usage for UI/metrics
         self.last_reasoning = extract_reasoning(response)
         self.last_usage = extract_usage_metrics(response)
@@ -111,6 +116,9 @@ class GrokAgent:
         Internal helper to call the xAI chat completion endpoint with retry.
         Automatically includes model, messages, tools, and sampling parameters.
         """
+        # Schema validation before API call
+        validate_messages(messages)
+        validate_tools(tools)
         # Gather parameters for request
         effort = get_reasoning_effort()
         temp = get_temperature()

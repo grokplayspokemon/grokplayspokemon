@@ -1,0 +1,35 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "xAI Tool Definition",
+    "type": "object",
+    "properties": {
+        "type": {
+            "const": "function"
+        },
+        "function": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "parameters": {
+                    "type": "object"
+                }
+            },
+            "required": [
+                "name",
+                "description",
+                "parameters"
+            ],
+            "additionalProperties": false
+        }
+    },
+    "required": [
+        "type",
+        "function"
+    ],
+    "additionalProperties": false
+}

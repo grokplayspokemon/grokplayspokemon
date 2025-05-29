@@ -497,7 +497,9 @@ from pyboy.utils import WindowEvent
 
 from data.map import MapIds
 from data.warps import WARP_DICT
-from environment import RedGymEnv
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from environment import RedGymEnv
 from global_map import local_to_global, global_to_local
 # --------------------------------------------------------------------
 
@@ -538,6 +540,10 @@ class InteractiveNavigator:
 
         # Once we leave the player's house, never go back inside during this session
         self._left_home = False
+        
+        # Coords stuff
+        # local (x, y)
+        self.current_coords = None
 
     # ...............................................................
     #  U T I L I T I E S
@@ -676,6 +682,19 @@ class InteractiveNavigator:
             if target_map_id == self.last_warp_origin_map:
                 return False
 
+            # Block any warp to a map not in the current quest's path
+            base = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046"
+            quest_file = base / f"{self.active_quest_id:03d}" / f"{self.active_quest_id:03d}_coords.json"
+            try:
+                quest_data = json.loads(quest_file.read_text())
+                allowed_maps = {int(k.split('_')[0]) for k in quest_data.keys()}
+            except Exception as e:
+                print(f"navigator.py: warp_tile_handler(): could not load quest {self.active_quest_id:03d} JSON: {e}")
+                allowed_maps = set()
+            if target_map_id not in allowed_maps:
+                print(f"navigator.py: warp_tile_handler(): skipping warp to map {target_map_id} (not on quest {self.active_quest_id:03d} route)")
+                return False
+
             # Detect if this is a door warp (two adjacent warp tiles)
             door_warp = any(
                 self._manhattan(nearest_warp, wt2) == 1
@@ -787,6 +806,10 @@ class InteractiveNavigator:
             print(f"Navigator: Roaming in grass: movement {direction_str} failed")
         return True
 
+    # (x, y, map_id)
+    def get_current_local_coords(self):
+        return (self.env.get_game_coords()[0], self.env.get_game_coords()[1], self.env.get_game_coords()[2])
+
     # ...............................................................
     #  M O V E
     # ...............................................................
@@ -800,14 +823,19 @@ class InteractiveNavigator:
         env_qid = getattr(self.env, 'current_loaded_quest_id', None)
         if hasattr(self, '_last_loaded_quest_id') and self._last_loaded_quest_id != env_qid:
             self._reset_state()
-        # Ensure path loaded for current quest
+        # Ensure path loaded for current quest; if none for this map, fallback to previous quest segment
         if not self.sequential_coordinates:
             env_qid = getattr(self.env, 'current_loaded_quest_id', None)
             if env_qid is None:
                 return False
-            # Load the quest's coordinates if we haven't yet
+            # Try loading the quest's full coordinate list for this map
             if not self.load_coordinate_path(env_qid):
-                return False
+                # No full-quest path for this map, try loading per-map segment from most recent quest
+                try:
+                    self.load_segment_for_current_map()
+                    return True
+                except RuntimeError:
+                    return False
         # For Quest 012, once you reach Oak's spot, halt movement so player can press A
         if self.active_quest_id == 12:
             pos = self._get_player_global_coords()
@@ -841,8 +869,9 @@ class InteractiveNavigator:
                         return True
             except Exception as e:
                 print(f"Navigator: error loading next segment for Quest {quest_id:03d}: {e}")
-            # fall back to loading next quest
+            # fall back to manual movement: stop nav when no next segment
             self.quest_locked = False
+            return False
 
         # Handle multi-map quests: if map has changed (e.g., warp to new map segment), reload that segment
         cur_map = self.env.get_game_coords()[2]
@@ -959,6 +988,12 @@ class InteractiveNavigator:
         try:
             with file_path.open() as f:
                 data = json.load(f)
+            # If this quest has no segment for the current map, skip automatic navigation
+            cur_map = self.env.get_game_coords()[2]
+            # JSON keys are mapID or mapID_segment; compare integer prefix
+            if not any(int(k.split('_')[0]) == cur_map for k in data.keys()):
+                print(f"Navigator: quest {quest_id:03d} has no path for map {cur_map}, not loading")
+                return False
         except Exception as e:
             print(f"Navigator: failed to read coord file: {e}")
             return False

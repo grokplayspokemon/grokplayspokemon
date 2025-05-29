@@ -16,7 +16,8 @@ import tkinter.ttk as ttk
 from trigger_evaluator import TriggerEvaluator
 from datetime import datetime
 
-from environment import RedGymEnv, VALID_ACTIONS, PATH_FOLLOW_ACTION
+from wrappers.env_wrapper import EnvWrapper
+from environment import VALID_ACTIONS, PATH_FOLLOW_ACTION
 from pyboy.utils import WindowEvent
 from global_map import local_to_global
 from navigator import InteractiveNavigator
@@ -504,44 +505,44 @@ def get_default_config(rom_path, initial_state_path, infinite_money=False, infin
                        log_frequency=1000, two_bit=False, auto_flash=False, required_tolerance=None,
                        disable_ai_actions=True, use_global_map=False, save_state=True, animate_scripts=True, exploration_inc=0.01, exploration_max=1.0,
                        max_steps_scaling=0.0, map_id_scalefactor=1.0):
-    # For play.py, only use an initial state name if the file actually exists.
-    init_state_name = None
+    # For play.py, if a full path to a .state file is provided and exists, use it directly.
     if initial_state_path:
         p = Path(initial_state_path)
-        # Full path to a state file overrides default
-        if p.is_file():  # Provided a full path to a .state file
-            # Store full path so environment can detect and load directly
-            init_state_name = str(p)
+        if p.suffix == '.state' and p.exists():
+            initial_state_name = str(p)
+        elif p.exists():
+            initial_state_name = p.stem
         else:
-            # Check default state directory for state file
-            state_dir = Path("./states/new")
-            state_file = state_dir / f"{initial_state_path}.state"
-            if state_file.is_file():
-                init_state_name = initial_state_path
-            else:
-                print(f"Initial state file not found at {state_file}, starting new game.")
-                init_state_name = None
+            initial_state_name = None
+    else:
+        initial_state_name = None
 
-    return {
-        "video_dir": Path("./videos/play_sessions/"),
-        "emulator_delay": emulator_delay,
-        "headless": False, # play.py is interactive, so headless is False
-        "state_dir": Path("./states/new"), # Relative to play.py
-        "init_state": init_state_name, # Use provided state, or None
-        "action_freq": 24,
-        "max_steps": 1_000_000,
+    env_config = {
+        "headless": False,  # Must be False for human play
         "save_video": save_video,
         "fast_video": fast_video,
-        "n_record": n_record,
+        "action_freq": 24,
+        "init_state": initial_state_name,  # Use full path or name as needed by RedGymEnv
+        "state_dir": str(Path(__file__).parent / "states"),
+        "video_dir": str(Path(__file__).parent / "replays" / "videos"),
+        "gb_path": rom_path,
+        "debug": False,
+        "sim_frame_dist": 2_000_000.0,
+        "max_steps": 2048 * 100, # Default, can be overridden
+        "save_final_state": True,
+        "print_rewards": True,
+        "mapping_file": str(Path(__file__).resolve().parent.parent.parent / "mapping.txt"), # DATAPlaysPokemon/mapping.txt
+        "session_id": datetime.now().strftime("%Y%m%d-%H%M%S"),
+        "emulator_delay": emulator_delay, # Human-playable delay
+        "n_record": n_record, # Number of episodes to record
         "perfect_ivs": perfect_ivs,
         "reduce_res": reduce_res,
-        "gb_path": rom_path,
         "log_frequency": log_frequency,
         "two_bit": two_bit,
         "auto_flash": auto_flash,
-        "required_tolerance": required_tolerance,
+        "required_tolerance": required_tolerance, # Set via args or None
         "disable_wild_encounters": disable_wild_encounters,
-        "disable_ai_actions": disable_ai_actions, # AI actions likely disabled for interactive play
+        "disable_ai_actions": disable_ai_actions, # True for human play
         "auto_teach_cut": auto_teach_cut,
         "auto_teach_surf": auto_teach_surf,
         "auto_teach_strength": auto_teach_strength,
@@ -564,7 +565,9 @@ def get_default_config(rom_path, initial_state_path, infinite_money=False, infin
         "exploration_max": exploration_max,
         "max_steps_scaling": max_steps_scaling,
         "map_id_scalefactor": map_id_scalefactor,
+        "record_replays": False # Default to False for play.py, override via arg if needed
     }
+    return OmegaConf.create(env_config)
 
 ACTION_MAPPING_PYGAME_TO_INT = {
     pygame.K_DOWN: VALID_ACTIONS.index(WindowEvent.PRESS_ARROW_DOWN),
@@ -578,69 +581,111 @@ ACTION_MAPPING_PYGAME_TO_INT = {
 }
 
 def main():
-    parser = argparse.ArgumentParser(description='Play Pokemon Red interactively and record actions')
-    parser.add_argument('--rom', type=str, help='Path to the Game Boy ROM file', default="./PokemonRed.gb")
-    parser.add_argument('--state', type=str, help='Path to the initial state file (e.g., xxx.state)', default="has_pokedex_nballs") # Default to name, RedGymEnv prepends dir
-    parser.add_argument('--name', type=str, help='Name for the output JSON action file (without extension)', default=None)
-    parser.add_argument('--infinite-money', action='store_true', help='Enable infinite money')
-    parser.add_argument('--infinite-health', action='store_true', help='Enable infinite health')
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--rom", type=str, default=str(Path(__file__).parent / "PokemonRed.gb"))
+    parser.add_argument("--init_state", type=str, default="") # Default to empty, implies new game unless file found
+    parser.add_argument("--record_session", action="store_true", help="Record full session video and path data")
+    # Allow override for config values
+    parser.add_argument("--infinite_money", action="store_true")
+    parser.add_argument("--infinite_health", action="store_true")
+    parser.add_argument("--emulator_delay", type=int, default=11) # Default 11 for PyBoy, adjust as needed
+    parser.add_argument("--disable_wild_encounters", action="store_true") # Simple flag for now
+    parser.add_argument("--auto_teach_cut", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--auto_use_cut", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--auto_teach_surf", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--auto_use_surf", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--auto_teach_strength", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--auto_use_strength", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--auto_solve_strength_puzzles", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--auto_remove_all_nonuseful_items", action="store_true")
+    parser.add_argument("--auto_pokeflute", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--auto_next_elevator_floor", action="store_true")
+    parser.add_argument("--skip_safari_zone", action="store_true")
+    parser.add_argument("--infinite_safari_steps", action="store_true")
+    parser.add_argument("--insert_saffron_guard_drinks", action="store_true")
+    parser.add_argument("--save_video", action="store_true")
+    parser.add_argument("--fast_video", action="store_true")
+    parser.add_argument("--n_record", type=int, default=0)
+    parser.add_argument("--perfect_ivs", action="store_true")
+    parser.add_argument("--reduce_res", action="store_true")
+    parser.add_argument("--log_frequency", type=int, default=1000)
+    parser.add_argument("--two_bit", action="store_true")
+    parser.add_argument("--auto_flash", action="store_true")
+    parser.add_argument("--required_tolerance", type=float, default=None) # Default to None
+    parser.add_argument("--disable_ai_actions", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--use_global_map", action="store_true")
+    parser.add_argument("--save_state", action=argparse.BooleanOptionalAction, default=True) # Save intermediate states on new event/item
+    parser.add_argument("--animate_scripts", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--exploration_inc", type=float, default=0.01)
+    parser.add_argument("--exploration_max", type=float, default=1.0)
+    parser.add_argument("--max_steps_scaling", type=float, default=0.0) # default to no scaling
+    parser.add_argument("--map_id_scalefactor", type=float, default=1.0) # default to no scaling
+    parser.add_argument("--record_replays", action="store_true", help="Enable recording of path traces for replays") # Added record_replays arg
+
     args = parser.parse_args()
 
-    # Load YAML config overrides
-    config_path = Path(__file__).parent.parent / 'config.yaml'
-    try:
-        yaml_cfg = OmegaConf.load(str(config_path))
-        yaml_env = yaml_cfg.env
-    except Exception:
-        yaml_env = None
-
-    # Determine infinite flags: YAML takes precedence unless CLI flag set
-    infinite_money_flag = (args.infinite_money or (yaml_env.infinite_money if yaml_env and 'infinite_money' in yaml_env else False))
-    infinite_health_flag = (args.infinite_health or (yaml_env.infinite_health if yaml_env and 'infinite_health' in yaml_env else False))
-
-    # Set up run directory for quest/trigger persistence
+    # BEGIN: determine sequential run directory and previous run for status loading
     recordings_dir = Path(__file__).parent / "replays" / "recordings"
     recordings_dir.mkdir(parents=True, exist_ok=True)
-    # Track previous run directory for status loading
-    prev_dir = None
-    # Determine naming base: use provided --name or reuse latest numeric run
-    if args.name:
-        name_base = Path(args.name).stem
+    existing_dirs = [d for d in recordings_dir.iterdir() if d.is_dir() and d.name.isdigit()]
+    if existing_dirs:
+        max_id = max(int(d.name) for d in existing_dirs)
+        prev_dir = recordings_dir / f"{max_id:03d}"
+        name_base = f"{max_id+1:03d}"
+        prev_end = prev_dir / f"{str(max_id).zfill(3)}_end.state"
+        effective_init_state = str(prev_end) if prev_end.is_file() else args.init_state
     else:
-        existing_dirs = [d for d in recordings_dir.iterdir() if d.is_dir() and d.name.isdigit()]
-        if existing_dirs:
-            max_id = max(int(d.name) for d in existing_dirs)
-            # Increment to create a new run ID
-            next_id = max_id + 1
-            name_base = f"{next_id:03d}"
-            # Remember the previous run directory for status loading
-            prev_dir = recordings_dir / f"{max_id:03d}"
-            # If an end state exists from the last run, load it from the previous ID
-            prev_end = recordings_dir / f"{max_id:03d}" / f"{max_id:03d}_end.state"
-            if prev_end.is_file():
-                args.state = str(prev_end)
-        else:
-            # First run
-            name_base = "001"
-    # Create run directory named after name_base
+        prev_dir = None
+        name_base = "001"
+        effective_init_state = args.init_state
     run_dir = recordings_dir / name_base
     run_dir.mkdir(parents=True, exist_ok=True)
+    # END: sequential run directory logic
 
-    env_config_dict = get_default_config(
-        args.rom,
-        args.state,
-        infinite_money=infinite_money_flag,
-        infinite_health=infinite_health_flag,
+    # Build env_config from args
+    env_config = get_default_config(
+        rom_path=args.rom,
+        initial_state_path=effective_init_state,
+        infinite_money=args.infinite_money,
+        infinite_health=args.infinite_health,
+        emulator_delay=args.emulator_delay,
+        disable_wild_encounters=args.disable_wild_encounters, # Pass the direct value
+        auto_teach_cut=args.auto_teach_cut,
+        auto_use_cut=args.auto_use_cut,
+        auto_teach_surf=args.auto_teach_surf,
+        auto_use_surf=args.auto_use_surf,
+        auto_teach_strength=args.auto_teach_strength,
+        auto_use_strength=args.auto_use_strength,
+        auto_solve_strength_puzzles=args.auto_solve_strength_puzzles,
+        auto_remove_all_nonuseful_items=args.auto_remove_all_nonuseful_items,
+        auto_pokeflute=args.auto_pokeflute,
+        auto_next_elevator_floor=args.auto_next_elevator_floor,
+        skip_safari_zone=args.skip_safari_zone,
+        infinite_safari_steps=args.infinite_safari_steps,
+        insert_saffron_guard_drinks=args.insert_saffron_guard_drinks,
+        save_video=args.save_video,
+        fast_video=args.fast_video,
+        n_record=args.n_record,
+        perfect_ivs=args.perfect_ivs,
+        reduce_res=args.reduce_res,
+        log_frequency=args.log_frequency,
+        two_bit=args.two_bit,
+        auto_flash=args.auto_flash,
+        required_tolerance=args.required_tolerance,
+        disable_ai_actions=args.disable_ai_actions,
+        use_global_map=args.use_global_map,
+        save_state=args.save_state,
+        animate_scripts=args.animate_scripts,
+        exploration_inc=args.exploration_inc,
+        exploration_max=args.exploration_max,
+        max_steps_scaling=args.max_steps_scaling,
+        map_id_scalefactor=args.map_id_scalefactor
     )
-    
-    # Convert to DictConfig for RedGymEnv if it expects it (optional based on RedGymEnv)
-    # from omegaconf import DictConfig (add this import if needed)
-    # env_config = DictConfig(env_config_dict)
-    env_config = env_config_dict # Assuming RedGymEnv can take a dict
+    env_config.record_replays = args.record_replays # Set record_replays from arg
 
-    env = RedGymEnv(env_config=env_config)
-    # Disable automatic environment replay directory creation; manual run_dir will be used
-    env.record_replays = False
+    env = EnvWrapper(env_config)  # Use the wrapper
+    env.reset()
+    screen = pygame.display.set_mode((700, 600)) # Adjusted for UI
     navigator = InteractiveNavigator(env) # Initialize navigator
     # Make navigator available to QuestManager for current quest tracking
     env.navigator = navigator
@@ -648,9 +693,8 @@ def main():
     quest_manager = QuestManager(env)
 
     obs, info = env.reset() # Initial reset
-    # Use our play.py run_dir for path trace recording AFTER reset has cleared env.current_run_dir
+    # Use our sequential run_dir for path trace recording
     env.current_run_dir = run_dir
-
     # Save initial state to run directory
     save_initial_state(env, run_dir, name_base)
     # Log initial coordinate in path trace
@@ -714,7 +758,7 @@ def main():
     # CORRECTED: Intelligent quest selection with position analysis
     recommended_quest = determine_starting_quest(current_player_pos, current_map_id_for_init, quest_completed, quest_ids_all)
     # Persist quest across reloads: if resuming from a previous run, resume next pending quest
-    if prev_dir is not None:
+    if env.current_run_dir.exists():
         for qid in quest_ids_all:
             if not quest_completed.get(qid, False):
                 recommended_quest = qid
@@ -1041,13 +1085,13 @@ def main():
             # Persist updated statuses to per-run status files
             try:
                 # Save statuses to the current run directory
-                with open(run_dir / "trigger_status.json", "w") as f:
+                with open(env.current_run_dir / "trigger_status.json", "w") as f:
                     json.dump(trigger_completed, f, indent=4)
-                with open(run_dir / "quest_status.json", "w") as f:
+                with open(env.current_run_dir / "quest_status.json", "w") as f:
                     # Persist int keys as zero-padded strings
                     json.dump({str(qid).zfill(3): val for qid, val in quest_completed.items()}, f, indent=4)
             except Exception as e:
-                print(f"Error writing status files to {run_dir}: {e}")
+                print(f"Error writing status files to {env.current_run_dir}: {e}")
             
             # Advance to next uncompleted quest if current quest completed
             current_qid = getattr(quest_manager, 'current_quest_id', None)
@@ -1079,7 +1123,7 @@ def main():
         pygame.quit()
 
         # Always save playthrough actions, coordinates, and end state
-        save_final_state(env, run_dir, recorded_playthrough, coords_data, args.name, name_base)
+        save_final_state(env, env.current_run_dir, recorded_playthrough, coords_data, env.current_run_dir.name, env.current_run_dir.name)
 
 if __name__ == "__main__":
     main()

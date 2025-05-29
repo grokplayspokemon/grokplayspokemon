@@ -1,0 +1,22 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "xAI Function Call",
+    "type": "object",
+    "properties": {
+        "name": {
+            "type": "string",
+            "enum": [
+                "press_next",
+                "press_button"
+            ]
+        },
+        "arguments": {
+            "type": "object"
+        }
+    },
+    "required": [
+        "name",
+        "arguments"
+    ],
+    "additionalProperties": false
+}

@@ -55,6 +55,8 @@ from global_map import GLOBAL_MAP_SHAPE, local_to_global
 from debug import debug_print
 from data.warps import WARP_DICT
 from global_map import local_to_global, global_to_local, MAP_DATA
+import itertools
+import tempfile
 
 PIXEL_VALUES = np.array([0, 85, 153, 255], dtype=np.uint8)
 VISITED_MASK_SHAPE = (144 // 16, 160 // 16, 1)
@@ -81,6 +83,8 @@ VALID_RELEASE_ACTIONS = [
     None,                         # 6: path-follow
     WindowEvent.RELEASE_BUTTON_START,
 ]
+
+from data.item_handler import ItemHandler
 
 VALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start"]
 
@@ -185,7 +189,7 @@ class RedGymEnv(Env):
         self.next_to_warp_tile = False
         self.action_taken = None
         self.last_dialog = ''
-        self.current_dialog = ''
+        self.current_dialog = ''        
 
         # For saving replays
         self.replays_base_dir = Path(__file__).parent / "replays" / "recordings"
@@ -293,6 +297,7 @@ class RedGymEnv(Env):
         self.screen = self.pyboy.screen
 
         self.first = True
+        self.item_handler = ItemHandler(self)
 
         with RedGymEnv.lock:
             env_id = (
@@ -315,6 +320,22 @@ class RedGymEnv(Env):
         self.combined_path = []
         self.current_path_target_index = 0
         self.current_loaded_quest_id = None # Add this for logging
+
+        # Warp tile caching: in-memory and file-backed cache
+        self._warp_info_cache = {}
+        self._new_warp_info = {}
+        self._warp_cache_master_path = Path(__file__).parent / "warp_tile_cache_master.json"
+        run_uuid = uuid.uuid4().hex
+        self._warp_cache_temp_path = Path(tempfile.gettempdir()) / f"warp_cache_run_{run_uuid}.json"
+        # Load master cache if it exists
+        if self._warp_cache_master_path.exists():
+            try:
+                with open(self._warp_cache_master_path, 'r') as f:
+                    master_data = json.load(f)
+                for k, v in master_data.items():
+                    self._warp_info_cache[int(k)] = v
+            except Exception as e:
+                print(f"Error loading warp tile master cache: {e}")
 
         self.init_mem()
 
@@ -710,7 +731,7 @@ class RedGymEnv(Env):
         """
         # If not in battle, set the visited mask. There's no reason to process it when in battle
         scale = 2 if self.reduce_res else 1
-        if self.read_m(0xD057) == 0:
+        if self.read_m("wIsInBattle") == 0:
             '''
             for y in range(-72 // 16, 72 // 16):
                 for x in range(-80 // 16, 80 // 16):
@@ -921,37 +942,23 @@ class RedGymEnv(Env):
         if not local:
             return False
 
-        warp_entries = WARP_DICT.get(MapIds(cur_map).name, [])
-        # detect warp if standing 1 tile away from a warp tile
-        # if so, press the appropriate direction to warp
-        # iterate through warp entries to get all tiles that are warps on the current map
-        warp_tiles = []
-        for i in range(len(warp_entries)): 
-            print(f"environment.py: is_next_to_warp_tile(): warp_entries[{i}]={warp_entries[i]}")
-            x, y = warp_entries[i].get('x', None), warp_entries[i].get('y', None)
-            if x is not None and y is not None:
-                warp_tiles.append((x, y))
-                continue
-            else:
-                print(f"environment.py: is_next_to_warp_tile(): warp_entries[{i}]={warp_entries[i]} has no x or y")
-                break
-        print(f"environment.py: is_next_to_warp_tile(): warp_tiles={warp_tiles}")
+        # Warp tile caching for this map
+        info = self._warp_info_cache.get(cur_map)
+        if info is None:
+            entries = WARP_DICT.get(MapIds(cur_map).name, [])
+            warp_tiles = [(e.get('x'), e.get('y')) for e in entries if e.get('x') is not None and e.get('y') is not None]
+            # classify door warp: adjacent warp tiles
+            door_flag = False
+            for a, b in itertools.combinations(warp_tiles, 2):
+                if self.navigator._manhattan(a, b) == 1:
+                    door_flag = True
+                    break
+            info = {'warp_tiles': warp_tiles, 'door_warp': door_flag}
+            self._warp_info_cache[cur_map] = info
+            self._new_warp_info[cur_map] = info
+        warp_tiles = info['warp_tiles']
+        self.door_warp = info['door_warp']
         
-        # before we determine which direction to press, we need to see if this is a door warp
-        # to do that, we see if there are side-by-side warp tiles on the current map
-        # if there are, then we know this is a door warp
-        # if there are not, then we know this is a tile warp
-        for i in range(len(warp_tiles)):
-            for j in range(i + 1, len(warp_tiles)):
-                distance_between_tiles = self.navigator._manhattan(warp_tiles[i], warp_tiles[j])
-                if distance_between_tiles == 1 and\
-                    (self.navigator._manhattan(local, warp_tiles[i]) == 1 or self.navigator._manhattan(local, warp_tiles[j]) == 1):
-                    self.door_warp = True
-                    print(f"environment.py: is_next_to_warp_tile(): side-by-side warp tiles found, this is a door warp")
-                else:
-                    self.door_warp = False
-                    print(f"environment.py: is_next_to_warp_tile(): no side-by-side warp tiles found, this is a tile warp")
-
         # now that we have all the warp tiles for this map:
         # for each warp tile, check if the player is 1 tile away from it.
         # we only want to do things if player is 1 tile away from a warp tile.
@@ -1180,6 +1187,8 @@ class RedGymEnv(Env):
         self.required_events = required_events
         self.required_items = required_items
 
+        self.item_handler.scripted_manage_items()
+        
         self.update_path_trace() # Update path trace with the new state
 
         obs = self._get_obs()
@@ -1243,6 +1252,7 @@ class RedGymEnv(Env):
         return obs, 0.0, reset, False, info
 
     def run_action_on_emulator(self, action):
+        print(f"environment.py: run_action_on_emulator(): action: {action}")
         # Skip path-follow placeholder action (no actual button press)
         if action == PATH_FOLLOW_ACTION:
             return
@@ -1253,7 +1263,7 @@ class RedGymEnv(Env):
         # if not self.disable_ai_actions:
         self.pyboy.send_input(VALID_ACTIONS[action])
         self.pyboy.send_input(VALID_RELEASE_ACTIONS[action], delay=self.emulator_delay)
-        self.pyboy.tick(self.action_freq - 1, render=True)
+        self.pyboy.tick(self.action_freq - 1, render=False)
 
         # TODO: Split this function up. update_seen_coords should not be here!
         self.update_seen_coords()
@@ -2670,6 +2680,34 @@ class RedGymEnv(Env):
             except Exception as e:
                 print(f"Error saving fallback ending game state: {e}")
 
+        # Warp tile cache persistence: write run temp and merge master
+        try:
+            with open(self._warp_cache_temp_path, 'w') as f:
+                json.dump({str(k): v for k, v in self._new_warp_info.items()}, f, indent=2)
+            print(f"Wrote warp cache run data to {self._warp_cache_temp_path}")
+        except Exception as e:
+            print(f"Error writing warp cache temp file: {e}")
+
+        master = {}
+        if self._warp_cache_master_path.exists():
+            try:
+                with open(self._warp_cache_master_path, 'r') as f:
+                    master = json.load(f)
+            except Exception as e:
+                print(f"Error reloading master warp cache: {e}")
+        for k, v in self._new_warp_info.items():
+            ks = str(k)
+            if ks in master:
+                if master[ks] != v:
+                    print(f"Conflict in warp cache for map {k}: master {master[ks]}, new {v}")
+            else:
+                master[ks] = v
+        try:
+            with open(self._warp_cache_master_path, 'w') as f:
+                json.dump(master, f, indent=2)
+            print(f"Merged warp cache into master file {self._warp_cache_master_path}")
+        except Exception as e:
+            print(f"Error writing master warp cache: {e}")
 
     def load_coordinate_path(self, quest_id: int) -> bool:
         """Enhanced coordinate loading with comprehensive validation and error correction"""

@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grok Plays Pokémon - Stream</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: #0a0a0a;
+            color: #ffffff;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Elegant grid layout */
+        .stream-container {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            /* MODIFIED: Ensure row 2 takes available space, others fit content */
+            grid-template-rows: auto 1fr auto auto;
+            gap: 1px;
+            height: 100vh;
+            background-color: #1a1a1a;
+            padding: 1px;
+        }
+
+        /* Subtle animated gradient border */
+        .gradient-border {
+            position: relative;
+            background: #0a0a0a;
+        }
+
+        .gradient-border::before {
+            content: '';
+            position: absolute;
+            inset: -1px;
+            background: linear-gradient(45deg, #3b82f6, #8b5cf6, #ec4899, #3b82f6);
+            background-size: 400% 400%;
+            animation: gradient-shift 15s ease infinite;
+            z-index: -1;
+            opacity: 0.5;
+        }
+
+        @keyframes gradient-shift {
+
+            0%,
+            100% {
+                background-position: 0% 50%;
+            }
+
+            50% {
+                background-position: 100% 50%;
+            }
+        }
+
+        /* Panel styling */
+        .panel {
+            background: #0a0a0a;
+            position: relative;
+            overflow: hidden;
+            /* ADDED: Ensure correct grid placement and 1fr behavior */
+            grid-row: 2;
+            grid-column: 1;
+            min-height: 0;
+            /* Helps 1fr rows behave */
+        }
+
+
+        /* Game screen */
+        .game-screen {
+            background: #000;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .game-placeholder {
+            width: 90%;
+            height: 90%;
+            background: #111;
+            border: 1px solid #222;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #444;
+            font-size: 24px;
+        }
+
+        /* Header */
+        .header {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 30px;
+            background: #0a0a0a;
+            border-bottom: 1px solid #1a1a1a;
+            grid-row: 1;
+            /* Ensure header is in row 1 */
+        }
+
+        .title {
+            font-size: 84px;
+            font-weight: 300;
+            letter-spacing: -0.5px;
+        }
+
+        .title strong {
+            font-weight: 600;
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .live-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: #dc2626;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            animation: spin 5.5s linear infinite;
+        }
+
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: #fff;
+            border-radius: 50%;
+            animation: pulse 0.5s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.6;
+                transform: scale(0.8);
+            }
+        }
+
+        /* Sidebar sections */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            background: #1a1a1a;
+            /* ADDED: Span rows 2 and 3 */
+            grid-row: 2 / 4;
+            grid-column: 2;
+        }
+
+        .sidebar-section {
+            background: #0a0a0a;
+            padding: 20px;
+            border-left: 1px solid #1a1a1a;
+        }
+
+        .section-title {
+            font-size: 31px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #666;
+            margin-bottom: 16px;
+        }
+
+        /* MODIFIED: New class for the relocated team display area */
+        .team-display-area {
+            grid-column: 1;
+            grid-row: 3;
+            padding: 20px;
+            border-top: 1px solid #1a1a1a;
+            background: #0a0a0a;
+            /* ADDED: Prevent content from overflowing/pushing */
+            overflow: hidden;
+        }
+
+        /* AI Log */
+        .ai-log {
+            flex: 1;
+            overflow-y: auto;
+            font-size: 30px;
+            line-height: 1.7;
+            padding: 24px;
+            letter-spacing: 0.3px;
+        }
+
+        .log-entry {
+            margin-bottom: 18px;
+            padding-left: 24px;
+            position: relative;
+            color: #999;
+        }
+
+        .log-entry::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 12px;
+            width: 6px;
+            height: 6px;
+            background: #444;
+            border-radius: 50%;
+        }
+
+        .log-entry.action {
+            color: #3b82f6;
+        }
+
+        .log-entry.action::before {
+            background: #3b82f6;
+        }
+
+        .log-entry.analysis {
+            color: #8b5cf6;
+        }
+
+        .log-entry.analysis::before {
+            background: #8b5cf6;
+        }
+
+        .log-entry.decision {
+            color: #10b981;
+        }
+
+        .log-entry.decision::before {
+            background: #10b981;
+        }
+
+        .log-timestamp {
+            font-size: 11px;
+            color: #444;
+            margin-right: 8px;
+        }
+
+        /* REMOVED: LLM Usage Styling (Moved to footer/bottom-bar) */
+
+        /* Team section */
+        .team-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 16px;
+            width: 100%;
+        }
+
+        .pokemon-card {
+            background: #111;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 12px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 320px;
+        }
+
+        .pokemon-card:hover {
+            background: #181818;
+            border-color: #444;
+            transform: translateY(-4px);
+        }
+
+        .pokemon-sprite-container {
+            width: 100%;
+            aspect-ratio: 1/1;
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.08));
+            border-radius: 6px;
+            padding: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+
+        .pokemon-sprite {
+            width: 100%;
+            height: 100%;
+            max-width: 396px;
+            max-height: 396px;
+            image-rendering: pixelated;
+            filter: brightness(1.1) contrast(1.1);
+            object-fit: contain;
+            animation: bounce 1ms ease-in-out infinite;
+        }
+
+        .pokemon-card-info-wrapper {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex-grow: 1;
+            justify-content: flex-start;
+        }
+
+        .pokemon-card-main-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            width: 100%;
+            margin-bottom: 8px;
+        }
+
+        .pokemon-card-left {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            text-align: left;
+        }
+
+        .pokemon-card-right {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            text-align: right;
+        }
+
+        .pokemon-name {
+            font-size: 32px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #e0e0e0;
+            line-height: 1.1;
+        }
+
+        .pokemon-species-name {
+            font-size: 26px;
+            font-weight: 500;
+            color: #bbb;
+            text-transform: capitalize;
+            margin-top: 2px;
+            line-height: 1.1;
+        }
+
+        .pokemon-level {
+            font-size: 38px;
+            color: #e0e0e0;
+            font-weight: 600;
+            line-height: 1.1;
+        }
+
+        .pokemon-types-row {
+            width: 100%;
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 8px;
+            min-height: 50px;
+        }
+
+        .pokemon-types {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: flex-end;
+        }
+
+        .type-badge {
+            font-size: 22px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .pokemon-card-stats-footer {
+            width: 100%;
+            margin-top: auto;
+        }
+
+        .hp-bar {
+            height: 22px;
+            background: #2a2a2a;
+            border-radius: 3px;
+            overflow: hidden;
+            width: 100%;
+            margin-bottom: 6px;
+        }
+
+        .hp-fill {
+            height: 100%;
+            background: #10b981;
+            transition: width 0.3s ease, background-color 0.3s ease;
+        }
+
+        .hp-fill.medium {
+            background: #f59e0b;
+        }
+
+        .hp-fill.low {
+            background: #ef4444;
+        }
+
+        .pokemon-card-bottom-details {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        .hp-text {
+            font-size: 26px;
+            color: #aaa;
+            font-variant-numeric: tabular-nums;
+            line-height: 1.1;
+        }
+
+        .pokemon-status {
+            font-size: 26px;
+            font-weight: 600;
+            color: #aaa;
+            text-transform: uppercase;
+            line-height: 1.1;
+        }
+
+        /* Type colors */
+        .type-normal {
+            background: #9d9d9a;
+            color: #000;
+        }
+
+        .type-fire {
+            background: #F08030;
+            color: #000;
+        }
+
+        .type-water {
+            background: #6890F0;
+            color: #fff;
+        }
+
+        .type-electric {
+            background: #F8D030;
+            color: #000;
+        }
+
+        .type-grass {
+            background: #78C850;
+            color: #000;
+        }
+
+        .type-ice {
+            background: #98D8D8;
+            color: #000;
+        }
+
+        .type-fighting {
+            background: #C03028;
+            color: #fff;
+        }
+
+        .type-poison {
+            background: #A040A0;
+            color: #fff;
+        }
+
+        .type-ground {
+            background: #E0C068;
+            color: #000;
+        }
+
+        .type-flying {
+            background: #A890F0;
+            color: #000;
+        }
+
+        .type-psychic {
+            background: #F85888;
+            color: #fff;
+        }
+
+        .type-bug {
+            background: #A8B820;
+            color: #000;
+        }
+
+        .type-rock {
+            background: #B8A038;
+            color: #000;
+        }
+
+        .type-ghost {
+            background: #705898;
+            color: #fff;
+        }
+
+        .type-dragon {
+            background: #7038F8;
+            color: #fff;
+        }
+
+        .type-dark {
+            background: #705848;
+            color: #fff;
+        }
+
+        .type-steel {
+            background: #B8B8D0;
+            color: #000;
+        }
+
+        .type-fairy {
+            background: #EE99AC;
+            color: #000;
+        }
+
+        /* Empty slot */
+        .empty-slot {
+            background: #0a0a0a;
+            border: 1px dashed #1a1a1a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+            font-size: 24px;
+            min-height: 320px;
+        }
+
+        /* Bottom stats bar */
+        .bottom-bar {
+            grid-column: 1 / -1;
+            background: #0a0a0a;
+            border-top: 1px solid #1a1a1a;
+            padding: 16px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            grid-row: 4;
+            flex-wrap: wrap;
+            /* Allow wrapping if footer gets crowded */
+        }
+
+        .bottom-stats {
+            display: flex;
+            gap: 25px;
+            /* MODIFIED: Slightly reduced gap */
+            flex-wrap: wrap;
+            /* Allow wrapping */
+            align-items: baseline;
+        }
+
+        .bottom-stat {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+        }
+
+        .bottom-stat-label {
+            font-size: 22px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .bottom-stat-value {
+            font-size: 26px;
+            font-weight: 500;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ADDED: Style for LLM cost in the footer */
+        .bottom-stat-value.cost {
+            color: #2ecc71;
+            font-weight: 600;
+        }
+
+
+        /* Input visualization */
+        .input-viz {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .input-key {
+            padding: 4px 8px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            animation: key-press 0.3s ease;
+        }
+
+        @keyframes key-press {
+            0% {
+                transform: scale(0.9);
+                opacity: 0.5;
+            }
+
+            50% {
+                transform: scale(1.1);
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        @keyframes bounce {
+            0% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-10px);
+            }
+
+            100% {
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes flip {
+            0% {
+                transform: rotateY(0deg);
+            }
+
+            100% {
+                transform: rotateY(180deg);
+            }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0a0a0a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #444;
+        }
+
+        /* Loading animation */
+        .loading {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #333;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="stream-container">
+        <header class="header">
+            <h1 class="title"><strong>Grok</strong> Plays Pokémon Red</h1>
+            <div class="flex items-center gap-24">
+                <div class="flex gap-16 text-sm">
+                    <div>
+                        <span class="text-gray-500">Session</span>
+                        <span class="ml-2 mono">#0847</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500">Uptime</span>
+                        <span class="ml-2 mono">02:45:33</span>
+                    </div>
+                </div>
+                <div class="live-badge">
+                    <div class="live-dot"></div>
+                    LIVE
+                </div>
+            </div>
+        </header>
+
+        <main class="panel gradient-border">
+            <div class="game-screen">
+                <div class="game-placeholder">
+                    Game Capture
+                </div>
+            </div>
+        </main>
+
+        <section class="panel team-display-area">
+            <h2 class="section-title"
+                style="text-align: center; margin-bottom: 20px; font-size: 36px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #bbb;">
+                Active Team</h2>
+            <div class="team-grid" id="pokemon-team" style="max-width: 100%; margin: 0 auto;">
+                <div class="pokemon-card empty-slot">
+                    <div class="loading"></div>
+                </div>
+            </div>
+        </section>
+
+        <aside class="sidebar">
+            <section class="sidebar-section ai-log">
+                <h2 class="section-title">Decision Log</h2>
+                <div id="ai-log-content">
+                    <div class="log-entry analysis">
+                        <span class="log-timestamp mono">10:35:42</span>
+                        Analyzing route options: Viridian Forest vs Route 2 bypass
+                    </div>
+                    <div class="log-entry decision">
+                        <span class="log-timestamp mono">10:35:43</span>
+                        Selected: Viridian Forest (optimal for experience farming)
+                    </div>
+                    <div class="log-entry action">
+                        <span class="log-timestamp mono">10:35:44</span>
+                        Initiating movement: North through Route 2 entrance
+                    </div>
+                    <div class="log-entry analysis">
+                        <span class="log-timestamp mono">10:35:51</span>
+                        Wild encounter: Caterpie Lv.3 - Threat level: Minimal
+                    </div>
+                    <div class="log-entry decision">
+                        <span class="log-timestamp mono">10:35:52</span>
+                        Battle strategy: Quick elimination with Ember
+                    </div>
+                    <div class="log-entry action">
+                        <span class="log-timestamp mono">10:35:53</span>
+                        Executing: Fight → Ember → Target: Caterpie
+                    </div>
+                </div>
+            </section>
+        </aside>
+
+        <footer class="bottom-bar">
+            <div class="bottom-stats">
+                <div class="bottom-stat">
+                    <span class="bottom-stat-label">Location</span>
+                    <span class="bottom-stat-value">Viridian Forest</span>
+                </div>
+                <div class="bottom-stat">
+                    <span class="bottom-stat-label">Money</span>
+                    <span class="bottom-stat-value mono">₽3,247</span>
+                </div>
+                <div class="bottom-stat">
+                    <span class="bottom-stat-label">Pokédex</span>
+                    <span class="bottom-stat-value">12/151</span>
+                </div>
+                <div class="bottom-stat">
+                    <span class="bottom-stat-label">Badges</span>
+                    <span class="bottom-stat-value">0/8</span>
+                </div>
+                <div class="bottom-stat">
+                    <span class="bottom-stat-label">Steps</span>
+                    <span class="bottom-stat-value mono">24,736</span>
+                </div>
+                <div class="bottom-stat">
+                    <span class="bottom-stat-label">LLM In</span>
+                    <span class="bottom-stat-value mono" id="total-input-tokens">0</span>
+                </div>
+                <div class="bottom-stat">
+                    <span class="bottom-stat-label">LLM Out</span>
+                    <span class="bottom-stat-value mono" id="total-output-tokens">0</span>
+                </div>
+                <div class="bottom-stat">
+                    <span class="bottom-stat-label">LLM Cost</span>
+                    <span class="bottom-stat-value mono cost" id="estimated-cost">$0.00000</span>
+                </div>
+            </div>
+            <div class="input-viz" id="input-display">
+                <span class="text-gray-500 text-xs uppercase tracking-wide">Last Input</span>
+                <span class="input-key">A</span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // Pokemon team data with PokeAPI integration
+        // TODO: Fetch real-time team data from the game state/backend. This is placeholder data.
+        const teamData = [
+            {
+                id: 4,
+                name: 'Charmander', // Species name
+                nickname: 'CHARMANDER', // Nickname, defaults to species name if not specified by user
+                level: 14,
+                hp: 38,
+                maxHp: 41,
+                types: ['fire'],
+                status: 'OK' // Added status
+            },
+            {
+                id: 16,
+                name: 'Pidgey',
+                nickname: 'PIDGEY',
+                level: 8,
+                hp: 15, // Example: lower HP
+                maxHp: 28,
+                types: ['normal', 'flying'],
+                status: 'PSN' // Example status
+            },
+            {
+                id: 19,
+                name: 'Rattata',
+                nickname: 'RATATTACK', // Longer nickname example
+                level: 6,
+                hp: 5, // Example: critical HP
+                maxHp: 23,
+                types: ['normal'],
+                status: 'BRN' // Example status
+            },
+            {
+                id: 25,
+                name: 'Pikachu',
+                nickname: 'SPARKY',
+                level: 10,
+                hp: 30,
+                maxHp: 30,
+                types: ['electric'],
+                status: 'PAR'
+            }
+        ];
+
+        // Fetch Pokemon data from PokeAPI and render team
+        async function loadPokemonTeam() {
+            const teamContainer = document.getElementById('pokemon-team');
+            teamContainer.innerHTML = ''; // Clear existing cards/loading
+
+            for (const pokemon of teamData) {
+                try {
+                    // TODO: Cache API responses to avoid hitting limits and improve load times.
+                    const response = await fetch(`https://pokeapi.co/api/v2/pokemon/${pokemon.id}`);
+                    if (!response.ok) throw new Error(`API request failed for ${pokemon.name}`);
+                    const data = await response.json();
+                    const card = createPokemonCard(pokemon, data);
+                    teamContainer.appendChild(card);
+                } catch (error) {
+                    console.error(`Failed to load Pokemon ${pokemon.id} (${pokemon.name}):`, error);
+                    // Optionally, render an error card
+                    const errorCard = document.createElement('div');
+                    errorCard.className = 'pokemon-card empty-slot';
+                    errorCard.textContent = `Error loading ${pokemon.name}`;
+                    teamContainer.appendChild(errorCard);
+                }
+            }
+
+            // Add empty slots
+            for (let i = teamData.length; i < 6; i++) {
+                const emptySlot = document.createElement('div');
+                emptySlot.className = 'pokemon-card empty-slot';
+                emptySlot.innerHTML = '—';
+                teamContainer.appendChild(emptySlot);
+            }
+        }
+
+        function createPokemonCard(pokemon, apiData) {
+            const card = document.createElement('div');
+            card.className = 'pokemon-card';
+
+            const hpPercent = (pokemon.hp / pokemon.maxHp) * 100;
+            let hpClass = '';
+            if (hpPercent <= 20) {
+                hpClass = 'low';
+            } else if (hpPercent <= 50) {
+                hpClass = 'medium';
+            }
+            const currentNickname = pokemon.nickname || pokemon.name;
+            const currentStatus = pokemon.status || 'OK';
+
+            card.innerHTML = `
+                <div class="pokemon-sprite-container">
+                    <img src="${apiData.sprites.front_default || 'https://placehold.co/96x96/333333/666666?text=N/A'}" alt="${pokemon.name}" class="pokemon-sprite" onerror="this.src='https://placehold.co/96x96/333333/666666?text=Error'; this.onerror=null;">
+                </div>
+                
+                <div class="pokemon-card-info-wrapper">
+                    <div class="pokemon-card-main-info">
+                        <div class="pokemon-card-left">
+                            <div class="pokemon-name">${currentNickname}</div>
+                            <div class="pokemon-species-name">${pokemon.name}</div>
+                        </div>
+                        <div class="pokemon-card-right">
+                            <div class="pokemon-level">Lv. ${pokemon.level}</div>
+                        </div>
+                    </div>
+
+                    <div class="pokemon-types-row">
+                        <div class="pokemon-types">
+                            ${pokemon.types.map(type => `<span class="type-badge type-${type.toLowerCase()}">${type}</span>`).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pokemon-card-stats-footer">
+                    <div class="hp-bar">
+                        <div class="hp-fill ${hpClass}" style="width: ${hpPercent}%"></div>
+                    </div>
+                    <div class="pokemon-card-bottom-details">
+                        <div class="hp-text">HP: ${pokemon.hp}/${pokemon.maxHp}</div>
+                        <div class="pokemon-status">${currentStatus}</div>
+                    </div>
+                </div>
+            `;
+            return card;
+        }
+
+        // Initialize
+        loadPokemonTeam();
+
+        // Simulate live updates
+        // TODO: Implement WebSocket or polling to receive new log entries dynamically.
+        function addLogEntry(type, message) {
+            const logContent = document.getElementById('ai-log-content');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+            entry.innerHTML = `<span class="log-timestamp mono">${timestamp}</span>${message}`;
+            logContent.insertBefore(entry, logContent.firstChild);
+            while (logContent.children.length > 20) { // Keep log size manageable
+                logContent.removeChild(logContent.lastChild);
+            }
+        }
+
+        let currentTotalInputTokens = 0;
+        let currentTotalOutputTokens = 0;
+        // TODO: Fetch real LLM usage data or receive via WebSocket/backend updates.
+        function updateLlmUsage(newInputTokens, newOutputTokens) {
+            currentTotalInputTokens += newInputTokens;
+            currentTotalOutputTokens += newOutputTokens;
+            document.getElementById('total-input-tokens').textContent = currentTotalInputTokens.toLocaleString();
+            document.getElementById('total-output-tokens').textContent = currentTotalOutputTokens.toLocaleString();
+            // TODO: Use accurate, up-to-date pricing models.
+            const inputCost = (currentTotalInputTokens / 1000000) * 0.30;
+            const outputCost = (currentTotalOutputTokens / 1000000) * 0.50;
+            const totalCost = inputCost + outputCost;
+            document.getElementById('estimated-cost').textContent = `$${totalCost.toFixed(5)}`;
+        }
+
+        // TODO: Implement function to update input display based on actual inputs received.
+        function updateInputDisplay(key) {
+            const inputDisplay = document.getElementById('input-display');
+            // Example: Remove existing key, add new one
+            const oldKey = inputDisplay.querySelector('.input-key');
+            if (oldKey) {
+                oldKey.remove();
+            }
+            const newKeySpan = document.createElement('span');
+            newKeySpan.className = 'input-key';
+            newKeySpan.textContent = key;
+            inputDisplay.appendChild(newKeySpan);
+        }
+
+        // Example simulation calls (Remove when real data is implemented)
+        // setInterval(() => {
+        //     const types = ['analysis', 'decision', 'action'];
+        //     addLogEntry(types[Math.floor(Math.random() * 3)], `Simulated log entry ${Math.random().toFixed(3)}`);
+        //     updateLlmUsage(Math.floor(Math.random() * 500 + 100), Math.floor(Math.random() * 50 + 10));
+        //     updateInputDisplay(inputs[Math.floor(Math.random() * inputs.length)]);
+        // }, 5000);
+
+    </script>
+</body>
+
+</html>

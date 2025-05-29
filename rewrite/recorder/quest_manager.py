@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional
 from collections import defaultdict
+from data.item_handler import ItemHandler
 
 class QuestManager:
     """
@@ -63,8 +64,10 @@ class QuestManager:
         env.step = _step_wrapper
         self.item_count = 0
         self.pressed_button_dict = {} # {quest_id: {coordinate: {action_index: count}}}
+        self.item_handler = ItemHandler(self.env)
+        self.last_num_potions = 0
 
-    def update_pressed_button_dict(self, coord, action_index, quest):
+    def update_pressed_button_dict(self, coord, action_index, quest, value=1):
         # If the quest ID is not in the dictionary, initialize it
         if quest not in self.pressed_button_dict:
             self.pressed_button_dict[quest] = {}
@@ -81,7 +84,7 @@ class QuestManager:
             print(f'Initialized count for action_index: {action_index} at coordinate: {coord}')
 
         # Increment the count for the specific action at the specific coordinate for the specific quest
-        self.pressed_button_dict[quest][coord][action_index] += 1
+        self.pressed_button_dict[quest][coord][action_index] += value
         print(f'Incremented count for action_index {action_index} at coordinate {coord} for quest_id {quest}')
     
     def filter_action(self, action: int) -> int:
@@ -107,38 +110,23 @@ class QuestManager:
         self.env.current_loaded_quest_id = current_quest_id
         self.current_quest_id = current_quest_id
         # Hard-coded logic for quest 014: use environment path-follow
-        coords14 = self.loaded_paths.get(14, [])
-        # Check current global position
+        if 14 not in self.loaded_paths:
+            file14 = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / "014" / "014_coords.json"
+            try:
+                data14 = json.load(file14.open('r'))
+                self.loaded_paths[14] = [(int(pair[0]), int(pair[1])) for seg in data14.values() for pair in seg]
+            except Exception:
+                self.loaded_paths[14] = []
+        coords14 = self.loaded_paths[14]
         x, y, map_id = self.env.get_game_coords()
         gy, gx = local_to_global(y, x, map_id)
-        
+
         # reset pressed_button_dict after quest is completed
         if current_quest_id-1 in self.pressed_button_dict:
-            print
             del self.pressed_button_dict[current_quest_id-1]
-        
-        # print(f"quest_manager.py: filter_action(): action_taken=={self.env.action_taken}")
-        # print(f"quest_manager.py: filter_action(): wIsInBattle=={self.env.read_m('wIsInBattle')}")
-        # # dynamic dialog detection in battle using stored last_dialog
-        # if self.env.read_m("wIsInBattle") != 0:
-        #     current_dialog = getattr(self.env, 'last_dialog', '')
-        #     print(f"quest_manager.py: filter_action(): last_dialog=={self.env.current_dialog}")
-        #     # in the FIGHT submenu, if B was pressed last, send B noop to refresh dialog
-        #     if "TYPE/" in current_dialog and self.env.action_taken == self.b_action_index:
-        #         print(f"quest_manager.py: filter_action(): b noop sent, PRESSING b")
-        #         return self.b_action_index
-        #     # on main battle menu after A, send left noop to refresh dialog
-        #     elif "►FIGHT" in current_dialog and self.env.action_taken == self.a_action_index:
-        #         print(f"quest_manager.py: filter_action(): left noop sent, PRESSING left")
-        #         return self.left_action_index
 
-        
-        # Only auto-follow quest 014 path when actively on quest 014
         if current_quest_id == 14 and (gy, gx) in coords14:
-            # Load into environment if not already
-            if getattr(self.env, 'current_loaded_quest_id', None) != 14:
-                self.env.load_coordinate_path(14)
-            # Use path-follow action for correct navigation
+            self.env.load_coordinate_path(14)
             return PATH_FOLLOW_ACTION
 
         # Hard-coded logic for quest 015 (Town Map and warp)
@@ -172,38 +160,25 @@ class QuestManager:
                 self.nav.current_coordinate_index = coords16.index((gy, gx))
             if getattr(self.nav, 'active_quest_id', None) == 16:
                 return PATH_FOLLOW_ACTION
-
-        # HARD-CODED hack for Quest 003: if on tile (344, 88) on map 0, force UP
-        if current_quest_id == 3:
-            x, y, map_id = self.env.get_game_coords()
-            gy, gx = local_to_global(y, x, map_id)
-            if (gy, gx) == (340, 94) or (gy, gx) == (340, 95):
-                print("quest_manager.py: hack for quest 003 at tile (344, 88) or (344, 89) - move UP")
-                return self.up_action_index
-
-        if current_quest_id == 2 or current_quest_id == 3:
-            x, y, map_id = self.env.get_game_coords()
-            gy, gx = local_to_global(y, x, map_id)
-            if (gy, gx) == (349, 82):
-                return self.down_action_index
-        
+               
         if current_quest_id == 5 and gy == 338 and gx == 94:
             return self.up_action_index
         
         if current_quest_id == 2 or current_quest_id == 3:
             x, y, map_id = self.env.get_game_coords()
             gy, gx = local_to_global(y, x, map_id)
+            # HARD-CODED hack for Quest 003: if on tile (344, 88) on map 0, force UP
+            if current_quest_id == 3:
+                if (gy, gx) == (340, 94) or (gy, gx) == (340, 95):
+                    print("quest_manager.py: hack for quest 003 at tile (344, 88) or (344, 89) - move UP")
+                    return self.up_action_index
             if (gy, gx) == (355, 78) or (gy, gx) == (355, 77):
                 return self.right_action_index
-            if (gy, gx) == (343, 89):
+            elif (gy, gx) == (343, 89):
                 return self.down_action_index
-            if (gy, gx) == (344, 89):
+            elif (gy, gx) == (344, 89):
                 return self.down_action_index
-        
-        if current_quest_id == 2 or current_quest_id == 3:
-            x, y, map_id = self.env.get_game_coords()
-            gy, gx = local_to_global(y, x, map_id)
-            if (gy, gx) == (344, 89):
+            elif (gy, gx) == (349, 82):
                 return self.down_action_index
         
         # Talk to Oak
@@ -260,8 +235,7 @@ class QuestManager:
                         # return a_action_index if a has not been pressed on this coordinate
                         self.update_pressed_button_dict((gy, gx), self.a_action_index, current_quest_id)
                         # self.pressed_button_dict[current_quest_id][(gy, gx)][self.a_action_index] += 1
-                        return self.a_action_index
-                    
+                        return self.a_action_index                   
             # press a once at (297, 118) to grab viridian city cut tree potion
             if (gy, gx) == (270, 89)  and current_quest_id in self.pressed_button_dict:
                 # initialize the pressed_button_dict for this quest if it doesn't exist
@@ -275,21 +249,7 @@ class QuestManager:
                         self.update_pressed_button_dict((gy, gx), self.a_action_index, current_quest_id)
                         # self.pressed_button_dict[current_quest_id][(gy, gx)][self.a_action_index] += 1
                         return self.a_action_index
-        
-        # if current_quest_id == 26 and self.pressed_button_dict.get(current_quest_id, []) == []:
-        #     x, y, map_id = self.env.get_game_coords()
-        #     gy, gx = local_to_global(y, x, map_id)
-        #     if (gy, gx) == (297, 118) and not self.env.read_hp_fraction() == 1:
-        #         self.pressed_button_dict[current_quest_id] += [(297, 118, self.a_action_index)]
-        #         return self.a_action_index
-            
-        #     if (gy, gx) == (270, 89):
-        #         self.pressed_button_dict[current_quest_id] += [(270, 89, self.a_action_index)]
-        #         return self.a_action_index
-            
-        if current_quest_id == 26:
-            x, y, map_id = self.env.get_game_coords()
-            gy, gx = local_to_global(y, x, map_id)
+            # goes *after* leaving pokemon center
             print(f"quest_manager.py: filter_action(): gy={gy}, gx={gx}")
             if (gy, gx) == (292, 97):
                 print(f"quest_manager.py: filter_action(): self.env.read_hp_fraction(): {self.env.read_hp_fraction()}")
@@ -347,12 +307,11 @@ class QuestManager:
             #     self.update_pressed_button_dict((gy, gx), self.a_action_index, current_quest_id)
             #     return self.a_action_index
         
-        if current_quest_id == 31:
-            x, y, map_id = self.env.get_game_coords()
-            gy, gx = local_to_global(y, x, map_id)   
-            print(f'self.pressed_button_dict: {self.pressed_button_dict}')                
             # press a once at (220, 133) to grab viridian forest antidote
             if (gy, gx) == (220, 133): # and current_quest_id in self.pressed_button_dict:
+                x, y, map_id = self.env.get_game_coords()
+                gy, gx = local_to_global(y, x, map_id)   
+                print(f'self.pressed_button_dict: {self.pressed_button_dict}')                
                 try:
                     if (gy, gx) in self.pressed_button_dict[current_quest_id]:
                         # return normal action if a has been pressed on this coordinate
@@ -363,7 +322,108 @@ class QuestManager:
                     self.update_pressed_button_dict((gy, gx), self.a_action_index, current_quest_id)
                     # self.pressed_button_dict[current_quest_id][(gy, gx)][self.a_action_index] += 1
                     return self.a_action_index
-        
+                
+        if current_quest_id == 33:
+            x, y, map_id = self.env.get_game_coords()
+            gy, gx = local_to_global(y, x, map_id)
+            # Only press A once to talk to Nurse Joy and heal Pokemon at Pewter Poke Center
+            if (gy, gx) == (193, 62):
+                self.update_pressed_button_dict((gy, gx), self.a_action_index, current_quest_id, 0)
+                # spam a through dialog to ensure healing isn't skipped
+                if self.env.read_dialog():
+                    return self.a_action_index
+                
+                # only talk to nurse joy once; tracked with pressed_button_dict
+                count = self.pressed_button_dict.get(current_quest_id, {}).get((gy, gx), {}).get(self.a_action_index, 0)
+                if count == 0:                    
+                    self.update_pressed_button_dict((gy, gx), self.a_action_index, current_quest_id, 1)
+                    return self.a_action_index
+                
+        # stuck in pewter poke center probably; down leaves the poke center
+        if current_quest_id == 34 and not self.env.read_dialog():
+            if (gy, gx) == (197, 62):
+                return self.down_action_index
+            if (gy, gx) == (193, 62):
+                return self.down_action_index
+            if (gy, gx) == (194, 62):
+                return self.down_action_index
+            if (gy, gx) == (195, 62):
+                return self.down_action_index
+            if (gy, gx) == (196, 62):
+                return self.down_action_index
+            if (gy, gx) == (197, 62):
+                return self.down_action_index
+            
+        # map 56 pewter_mart initiate dialog with clerk
+        if current_quest_id == 35:
+            items_in_bag, items_quantity_in_bag = self.item_handler.get_items_in_bag(), self.item_handler.get_items_quantity_in_bag()   
+            itdict = dict(zip(items_in_bag, items_quantity_in_bag))
+            num_potions = itdict[Items.POTION.value]
+            if not self.env.read_dialog():
+                self.update_pressed_button_dict((gy, gx), self.a_action_index, current_quest_id, 0)
+                self.item_handler.scripted_buy_items()
+                if (gy, gx) == (186, 58) and self.pressed_button_dict[current_quest_id][(gy, gx)][self.a_action_index] == 0:
+                    self.update_pressed_button_dict((gy, gx), self.a_action_index, current_quest_id, 1)
+                    return self.a_action_index
+            else:
+                if current_quest_id == 35 and self.env.read_dialog() and (gy, gx) == (186, 58):
+                    if self.last_num_potions != num_potions:
+                        return action
+                    else:
+                        self.last_num_potions = num_potions
+                        pewter_mart_clerk_dialog = self.env.read_dialog()
+                        self.item_handler.scripted_buy_items()
+                        money = self.item_handler.read_money()
+                        print(f"quest_manager.py: filter_action(): money={money}")
+                        print(f"quest_manager.py: filter_action(): items_in_bag={items_in_bag}")
+                        print(f"quest_manager.py: filter_action(): items_quantity_in_bag={items_quantity_in_bag}")
+                        num_potions = items_quantity_in_bag[Items.POTION.value]
+                        # max 10 or it could take a long time to shop
+                        num_potions_can_afford = max(min(10, money // 300), 0)
+                        construct_string = f"A×{num_potions_can_afford}"
+                        print(f"quest_manager.py: filter_action(): num_potions_can_afford={num_potions_can_afford}")
+                        if pewter_mart_clerk_dialog:
+                            # track potions so we don't get stuck in infinite loop
+                            self.last_num_potions = num_potions
+                            # select buy in top mart menu
+                            if "►BUY" in pewter_mart_clerk_dialog:  
+                                return self.a_action_index
+                            # press down to move cursor to potion in buy mart submenu
+                            elif "►POK" in pewter_mart_clerk_dialog:
+                                return self.down_action_index
+                            # press a to pull up quantity to buy sub-submenu in buy submenu
+                            elif "►POTION" in pewter_mart_clerk_dialog:
+                                return self.a_action_index
+                            # buy the max you can afford (computed) when quantity is selected
+                            elif construct_string in pewter_mart_clerk_dialog:
+                                return self.a_action_index
+                            elif "×" in pewter_mart_clerk_dialog:
+                                # pressing down in quantity sub-submenu increments quantity by 1
+                                return self.up_action_index
+                            # press a to confirm quantity and purchase in buy submenu dialog
+                            elif "YES" in pewter_mart_clerk_dialog:
+                                # detect change in potion number
+                                self.last_num_potions = num_potions
+                                # press a to purchase potions
+                                return self.a_action_index
+        # Hard-coded logic for quest 037: follow the recorded coordinate path
+        if current_quest_id == 37:
+            if 37 not in self.loaded_paths:
+                file37 = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / "037" / "037_coords.json"
+                try:
+                    data37 = json.load(file37.open('r'))
+                    self.loaded_paths[37] = [(int(pair[0]), int(pair[1])) for seg in data37.values() for pair in seg]
+                except Exception:
+                    self.loaded_paths[37] = []
+            coords37 = self.loaded_paths[37]
+            if (gy, gx) in coords37:
+                self.env.load_coordinate_path(37)
+                return PATH_FOLLOW_ACTION
+            if (gy, gx) == (178, 67) and self.env.read_m("wSpritePlayerStateData1FacingDirection") == 0x4:
+                return self.down_action_index
+            if (gy, gx) == (177, 67) and self.env.read_m("wSpritePlayerStateData1FacingDirection") == 0x4:
+                return self.down_action_index
+
         return action
 
     def _apply_quest_015_rules(self, action: int) -> int:

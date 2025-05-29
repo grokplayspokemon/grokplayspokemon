@@ -1125,9 +1125,9 @@
             "After winning, return to the Pok\u00e9mon Center if you need to heal.",
             "Retrace your path from the Gym to the Pok\u00e9mon Center.",
             "Heal your Pok\u00e9mon at the Pewter City Pok\u00e9mon Center.",
-            "When healed, return to the Gym to battle the next trainer."
+            "When healed, return to the Gym to battle Brock."
         ],
-        "end_quest_text": "First Gym trainer down\u2014momentum is building.",
+        "end_quest_text": "Grok vs Brok: throwdown!!",
         "associated_coordinates_file": "037_coords.json",
         "event_triggers": [
             {

@@ -1,0 +1,36 @@
+from setuptools import setup, find_packages
+
+setup(
+    name="grok_plays_pokemon",
+    version="0.1",
+    packages=find_packages(),
+    install_requires=[
+        'pyboy',
+        'numpy',
+        'omegaconf',
+        'pygame',
+        'tk',
+        'einops',
+        'gymnasium',
+        'mediapy',
+        'requests',
+        'pygame',
+        'pyboy',
+        'anthropic',
+        'omegaconf',
+        'fastapi',
+        'aiofiles',
+        'jinja2',
+        'python-multipart',
+        'deprecated',
+        'grpcio',
+        'parameterized',
+        'protobuf',
+        'xai-sdk',
+        'flask==3.0.2',
+        'fastapi>=0.104.0',
+        'uvicorn[standard]>=0.24.0',
+        'aiofiles>=23.2.1',
+        'websockets>=12.0'
+    ],
+) 

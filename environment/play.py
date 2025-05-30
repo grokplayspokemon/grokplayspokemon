@@ -11,31 +11,29 @@ from typing import Optional
 from omegaconf import OmegaConf
 import threading
 import queue
-import tkinter as tk
-import tkinter.ttk as ttk
-from grok_plays_pokemon.recorder.env_helpers.trigger_evaluator import TriggerEvaluator
+from environment_helpers.trigger_evaluator import TriggerEvaluator
 from datetime import datetime
+import os
 
 from wrappers.env_wrapper import EnvWrapper
+from wrappers.configured_env_wrapper import ConfiguredEnvWrapper
 from environment import VALID_ACTIONS, PATH_FOLLOW_ACTION
 from pyboy.utils import WindowEvent
-from grok_plays_pokemon.recorder.data.recorder_data.global_map import local_to_global
-from grok_plays_pokemon.recorder.env_helpers.navigator import InteractiveNavigator
-from grok_plays_pokemon.recorder.env_helpers.saver import save_initial_state, save_loop_state, save_final_state
-from grok_plays_pokemon.recorder.env_helpers.warp_tracker import record_warp_step, backtrack_warp_sequence
-from grok_plays_pokemon.recorder.env_helpers.quest_manager import QuestManager
+from data.recorder_data.global_map import local_to_global
+from environment_helpers.navigator import InteractiveNavigator
+from environment_helpers.saver import save_initial_state, save_loop_state, save_final_state
+from environment_helpers.warp_tracker import record_warp_step, backtrack_warp_sequence
+from environment_helpers.quest_manager import QuestManager
+from web.quest_server import status_queue, start_server
+from grok_integration import initialize_grok, get_grok_action, shutdown_grok
 
-# Add project root for global_map import if play.py is in a subdirectory
-project_root_path = Path(__file__).resolve().parent.parent.parent
+project_root_path = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root_path))
 
 # Load quest definitions
-QUESTS_FILE = Path(__file__).parent / "required_completions.json"
+QUESTS_FILE = Path(__file__).parent / "environment_helpers" / "required_completions.json"
 with open(QUESTS_FILE, 'r') as f:
     QUESTS = json.load(f)
-
-# Shared queue for UI updates
-status_queue = queue.Queue()
 
 def diagnose_environment_coordinate_loading(env, navigator):
     """Diagnostic protocol for environment coordinate loading accuracy"""
@@ -204,7 +202,7 @@ def debug_coordinate_system(env, navigator):
         quest_file_name = f"{quest_dir_name}_coords.json"
         
         # Use same path logic as navigator
-        primary_quest_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name
+        primary_quest_path = Path(__file__).parent / "environment_helpers" / "quest_paths" / quest_dir_name / quest_file_name
         
         file_status = "EXISTS" if primary_quest_path.exists() else "MISSING"
         print(f"Quest file {quest_file_name}: {file_status}")
@@ -273,7 +271,7 @@ def verify_quest_system_integrity(env, navigator):
                 # Validate against expected content
                 quest_dir_name = f"{quest_id:03d}"
                 quest_file_name = f"{quest_dir_name}_coords.json"
-                file_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name
+                file_path = Path(__file__).parent / "environment_helpers" / "quest_paths" / quest_dir_name / quest_file_name
                 
                 if file_path.exists():
                     with open(file_path, 'r') as f:
@@ -377,12 +375,19 @@ def start_quest_ui():
     hbar.pack(side='bottom', fill='x')
     tree.configure(xscrollcommand=hbar.set)
     tree.pack(fill='both', expand=True)
-    # Label for current location
-    location_label = tk.Label(root, text="Location: N/A")
-    location_label.pack(side='top', fill='x')
-    # Label for displaying current quest ID
-    quest_label = tk.Label(root, text="Current Quest: N/A")
-    quest_label.pack(side='top', fill='x')
+    # Replace top labels with bottom info_frame and separate labels
+    info_frame = tk.Frame(root)
+    info_frame.pack(side='bottom', fill='x')
+    map_name_label = tk.Label(info_frame, text="Map: N/A")
+    map_name_label.pack(side='left', padx=5)
+    map_id_label = tk.Label(info_frame, text="Map ID: N/A")
+    map_id_label.pack(side='left', padx=5)
+    global_label = tk.Label(info_frame, text="Global: N/A")
+    global_label.pack(side='left', padx=5)
+    local_label = tk.Label(info_frame, text="Local: N/A")
+    local_label.pack(side='left', padx=5)
+    quest_label = tk.Label(info_frame, text="Current Quest: N/A")
+    quest_label.pack(side='left', padx=5)
 
     # Function to describe trigger criteria
     def describe_trigger(trg):
@@ -449,11 +454,15 @@ def start_quest_ui():
             while True:
                 item_id, data = status_queue.get_nowait()
                 if item_id == '__location__':
-                    gx, gy, map_id, map_name = data
-                    location_label.config(text=f"Location: ({gx}, {gy}), Map ID: {map_id}, {map_name}")
+                    gx, gy, mid, mname = data
+                    map_name_label.config(text=f"Map: {mname}")
+                    map_id_label.config(text=f"Map ID: {mid}")
+                    global_label.config(text=f"Global: ({gx}, {gy})")
+                elif item_id == '__local_location__':
+                    lx, ly = data
+                    local_label.config(text=f"Local: ({lx}, {ly})")
                 elif item_id == '__current_quest__':
                     print(f"play.py: poll(): data: Current quest: {data}")
-                    # Always display a zero-padded quest ID or N/A if None
                     quest_str = str(data).zfill(3) if data is not None else 'N/A'
                     quest_label.config(text=f"Current Quest: {quest_str}")
                 else:
@@ -508,21 +517,26 @@ def get_default_config(rom_path, initial_state_path, infinite_money=False, infin
     # For play.py, if a full path to a .state file is provided and exists, use it directly.
     if initial_state_path:
         p = Path(initial_state_path)
+        print(f"Processing initial state path: {p}")  # Debug line
         if p.suffix == '.state' and p.exists():
             initial_state_name = str(p)
+            print(f"Using full state path: {initial_state_name}")  # Debug line
         elif p.exists():
             initial_state_name = p.stem
+            print(f"Using state stem: {initial_state_name}")  # Debug line
         else:
             initial_state_name = None
+            print(f"State path not found: {p}")  # Debug line
     else:
         initial_state_name = None
+        print("No initial state path provided")  # Debug line
 
     env_config = {
         "headless": False,  # Must be False for human play
         "save_video": save_video,
         "fast_video": fast_video,
         "action_freq": 24,
-        "init_state": initial_state_name,  # Use full path or name as needed by RedGymEnv
+        "init_state": initial_state_name,  # This is the key line
         "state_dir": str(Path(__file__).parent / "states"),
         "video_dir": str(Path(__file__).parent / "replays" / "videos"),
         "gb_path": rom_path,
@@ -582,7 +596,9 @@ ACTION_MAPPING_PYGAME_TO_INT = {
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rom", type=str, default=str(Path(__file__).parent / "PokemonRed.gb"))
+    # CLI option for quest UI server port
+    parser.add_argument("--ui_port", type=int, default=3030, help="Port for quest progress UI server")
+    parser.add_argument("--rom", type=str, default=str(Path(__file__).parent / "red.gb"))
     parser.add_argument("--init_state", type=str, default="") # Default to empty, implies new game unless file found
     parser.add_argument("--record_session", action="store_true", help="Record full session video and path data")
     # Allow override for config values
@@ -621,77 +637,89 @@ def main():
     parser.add_argument("--max_steps_scaling", type=float, default=0.0) # default to no scaling
     parser.add_argument("--map_id_scalefactor", type=float, default=1.0) # default to no scaling
     parser.add_argument("--record_replays", action="store_true", help="Enable recording of path traces for replays") # Added record_replays arg
-
+    parser.add_argument("--grok_mode", action="store_true", help="Enable Grok autonomous play")
+    parser.add_argument("--grok_api_key", type=str, help="XAI API key for Grok")
+    
     args = parser.parse_args()
 
-    # BEGIN: determine sequential run directory and previous run for status loading
+    # Support using XAI_API_KEY environment variable if CLI argument not provided
+    if not args.grok_api_key:
+        env_key = os.environ.get("XAI_API_KEY")
+        if env_key:
+            args.grok_api_key = env_key
+            args.grok_mode = True
+            print(f"Using XAI_API_KEY from environment and enabling Grok mode")
+
+    # Launch quest progress server using specified port
+    start_server(host='0.0.0.0', port=args.ui_port)
+
+    # BEGIN: determine effective initial state respecting config.yaml and previous runs
+    config_path = Path(__file__).parent.parent / "config.yaml"
+    cfg = OmegaConf.load(config_path).env
+    init_from_last = cfg.get("init_from_last_ending_state", False)
+    yaml_override = cfg.get("override_init_state", None)
+
     recordings_dir = Path(__file__).parent / "replays" / "recordings"
     recordings_dir.mkdir(parents=True, exist_ok=True)
     existing_dirs = [d for d in recordings_dir.iterdir() if d.is_dir() and d.name.isdigit()]
+    prev_dir = None
     if existing_dirs:
         max_id = max(int(d.name) for d in existing_dirs)
         prev_dir = recordings_dir / f"{max_id:03d}"
         name_base = f"{max_id+1:03d}"
         prev_end = prev_dir / f"{str(max_id).zfill(3)}_end.state"
-        effective_init_state = str(prev_end) if prev_end.is_file() else args.init_state
+        print(f"Previous run directory: {prev_dir}")
+        print(f"Looking for end state: {prev_end}")
+        print(f"End state exists: {prev_end.is_file()}")
     else:
-        prev_dir = None
         name_base = "001"
+
+    effective_init_state = None
+    if init_from_last and prev_dir and prev_end.is_file():
+        effective_init_state = str(prev_end.resolve())
+        print(f"Using previous end state due to init_from_last_ending_state=True: {effective_init_state}")
+    elif args.init_state:
         effective_init_state = args.init_state
+        print(f"Using CLI init_state: {effective_init_state}")
+    elif yaml_override:
+        # Resolve YAML override relative to environment/states directory
+        st = yaml_override
+        state_file = Path(__file__).parent / "states" / f"{st}.state"
+        effective_init_state = str(state_file.resolve())
+        print(f"Using YAML override_init_state path: {effective_init_state}")
+    else:
+        print("No initial state provided; starting new game")
+
     run_dir = recordings_dir / name_base
     run_dir.mkdir(parents=True, exist_ok=True)
-    # END: sequential run directory logic
+    # END: determine effective initial state
 
-    # Build env_config from args
-    env_config = get_default_config(
-        rom_path=args.rom,
-        initial_state_path=effective_init_state,
-        infinite_money=args.infinite_money,
-        infinite_health=args.infinite_health,
-        emulator_delay=args.emulator_delay,
-        disable_wild_encounters=args.disable_wild_encounters, # Pass the direct value
-        auto_teach_cut=args.auto_teach_cut,
-        auto_use_cut=args.auto_use_cut,
-        auto_teach_surf=args.auto_teach_surf,
-        auto_use_surf=args.auto_use_surf,
-        auto_teach_strength=args.auto_teach_strength,
-        auto_use_strength=args.auto_use_strength,
-        auto_solve_strength_puzzles=args.auto_solve_strength_puzzles,
-        auto_remove_all_nonuseful_items=args.auto_remove_all_nonuseful_items,
-        auto_pokeflute=args.auto_pokeflute,
-        auto_next_elevator_floor=args.auto_next_elevator_floor,
-        skip_safari_zone=args.skip_safari_zone,
-        infinite_safari_steps=args.infinite_safari_steps,
-        insert_saffron_guard_drinks=args.insert_saffron_guard_drinks,
-        save_video=args.save_video,
-        fast_video=args.fast_video,
-        n_record=args.n_record,
-        perfect_ivs=args.perfect_ivs,
-        reduce_res=args.reduce_res,
-        log_frequency=args.log_frequency,
-        two_bit=args.two_bit,
-        auto_flash=args.auto_flash,
-        required_tolerance=args.required_tolerance,
-        disable_ai_actions=args.disable_ai_actions,
-        use_global_map=args.use_global_map,
-        save_state=args.save_state,
-        animate_scripts=args.animate_scripts,
-        exploration_inc=args.exploration_inc,
-        exploration_max=args.exploration_max,
-        max_steps_scaling=args.max_steps_scaling,
-        map_id_scalefactor=args.map_id_scalefactor
+    # Prepare base configuration overrides; rely on config.yaml for init_from_last_ending_state
+    base_conf = {}
+    if effective_init_state:
+        base_conf["override_init_state"] = effective_init_state
+    env = ConfiguredEnvWrapper(
+        base_conf,
+        cli_args=None,
+        config_path=Path(__file__).parent.parent / "config.yaml"
     )
-    env_config.record_replays = args.record_replays # Set record_replays from arg
-
-    env = EnvWrapper(env_config)  # Use the wrapper
+    # Initial reset with effective init state
     env.reset()
+    # Initialize display before navigator
     screen = pygame.display.set_mode((700, 600)) # Adjusted for UI
     navigator = InteractiveNavigator(env) # Initialize navigator
     # Make navigator available to QuestManager for current quest tracking
     env.navigator = navigator
     # Initialize quest manager to enforce quest-specific rules
     quest_manager = QuestManager(env)
+    if args.grok_mode and args.grok_api_key:
+        initialize_grok(args.grok_api_key, env, navigator, quest_manager)
+        print("Grok mode activated!")
+    else:
+        print("Grok mode not activated. Use --grok_mode and --grok_api_key to enable.")
 
+        
+    
     obs, info = env.reset() # Initial reset
     # Use our sequential run_dir for path trace recording
     env.current_run_dir = run_dir
@@ -784,7 +812,7 @@ def main():
             # VALIDATION: Pre-check coordinate file existence with correct path structure
             quest_dir_name = f"{q_id_int:03d}"
             quest_file_name = f"{quest_dir_name}_coords.json"
-            coord_file_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name
+            coord_file_path = Path(__file__).parent / "environment_helpers" / "quest_paths" / quest_dir_name / quest_file_name
             
             if not coord_file_path.exists():
                 print(f"WARNING: Coordinate file {quest_file_name} not found at {coord_file_path}")
@@ -808,7 +836,12 @@ def main():
                 continue
                 
             # Attempt coordinate loading with validated file
-            if navigator.load_coordinate_path(q_id_int):
+            try:
+                navigator.load_coordinate_path(q_id_int)
+            except Exception as e:
+                print(f"Error loading path for Quest {q_id_int:03d}: {e}")
+                continue
+            if navigator.sequential_coordinates:
                 # Remember this as the loaded quest for correct ID tracking
                 initial_loaded_quest_id = q_id_int
                 print(f"Successfully loaded initial path for Quest {q_id_int:03d} on map {current_map_id_for_init}.")
@@ -842,10 +875,9 @@ def main():
             status_queue.put((tid, trigger_completed.get(tid, False)))
         # Update quest status
         status_queue.put((qid, quest_completed.get(int(qid), False)))
-    # Launch the Quest Progress HUD in its own thread
-    threading.Thread(target=start_quest_ui, daemon=True).start()
-    debounce_time = 0.1 # seconds for manual input debounce
-    last_action_time = 0
+
+    # Start sending updates to the UI server
+    # (status_queue has been pre-seeded with persisted states)
 
     pygame.init()
     SCREENSHOTS_DIR = Path("./screenshots")
@@ -878,9 +910,15 @@ def main():
     print("Press 7 to backtrack warp sequence.")
 
     running = True
+    debounce_time = 0.1  # 100 ms debounce interval for manual key inputs
+    last_action_time = 0.0  # Initialize timestamp of last player action
     try:
         while running:
-            manual_action_to_take = -1 # Action from player keyboard input
+            if args.grok_mode:
+                temp_action = get_grok_action()
+                manual_action_to_take = temp_action if temp_action is not None else -1
+            else:
+                manual_action_to_take = -1  # Default to no action
             current_time_sec = pygame.time.get_ticks() / 1000.0
             keys_pressed_this_frame = False
 
@@ -1043,6 +1081,9 @@ def main():
                 status_queue.put(('__location__', (player_gx, player_gy, current_map_id, current_map_name)))
                 # Also display current quest ID (reflect environment's current_loaded_quest_id)
                 status_queue.put(('__current_quest__', getattr(env, 'current_loaded_quest_id', None)))
+                # Add local location update
+                local_x, local_y, _ = env.get_game_coords()
+                status_queue.put(('__local_location__', (local_x, local_y)))
 
             # Prepare for 'previous_map_id_was' triggers by capturing the current map before evaluation
             current_map_id = env.get_game_coords()[2]
@@ -1052,11 +1093,18 @@ def main():
             if current_qid is not None:
                 active_quest = next((qq for qq in QUESTS if int(qq['quest_id']) == current_qid), None)
                 if active_quest:
-                    for idx, trg in enumerate(active_quest.get('event_triggers', [])):
+                    # Find first incomplete trigger
+                    triggers = active_quest.get('event_triggers', [])
+                    for idx, trg in enumerate(triggers):
                         tid = f"{active_quest['quest_id']}_{idx}"
-                        if not trigger_completed.get(tid, False) and evaluator.check_trigger(trg):
-                            trigger_completed[tid] = True
-                            status_queue.put((tid, True))
+                        # Only check this trigger if all previous triggers are complete
+                        if idx == 0 or all(trigger_completed.get(f"{active_quest['quest_id']}_{i}", False) for i in range(idx)):
+                            if not trigger_completed.get(tid, False) and evaluator.check_trigger(trg):
+                                trigger_completed[tid] = True
+                                status_queue.put((tid, True))
+                        else:
+                            # If a previous trigger is not complete, don't check this one
+                            break
             # Update status for the active quest only
             if current_qid is not None and active_quest:
                 tids = [f"{active_quest['quest_id']}_{i}" for i in range(len(active_quest.get('event_triggers', [])))]
@@ -1116,14 +1164,20 @@ def main():
     except KeyboardInterrupt:
         print("\nPlay session interrupted by user.")
     finally:
-        # Capture trace data and final state before closing (env.close clears them)
+        if args.grok_mode:
+            shutdown_grok() # :'''(
+        # Capture trace data and final state before closing
         coords_data = env.path_trace_data.copy()
+        # Preserve run directory before closing
+        run_dir = getattr(env, 'current_run_dir', None)
+        # Save playthrough actions, coordinates, and end state if run_dir exists
+        if run_dir:
+            save_final_state(env, run_dir, recorded_playthrough, coords_data, run_dir.name, run_dir.name)
+        else:
+            print("play.py: final(): No run_dir found; skipping save_final_state")
         # Close environment and pygame
         env.close()
         pygame.quit()
-
-        # Always save playthrough actions, coordinates, and end state
-        save_final_state(env, env.current_run_dir, recorded_playthrough, coords_data, env.current_run_dir.name, env.current_run_dir.name)
 
 if __name__ == "__main__":
     main()

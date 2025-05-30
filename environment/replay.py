@@ -21,6 +21,7 @@ sys.path.insert(0, str(project_root_path))
 from rewrite.recorder.environment import RedGymEnv
 # from pyboy.utils import WindowEvent # Not directly used now
 from stats_wrapper import StatsWrapper # Keep if used independently
+from wrappers.configured_env_wrapper import ConfiguredEnvWrapper
 # from global_map import local_to_global, global_to_local # No longer needed here
 
 
@@ -248,8 +249,12 @@ def main():
         screen = None # No screen if headless
         clock = None
 
-    # env = RedGymEnv(config={"headless": args.headless, "init_state": args.init_state, "gb_path": args.rom}) # Old
-    env = RedGymEnv(env_config=env_config_for_redgymenv) 
+    # Use the configured wrapper to load base defaults, YAML, and CLI args
+    env = ConfiguredEnvWrapper(
+        base_env_config_dict,
+        cli_args=args,
+        config_path=Path(__file__).parent.parent / "config.yaml"
+    )
     # ReplayExtender instance removed: # extender = ReplayExtender(pyboy_instance=env.pyboy, env_instance=env)
 
     # stats_wrapper = StatsWrapper(pyboy) # Old, pyboy is now env.pyboy

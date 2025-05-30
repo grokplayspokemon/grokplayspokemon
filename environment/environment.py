@@ -17,17 +17,17 @@ from omegaconf import DictConfig, ListConfig
 from pyboy import PyBoy
 from pyboy.utils import WindowEvent
 
-from data.elevators import NEXT_ELEVATORS
-from data.events import (
+from data.environment_data.elevators import NEXT_ELEVATORS
+from data.environment_data.events import (
     EVENT_FLAGS_START,
     EVENTS_FLAGS_LENGTH,
     MUSEUM_TICKET,
     REQUIRED_EVENTS,
     EventFlags,
 )
-from data.field_moves import FieldMoves
-from data.flags import Flags
-from data.items import (
+from data.environment_data.field_moves import FieldMoves
+from data.environment_data.flags import Flags
+from data.environment_data.items import (
     HM_ITEMS,
     KEY_ITEMS,
     MAX_ITEM_CAPACITY,
@@ -35,26 +35,26 @@ from data.items import (
     USEFUL_ITEMS,
     Items,
 )
-from data.map import (
+from data.environment_data.map import (
     MAP_ID_COMPLETION_EVENTS,
     MapIds,
 )
-from data.missable_objects import MissableFlags
-from data.party import PartyMons
-from data.strength_puzzles import STRENGTH_SOLUTIONS
-from data.tilesets import Tilesets
-from data.tm_hm import (
+from data.environment_data.missable_objects import MissableFlags
+from data.environment_data.party import PartyMons
+from data.environment_data.strength_puzzles import STRENGTH_SOLUTIONS
+from data.environment_data.tilesets import Tilesets
+from data.environment_data.tm_hm import (
     CUT_SPECIES_IDS,
     STRENGTH_SPECIES_IDS,
     SURF_SPECIES_IDS,
     TmHmMoves,
 )
-from data.moves import Moves as Move
-from data.types import PokemonType
-from grok_plays_pokemon.recorder.data.recorder_data.global_map import GLOBAL_MAP_SHAPE, local_to_global
-from grok_plays_pokemon.recorder.debug.debug import debug_print
-from data.warps import WARP_DICT
-from grok_plays_pokemon.recorder.data.recorder_data.global_map import local_to_global, global_to_local, MAP_DATA
+from data.environment_data.moves import Moves as Move
+from data.environment_data.types import PokemonType
+from data.recorder_data.global_map import GLOBAL_MAP_SHAPE, local_to_global
+from debug.debug import debug_print
+from data.environment_data.warps import WARP_DICT
+from data.recorder_data.global_map import local_to_global, global_to_local, MAP_DATA
 import itertools
 import tempfile
 
@@ -84,7 +84,7 @@ VALID_RELEASE_ACTIONS = [
     WindowEvent.RELEASE_BUTTON_START,
 ]
 
-from data.item_handler import ItemHandler
+from data.environment_data.item_handler import ItemHandler
 
 VALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start"]
 
@@ -108,6 +108,7 @@ class RedGymEnv(Env):
     lock = Lock()
 
     def __init__(self, env_config: DictConfig | dict):
+        # Configuration verified; removed debug print to reduce log spam
         if isinstance(env_config, dict):
             env_config = DictConfig(env_config)
 
@@ -115,7 +116,10 @@ class RedGymEnv(Env):
         self.headless = env_config.headless
         self.emulator_delay = env_config.emulator_delay
         self.state_dir = Path(env_config.state_dir)
-        self.init_state = env_config.init_state
+        # Determine override or configured initial state
+        self.init_state = getattr(env_config, "override_init_state", None) or getattr(env_config, "init_state", None)
+        # Flag to load most recent ending state if no override is provided
+        self.init_from_last_ending_state = getattr(env_config, "init_from_last_ending_state", False)
         # Determine full path for initial state: if provided as a .state file, use it directly
         if self.init_state:
             init_path_candidate = Path(self.init_state)
@@ -324,18 +328,6 @@ class RedGymEnv(Env):
         # Warp tile caching: in-memory and file-backed cache
         self._warp_info_cache = {}
         self._new_warp_info = {}
-        self._warp_cache_master_path = Path(__file__).parent / "warp_tile_cache_master.json"
-        run_uuid = uuid.uuid4().hex
-        self._warp_cache_temp_path = Path(tempfile.gettempdir()) / f"warp_cache_run_{run_uuid}.json"
-        # Load master cache if it exists
-        if self._warp_cache_master_path.exists():
-            try:
-                with open(self._warp_cache_master_path, 'r') as f:
-                    master_data = json.load(f)
-                for k, v in master_data.items():
-                    self._warp_info_cache[int(k)] = v
-            except Exception as e:
-                print(f"Error loading warp tile master cache: {e}")
 
         self.init_mem()
 
@@ -482,7 +474,7 @@ class RedGymEnv(Env):
                     print("State loaded successfully from 'options'.")
                 except Exception as e:
                     print(f"environment.py: reset(): Error loading state from 'options': {e}")
-            elif self.init_state_path: # Only try if a path is configured
+            elif self.init_state_path:  # Only try if a path is configured
                 try:
                     print(f"Attempting to load state from path: {self.init_state_path}")
                     # Ensure self.init_state_path is a string or Path object for open()
@@ -496,6 +488,19 @@ class RedGymEnv(Env):
                     print(f"environment.py: reset(): State file not found at {self.init_state_path}. Starting new game.")
                 except Exception as e: # Catch other errors like corrupted state
                     print(f"environment.py: reset(): Error loading state from {self.init_state_path}: {e}. Starting new game.")
+            elif self.init_from_last_ending_state:
+                try:
+                    state_files = list(self.state_dir.glob("*.state"))
+                    if state_files:
+                        latest = max(state_files, key=lambda f: f.stat().st_mtime)
+                        with open(latest, "rb") as f:
+                            self.pyboy.load_state(f)
+                        state_loaded_successfully = True
+                        print(f"State loaded successfully from last ending state: {latest}")
+                    else:
+                        print(f"environment.py: reset(): No .state files found in {self.state_dir}. Starting new game.")
+                except Exception as e:
+                    print(f"environment.py: reset(): Error loading last ending state: {e}. Starting new game.")
             else:
                 print("environment.py: reset(): No initial state path configured and no state in options. Starting new game.")
 
@@ -604,14 +609,6 @@ class RedGymEnv(Env):
             run_identifier = f"{base_name}__{timestamp}"
             self.current_run_dir = self.replays_base_dir / run_identifier
             self.current_run_dir.mkdir(parents=True, exist_ok=True)
-
-            initial_state_file = self.current_run_dir / f"{run_identifier}.state"
-            try:
-                with open(initial_state_file, "wb") as f_s:
-                    self.pyboy.save_state(f_s)
-                print(f"Saved initial state for run {run_identifier} to {initial_state_file}")
-            except Exception as e:
-                print(f"Error saving initial state for run {run_identifier}: {e}")
 
             # Log the first point in the path trace for the new run.
             self.update_path_trace()
@@ -985,15 +982,14 @@ class RedGymEnv(Env):
         self.action_taken = action
         
         dialog = self.read_dialog() or ''
-        print(f"environment.py: step(): dialog at top of step() == {dialog}\n")
 
         self.next_to_warp_tile = self.is_next_to_warp_tile()
-        print(f"environment.py: step(): self.next_to_warp_tile=={self.next_to_warp_tile}")
-        print(f"environment.py: step(): self.on_a_warp_tile=={self.on_a_warp_tile}")
+        # print(f"environment.py: step(): self.next_to_warp_tile=={self.next_to_warp_tile}")
+        # print(f"environment.py: step(): self.on_a_warp_tile=={self.on_a_warp_tile}")
         if self.next_to_warp_tile and dialog == "" and not self.on_a_warp_tile:
             try:
                 self._handling_warp = True
-                print(f"environment.py: step(): self._handling_warp=={self._handling_warp}")
+                # print(f"environment.py: step(): self._handling_warp=={self._handling_warp}")
                 self.navigator.warp_tile_handler()
             except Exception as e:
                 print(f"Error in warp_tile_handler(): {e}")
@@ -1080,12 +1076,10 @@ class RedGymEnv(Env):
 
         # Trigger debug prints
         cur_map_id = self.read_m("wCurMap")
-        print(f"cur_map_id: {cur_map_id}")
         debug_print(f"[TriggerTest] current_map_id_is: {cur_map_id}")
         debug_print(f"[TriggerTest] previous_map_id_was: {self.prev_map_id}")
 
         if self.prev_map_id != cur_map_id:
-            print(f"environment.py: step(): prev_map_id: {self.prev_map_id}, cur_map_id: {cur_map_id}")
             player_x, player_y, map_n = self.get_game_coords()
             prev_map_name = MapIds(self.prev_map_id).name
             if prev_map_name in WARP_DICT:
@@ -1194,7 +1188,7 @@ class RedGymEnv(Env):
         obs = self._get_obs()
 
         self.step_count += 1
-        print(f"environment.py: step(): self.step_count=={self.step_count}\n")
+        # print(f"environment.py: step(): self.step_count=={self.step_count}\n")
 
         # Trigger debug: dialog, inventory, battle flags
         dialog = self.read_dialog() or ''
@@ -1247,12 +1241,12 @@ class RedGymEnv(Env):
                 self.pyboy.memory[stat_addr] = 0xFF
                 self.pyboy.memory[stat_addr+1] = 0xFF
 
-        print(f"environment.py: step(): dialog after path follow=={self.read_dialog()}")
+        # print(f"environment.py: step(): dialog after path follow=={self.read_dialog()}")
         self.current_dialog = self.read_dialog()
         return obs, 0.0, reset, False, info
 
     def run_action_on_emulator(self, action):
-        print(f"environment.py: run_action_on_emulator(): action: {action}")
+        # print(f"environment.py: run_action_on_emulator(): action: {action}")
         # Skip path-follow placeholder action (no actual button press)
         if action == PATH_FOLLOW_ACTION:
             return
@@ -2680,35 +2674,6 @@ class RedGymEnv(Env):
             except Exception as e:
                 print(f"Error saving fallback ending game state: {e}")
 
-        # Warp tile cache persistence: write run temp and merge master
-        try:
-            with open(self._warp_cache_temp_path, 'w') as f:
-                json.dump({str(k): v for k, v in self._new_warp_info.items()}, f, indent=2)
-            print(f"Wrote warp cache run data to {self._warp_cache_temp_path}")
-        except Exception as e:
-            print(f"Error writing warp cache temp file: {e}")
-
-        master = {}
-        if self._warp_cache_master_path.exists():
-            try:
-                with open(self._warp_cache_master_path, 'r') as f:
-                    master = json.load(f)
-            except Exception as e:
-                print(f"Error reloading master warp cache: {e}")
-        for k, v in self._new_warp_info.items():
-            ks = str(k)
-            if ks in master:
-                if master[ks] != v:
-                    print(f"Conflict in warp cache for map {k}: master {master[ks]}, new {v}")
-            else:
-                master[ks] = v
-        try:
-            with open(self._warp_cache_master_path, 'w') as f:
-                json.dump(master, f, indent=2)
-            print(f"Merged warp cache into master file {self._warp_cache_master_path}")
-        except Exception as e:
-            print(f"Error writing master warp cache: {e}")
-
     def load_coordinate_path(self, quest_id: int) -> bool:
         """Enhanced coordinate loading with comprehensive validation and error correction"""
         
@@ -2721,29 +2686,27 @@ class RedGymEnv(Env):
         quest_dir_name = f"{quest_id:03d}"
         quest_file_name = f"{quest_dir_name}_coords.json"
         
-        # PRIMARY PATH: Validated coordinate file location
-        coordinate_file_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name
+        # PRIMARY PATH: use quest_paths directory
+        base = Path(__file__).parent / "environment_helpers" / "quest_paths"
+        primary_path = base / quest_dir_name / quest_file_name
         
-        # FALLBACK PATHS: Legacy compatibility locations
+        # FALLBACK PATHS: legacy compatibility locations
         fallback_paths = [
+            Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name,
             Path(__file__).parent / quest_file_name,
             Path(__file__).parent.parent / quest_file_name,
-            Path(__file__).parent / "coordinates" / quest_file_name
+            Path(__file__).parent / "coordinates" / quest_file_name,
         ]
         
         # FILE EXISTENCE VALIDATION
-        target_file_path = None
-        if coordinate_file_path.exists():
-            target_file_path = coordinate_file_path
+        if primary_path.exists():
+            target_file_path = primary_path
         else:
-            for fallback_path in fallback_paths:
-                if fallback_path.exists():
-                    target_file_path = fallback_path
-                    break
-        
+            target_file_path = next((p for p in fallback_paths if p.exists()), None)
+
         if not target_file_path:
             print(f"Environment: ERROR - Coordinate file not found for Quest {quest_id:03d}")
-            print(f"  Primary path: {coordinate_file_path}")
+            print(f"  Primary path: {primary_path}")
             for i, fallback in enumerate(fallback_paths):
                 print(f"  Fallback {i+1}: {fallback}")
             return False

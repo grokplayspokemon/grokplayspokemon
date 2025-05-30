@@ -5,13 +5,13 @@ Currently only implements logic for quest 015 (getting the Town Map from Blue's 
 """
 from pyboy.utils import WindowEvent
 from environment import RedGymEnv, VALID_ACTIONS, PATH_FOLLOW_ACTION
-from data.items import Items
-from grok_plays_pokemon.recorder.data.recorder_data.global_map import local_to_global
+from data.environment_data.items import Items
+from data.recorder_data.global_map import local_to_global
 import json
 from pathlib import Path
 from typing import Dict, List, Optional
 from collections import defaultdict
-from data.item_handler import ItemHandler
+from data.environment_data.item_handler import ItemHandler
 
 class QuestManager:
     """

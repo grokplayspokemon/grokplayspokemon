@@ -75,7 +75,7 @@
             "Complete quest 002.",
             "Try to leave Pallet Town directly to the north. Oak will get you and bring you to his lab."
         ],
-        "end_quest_text": "Try to leave Pallet Town directly to the north. Oak will get you and bring you to his lab.",
+        "end_quest_text": "Why is it always 'Back to the lab!' with you, Oak?",
         "associated_coordinates_file": "003_coords.json",
         "event_triggers": [
             {

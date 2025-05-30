@@ -1,6 +1,6 @@
 # adapted from https://github.com/thatguy11325/pokemonred_puffer/blob/main/pokemonred_puffer/global_map.py
 
-from map_data import map_data
+from data.recorder_data.map_data import map_data
 
 PAD = 20
 GLOBAL_MAP_SHAPE = (444 + PAD * 2, 436 + PAD * 2)

@@ -13,9 +13,11 @@ env:
   # Hold button down for this many ticks (+1)
   emulator_delay: 11
   # Directory with pyboy save states to load from.
-  state_dir: pyboy_states
+  state_dir: environment/states
   # File within state dir to load from.
-  init_state: Bulbasaur
+  override_init_state: 
+  # Set to True to load most-recent ending save state
+  init_from_last_ending_state: True
   # How many ticks each environment step should take.
   action_freq: 24
   # Maximum number of steps per mini-episode.
@@ -536,6 +538,6 @@ debug:
 
 env_config:
   # Path to your Pokemon Red ROM file
-  gb_path: "/puffertank/llm_plays_pokemon/DATAPlaysPokemon/rewrite/recorder/PokemonRed.gb"
+  gb_path: "/puffertank/grok_plays_pokemon/environment/red.gb"
   # Optional: set headless to true to disable Pygame window
   headless: false

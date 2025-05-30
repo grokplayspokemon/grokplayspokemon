@@ -1,148 +1,221 @@
-import os
+"""
+Grok Agent Module - Autonomous Pokemon Playing Interface
+Interfaces with XAI SDK while preserving existing play.py patterns
+"""
+
+from xai_sdk import Grok
 import json
-from openai import OpenAI
+import asyncio
+from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+import time
 
-# Tool definitions
-from tools.press_next import press_next_tool
-from tools.press_button import press_button_tool
-# Configuration helpers
-from tools.model_config import get_model_name, get_temperature, get_top_p
-# Reasoning helpers
-from tools.reasoning import get_reasoning_effort, extract_reasoning
-# Usage metrics helpers
-from tools.metrics import extract_usage_metrics
-# Retry decorator for API calls
-from tools.retry import retry_on_exception
-
-# Logging setup
-from agent_logging.logger import get_logger
-logger = get_logger(__name__)
-
-# Validator
-from validator import validate_messages, validate_tools, validate_function_call
-
-class GrokAgent:
-    """
-    Synchronous AI agent for turn-by-turn control.  
-    Implements initialize, get_action, and on_feedback hooks.
-    """
-    def __init__(self):
-        self.env = None
-        self.navigator = None
-        self.quest_manager = None
-        self.model = None
-        self.client = None
-        # Last API reasoning trace and usage stats
-        self.last_reasoning = None
-        self.last_usage = None
-
-    def initialize(self, env, navigator, quest_manager):  # noqa: F841
-        """
-        Store references to environment, navigator, and quest manager.
-        Initialize OpenAI API key and model name.
-        """
-        logger.info("initialize called with env=%s, navigator=%s, quest_manager=%s", env, navigator, quest_manager)
+class GrokPokemonAgent:
+    def __init__(self, api_key: str, env, navigator, quest_manager):
+        self.client = Grok(api_key=api_key)
         self.env = env
         self.navigator = navigator
         self.quest_manager = quest_manager
-        # Initialize XAI client
-        api_key = os.getenv("XAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-        base_url = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1")
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
-        # Determine model name via config helper or environment
-        self.model = get_model_name()
+        
+        # Conversation management
+        self.conversation_history = []
+        self.max_turns = 50
+        self.turn_count = 0
+        
+        # Knowledge base
+        self.knowledge_base = {
+            "locations_visited": set(),
+            "pokemon_team": {},
+            "items_obtained": set(),
+            "npcs_encountered": set(),
+            "current_objective": None
+        }
+        
+        # Action mapping
+        self.ACTION_MAP = {
+            "up": 3, "down": 0, "left": 1, "right": 2,
+            "a": 4, "b": 5, "start": 7, "path": 6
+        }
+        
+    async def get_game_state(self) -> Dict:
+        """Extract text-only game state for Grok analysis"""
+        obs = self.env._get_obs()
+        
+        # Current location
+        x, y, map_id = self.env.get_game_coords()
+        map_name = self.env.get_map_name_by_id(map_id)
+        
+        # Dialog/menu detection
+        dialog = self.env.read_dialog()
+        
+        # Party status
+        party_info = []
+        for i in range(self.env.read_m("wPartyCount")):
+            party_info.append({
+                "species": obs["species"][i],
+                "level": obs["level"][i],
+                "hp": obs["hp"][i],
+                "max_hp": obs["maxHP"][i]
+            })
+        
+        # Quest status
+        current_quest = getattr(self.env, 'current_loaded_quest_id', None)
+        
+        return {
+            "location": {"x": x, "y": y, "map_id": map_id, "map_name": map_name},
+            "dialog": dialog,
+            "party": party_info,
+            "current_quest": current_quest,
+            "hp_fraction": self.env.read_hp_fraction(),
+            "in_battle": self.env.read_m("wIsInBattle") > 0,
+            "bag_items": list(self.env.get_items_in_bag())
+        }
+    
+    def create_system_prompt(self) -> str:
+        """Generate comprehensive system prompt for Grok"""
+        return """You are playing Pokemon Red as an autonomous agent. You perceive the game through text descriptions and control it via tool calls.
 
-    def get_action(self, state: dict) -> dict:
-        """
-        Synchronously query the xAI model for exactly one tool call.
-        Each turn, we send the full game state and available tools,
-        and receive back a `function_call` indicating which tool to invoke.
-        Returns a dict: {"name": tool_name, "args": {...}}.
-        """
-        logger.info("get_action called with state: %s", state)
-        system_prompt = (
-            "You are Grok, an AI agent playing Pokémon Red. "
-            "Each turn you receive the full game state as JSON. "
-            "You must respond with exactly one JSON object indicating the tool call to make. "
-            "Available tool calls: press_next (no arguments); "
-            "press_button with args {\"button\":\"UP\"|\"DOWN\"|\"LEFT\"|\"RIGHT\"|\"A\"|\"B\"|\"START\"}. "
-            "Do not include any other text or explanation."
-        )
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(state)}
-        ]
-        # List of available tools for function calling
-        tools = [press_next_tool, press_button_tool]
-        # Synchronous API call with retry for transient errors
-        response = self._call_api(messages, tools)
-        msg = response.choices[0].message
-        # Extract the single function_call from the response
-        func_call = None
-        if hasattr(msg, 'function_call') and msg.function_call:
-            func_call = msg.function_call
-        elif hasattr(msg, 'tool_calls') and msg.tool_calls:
-            # xAI may return a list of tool_calls; take the first
-            func_call = msg.tool_calls[0].function
-        else:
-            raise ValueError(f"No function_call found in response: {msg}")
-        name = func_call.name
-        # Arguments may be a JSON string; parse into dict
-        raw_args = func_call.arguments or '{}'
-        try:
-            args = json.loads(raw_args)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in function_call arguments: {raw_args}") from e
-        # Validate the extracted function call
-        validate_function_call({"name": name, "arguments": args})
-        # Save reasoning and usage for UI/metrics
-        self.last_reasoning = extract_reasoning(response)
-        self.last_usage = extract_usage_metrics(response)
-        logger.info("get_action result: name=%s, args=%s", name, args)
-        logger.info("last_reasoning: %s", self.last_reasoning)
-        logger.info("last_usage: %s", self.last_usage)
-        return {"name": name, "args": args}
+AVAILABLE TOOLS:
 
-    def on_feedback(self, state: dict, action: dict, reward: float, info: dict):
-        """
-        Receive feedback after each step; no-op for now.
-        """
-        logger.info("on_feedback called with state=%s, action=%s, reward=%s, info=%s", state, action, reward, info)
-        pass
+1. press_buttons: Press game buttons in sequence
+   - Parameters: {"buttons": ["a", "b", "up", "down", "left", "right", "start"]}
+   - Example: {"buttons": ["up", "up", "a"]}
 
-    @retry_on_exception()
-    def _call_api(self, messages, tools):  # noqa: C901
-        """
-        Internal helper to call the xAI chat completion endpoint with retry.
-        Automatically includes model, messages, tools, and sampling parameters.
-        """
-        # Schema validation before API call
-        validate_messages(messages)
-        validate_tools(tools)
-        # Gather parameters for request
-        effort = get_reasoning_effort()
-        temp = get_temperature()
-        top_p_val = get_top_p()
-        # Log full API request details for debugging
-        logger.info(
-            "API request: model=%s, messages=%s, tools=%s, reasoning_effort=%s, temperature=%s, top_p=%s",
-            self.model,
-            messages,
-            tools,
-            effort,
-            temp,
-            top_p_val,
+2. follow_path: Advance along current quest path
+   - Parameters: {"steps": <number>} (default: 1)
+   - This follows pre-recorded optimal paths for quests
+
+3. update_knowledge: Store important information
+   - Parameters: {"category": str, "key": str, "value": any}
+   - Categories: "locations", "pokemon", "items", "npcs", "objectives"
+
+GAME MECHANICS:
+- Navigate with directional buttons
+- 'A' to interact/confirm, 'B' to cancel/go back
+- Start opens menu
+- Path-following (tool 2) handles optimal navigation automatically
+
+PROGRESSIVE SUMMARIZATION:
+When conversation exceeds 50 turns, you'll summarize progress. Focus on:
+- Major accomplishments
+- Current location and objective
+- Team status changes
+- Key items/badges obtained
+
+RESPONSE FORMAT:
+Always structure responses as:
+1. Observation about current state
+2. Reasoning about next action
+3. Tool call(s) to execute
+"""
+
+    async def get_grok_action(self, game_state: Dict) -> List[Dict]:
+        """Query Grok for next action based on game state"""
+        
+        # Construct user message
+        user_message = f"""Current game state:
+Location: {game_state['location']['map_name']} at ({game_state['location']['x']}, {game_state['location']['y']})
+Quest: {game_state['current_quest']}
+Dialog: {game_state['dialog'] or 'None'}
+In Battle: {game_state['in_battle']}
+Party HP: {game_state['hp_fraction']:.2%}
+
+What should I do next?"""
+
+        # Check for summarization trigger
+        if self.turn_count >= self.max_turns:
+            summary = await self._progressive_summarization()
+            self.conversation_history = [{"role": "assistant", "content": summary}]
+            self.turn_count = 0
+        
+        # Add to conversation
+        self.conversation_history.append({"role": "user", "content": user_message})
+        
+        # Query Grok
+        response = await self.client.create_chat_completion(
+            model="grok-2",
+            messages=[
+                {"role": "system", "content": self.create_system_prompt()},
+                *self.conversation_history
+            ],
+            temperature=0.7,
+            max_tokens=500
         )
-        # Perform the API call
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            reasoning_effort=effort,
-            temperature=temp,
-            top_p=top_p_val,
+        
+        # Parse response and extract tool calls
+        grok_response = response.choices[0].message
+        self.conversation_history.append(grok_response)
+        self.turn_count += 1
+        
+        return self._parse_tool_calls(grok_response)
+    
+    def _parse_tool_calls(self, response) -> List[Dict]:
+        """Extract and validate tool calls from Grok response"""
+        tool_calls = []
+        
+        if hasattr(response, 'tool_calls'):
+            for call in response.tool_calls:
+                tool_calls.append({
+                    "name": call.function.name,
+                    "arguments": json.loads(call.function.arguments)
+                })
+        
+        return tool_calls
+    
+    async def execute_tool_calls(self, tool_calls: List[Dict]) -> List[int]:
+        """Convert tool calls to button press actions"""
+        actions = []
+        
+        for call in tool_calls:
+            if call["name"] == "press_buttons":
+                for button in call["arguments"]["buttons"]:
+                    if button.lower() in self.ACTION_MAP:
+                        actions.append(self.ACTION_MAP[button.lower()])
+            
+            elif call["name"] == "follow_path":
+                steps = call["arguments"].get("steps", 1)
+                for _ in range(steps):
+                    actions.append(self.ACTION_MAP["path"])
+            
+            elif call["name"] == "update_knowledge":
+                self._update_knowledge_base(
+                    call["arguments"]["category"],
+                    call["arguments"]["key"],
+                    call["arguments"]["value"]
+                )
+        
+        return actions
+    
+    def _update_knowledge_base(self, category: str, key: str, value):
+        """Update internal knowledge base"""
+        if category == "locations":
+            self.knowledge_base["locations_visited"].add(value)
+        elif category == "pokemon" and key:
+            self.knowledge_base["pokemon_team"][key] = value
+        elif category == "items":
+            self.knowledge_base["items_obtained"].add(value)
+        elif category == "npcs":
+            self.knowledge_base["npcs_encountered"].add(value)
+        elif category == "objectives":
+            self.knowledge_base["current_objective"] = value
+    
+    async def _progressive_summarization(self) -> str:
+        """Generate summary of recent progress"""
+        summary_prompt = """Summarize the last 50 turns of gameplay. Include:
+- Major progress and accomplishments
+- Current location and immediate objective
+- Pokemon team changes
+- Important items or badges obtained
+- Any significant battles or encounters"""
+        
+        response = await self.client.create_chat_completion(
+            model="grok-2", 
+            messages=[
+                {"role": "system", "content": "Summarize Pokemon gameplay progress concisely."},
+                {"role": "user", "content": summary_prompt},
+                *self.conversation_history[-10:]  # Last 10 messages for context
+            ],
+            max_tokens=300
         )
-        # Log raw API response for debugging
-        logger.info("API raw response: %s", response)
-        return response 
+        
+        return response.choices[0].message.content

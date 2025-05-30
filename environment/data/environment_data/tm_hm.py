@@ -1,5 +1,5 @@
 from enum import Enum
-from data.species import Species
+from data.environment_data.species import Species
 
 
 class TmHmMoves(Enum):

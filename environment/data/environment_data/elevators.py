@@ -1,4 +1,4 @@
-from data.map import MapIds
+from data.environment_data.map import MapIds
 
 
 # A mapping of map id to the next id in the item list

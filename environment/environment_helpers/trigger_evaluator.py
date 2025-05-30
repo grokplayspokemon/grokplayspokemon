@@ -1,11 +1,11 @@
 import re
 from typing import Dict, Optional, Tuple, List
 
-from data.events import EventFlags
-from data.flags import Flags
-from data.items import Items
-from data.species import Species
-from grok_plays_pokemon.recorder.data.recorder_data.global_map import local_to_global
+from data.environment_data.events import EventFlags
+from data.environment_data.flags import Flags
+from data.environment_data.items import Items
+from data.environment_data.species import Species
+from data.recorder_data.global_map import local_to_global
 
 class TriggerEvaluator:
     """

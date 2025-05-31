@@ -2,7 +2,7 @@ from ctypes import Structure, Union, c_uint16, c_uint8, sizeof
 
 from pyboy import PyBoy
 
-from data.environment_data.species import Species
+from environment.data.environment_data.species import Species
 
 
 class BoxStruct(Structure):

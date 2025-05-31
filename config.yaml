@@ -541,3 +541,24 @@ env_config:
   gb_path: "/puffertank/grok_plays_pokemon/environment/red.gb"
   # Optional: set headless to true to disable Pygame window
   headless: false
+
+# New section for Agent and LLM configuration
+agent:
+  # Specify the LLM provider (e.g., 'grok', 'anthropic', 'google', 'openai')
+  # For this project, we will focus on 'grok'
+  llm_provider: "grok" 
+  
+  # Model name for the specified LLM provider
+  model_name: "grok-1" # Replace with the actual Grok model name
+
+  # Maximum tokens for LLM responses
+  max_tokens: 2048
+
+  # Temperature for LLM sampling (0.0 to 1.0)
+  temperature: 0.7
+
+  # API Key for the LLM provider (can also be set via environment variable)
+  # e.g., GROK_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, OPENAI_API_KEY
+  # If set here, it might override environment variables depending on loading logic.
+  # It's often better to use environment variables for keys.
+  # api_key: "YOUR_GROK_API_KEY_IF_NOT_USING_ENV_VAR" 

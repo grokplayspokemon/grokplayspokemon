@@ -1,4 +1,4 @@
-from environment import RedGymEnv
+from environment.environment import RedGymEnv
 
 class EnvWrapper(RedGymEnv):
     """

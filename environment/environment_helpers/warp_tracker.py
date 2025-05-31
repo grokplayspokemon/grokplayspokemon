@@ -1,5 +1,5 @@
-from data.environment_data.tilesets import Tilesets
-from data.recorder_data.global_map import local_to_global, global_to_local 
+from environment.data.environment_data.tilesets import Tilesets
+from environment.data.recorder_data.global_map import local_to_global, global_to_local 
 
 # WarpTracker class encapsulates warp tracking and backtracking logic
 class WarpTracker:

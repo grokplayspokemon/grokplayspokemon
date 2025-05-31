@@ -13,14 +13,14 @@ import random
 import numpy as np
 from einops import rearrange
 
-from data.environment_data.ram_map import read_m, write_mem
-from data.environment_data.constants import ALL_GOOD_ITEMS, GOOD_ITEMS_PRIORITY, \
+from environment.data.environment_data.ram_map import read_m, write_mem
+from environment.data.environment_data.constants import ALL_GOOD_ITEMS, GOOD_ITEMS_PRIORITY, \
     POKEBALL_PRIORITY, POTION_PRIORITY, REVIVE_PRIORITY
-from data.environment_data.constants import MART_ITEMS_ID_DICT, ITEM_TM_IDS_PRICES
-from data.environment_data.ram_addresses import RamAddress as RAM
+from environment.data.environment_data.constants import MART_ITEMS_ID_DICT, ITEM_TM_IDS_PRICES
+from environment.data.environment_data.ram_addresses import RamAddress as RAM
 
-from environment_helpers.navigator import InteractiveNavigator
-from data.recorder_data.global_map import local_to_global, global_to_local
+from environment.environment_helpers.navigator import InteractiveNavigator
+from environment.data.recorder_data.global_map import local_to_global, global_to_local
 from functools import partial
 
 class ItemHandler:

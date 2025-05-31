@@ -2,7 +2,7 @@ from ctypes import LittleEndianStructure, Union, c_uint8
 
 from pyboy import PyBoy
 
-from data.items import Items
+from environment.data.environment_data.items import Items
 
 
 BAG_CAPACITY = 20

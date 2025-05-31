@@ -10,13 +10,13 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 
 from pyboy.utils import WindowEvent
 
-from data.environment_data.map import MapIds
-from data.environment_data.warps import WARP_DICT
+from environment.data.environment_data.map import MapIds
+from environment.data.environment_data.warps import WARP_DICT
 
 if TYPE_CHECKING:
     from environment import RedGymEnv
 
-from data.recorder_data.global_map import local_to_global, global_to_local
+from environment.data.recorder_data.global_map import local_to_global, global_to_local
 
 
 class InteractiveNavigator:
@@ -144,6 +144,8 @@ class InteractiveNavigator:
     # ...............................................................
     def warp_tile_handler(self) -> bool:
         cur = self._get_player_global_coords()
+        # Debug: initial warp handler state
+        print(f"warp_tile_handler: current_coordinate_index={self.current_coordinate_index}, coord_map_ids snippet={self.coord_map_ids[self.current_coordinate_index:self.current_coordinate_index+3] if self.coord_map_ids else []}")
         if cur is None:
             return False
 
@@ -175,6 +177,13 @@ class InteractiveNavigator:
 
         warp_entry = next((e for e in warp_entries if (e.get("x"), e.get("y")) == nearest_warp), None)
         if warp_entry:
+            # Debug: warp entry found
+            print(f"warp_tile_handler: found warp_entry target_map_id={warp_entry.get('target_map_id')} for nearest_warp={nearest_warp}")
+            # Only trigger warp if it matches the next intended map in the quest path
+            next_idx = self.current_coordinate_index + self._direction
+            intended_map = self.coord_map_ids[next_idx] if 0 <= next_idx < len(self.coord_map_ids) else None
+            if warp_entry.get("target_map_id") != intended_map:
+                return False
             if self._left_home and warp_entry.get("target_map_id") in {37, 38}:
                 print("navigator.py: warp_tile_handler(): BLOCKED re-entry to home")
                 return False
@@ -224,6 +233,8 @@ class InteractiveNavigator:
             post_map = None
 
         if post_map is not None and post_map != prev_map:
+            # Debug: successful warp
+            print(f"warp_tile_handler: warped from map {prev_map} to {post_map}, current idx before snap={self.current_coordinate_index}")
             if prev_map == 37 and post_map == 0:
                 self._left_home = True
             self.last_warp_time = time.time()
@@ -233,6 +244,7 @@ class InteractiveNavigator:
                 self._post_warp_exit_pos = landed
             if self.current_coordinate_index < len(self.sequential_coordinates):
                 self.snap_to_nearest_coordinate()
+            print(f"warp_tile_handler: after snap idx={self.current_coordinate_index}, target={self.sequential_coordinates[self.current_coordinate_index]}")
             return True
 
         return False
@@ -285,6 +297,11 @@ class InteractiveNavigator:
             except Exception:
                 pass
 
+        # Debug: start of move_to_next_coordinate
+        cur_map = self.env.get_game_coords()[2]
+        next_coords = self.sequential_coordinates[self.current_coordinate_index:self.current_coordinate_index+3] if self.sequential_coordinates else []
+        print(f"move_to_next_coordinate: quest={self.active_quest_id}, idx={self.current_coordinate_index}, cur_map={cur_map}, next_coords={next_coords}, path_len={len(self.sequential_coordinates)}")
+
         # Pause on dialog/battle
         try:
             if (self.env.read_dialog() or "").strip():
@@ -294,6 +311,7 @@ class InteractiveNavigator:
 
         # Early warp handling
         if self.warp_tile_handler():
+            print(f"move_to_next_coordinate: warp handled, new idx={self.current_coordinate_index}")
             return True
 
         # Ensure path loaded
@@ -324,32 +342,14 @@ class InteractiveNavigator:
             if self.active_quest_id == 23:
                 return self.roam_in_grass()
             # Attempt to load next segment of same quest
-            base = Path(__file__).parent / "quest_paths"
-            quest_id = self.active_quest_id
-            file_path = base / f"{quest_id:03d}" / f"{quest_id:03d}_coords.json"
             try:
-                data = json.loads(file_path.read_text())
-                ordered_keys = list(data.keys())
-                cur_map_str = str(self.env.get_game_coords()[2])
-                if cur_map_str in ordered_keys:
-                    idx = ordered_keys.index(cur_map_str)
-                    if idx < len(ordered_keys) - 1:
-                        next_map_str = ordered_keys[idx + 1]
-                        coords = data[next_map_str]
-                        self.sequential_coordinates = [(gy, gx) for gy, gx in coords]
-                        norm_key = next_map_str.split("_")[0]
-                        self.coord_map_ids = [int(norm_key)] * len(coords)
-                        self.current_coordinate_index = 0
-                        print(
-                            f"Navigator: loaded next segment for Quest {quest_id:03d} "
-                            f"on map {next_map_str} ({len(coords)} steps)"
-                        )
-                        return True
-            except Exception as e:
-                print(f"Navigator: error loading next segment for Quest {quest_id:03d}: {e}")
-            # No further segments: unlock and stop
-            self.quest_locked = False
-            return False
+                self.load_segment_for_current_map()
+                return True
+            except RuntimeError as e:
+                # End-of-path next segment load error
+                print(f"Navigator: end-of-path next segment load error: {e}")
+                self.quest_locked = False
+                return False
 
         # Multi-map quest: if map changed externally, load segment
         cur_map = self.env.get_game_coords()[2]

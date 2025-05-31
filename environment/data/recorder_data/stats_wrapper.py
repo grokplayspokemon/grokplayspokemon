@@ -5,12 +5,12 @@ from enum import Enum
 import numpy as np
 from gymnasium import Env
 
-from grok_plays_pokemon.recorder.data.recorder_data.events import filtered_event_names
-from items import Items
-from map_data import map_locations
-from moves import Moves
+from environment.data.recorder_data.events import filtered_event_names
+from environment.data.environment_data.items import Items
+from environment.data.recorder_data.map_data import map_locations
+from environment.data.environment_data.moves import Moves
 from environment import RedGymEnv
-from pokedex import Pokedex, PokedexOrder
+from environment.data.recorder_data.pokedex import Pokedex, PokedexOrder
 
 event_flags_start = 0xD747
 event_flags_end = 0xD887

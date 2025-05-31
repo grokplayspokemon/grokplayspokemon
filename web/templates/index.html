@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Grok Plays Pokémon - Stream</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/css/tailwind.css">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
@@ -87,10 +87,19 @@
             background: #000;
             position: relative;
             width: 100%;
-            height: 100%;
+            /* Maintain 160x144 Game Boy aspect ratio */
+            aspect-ratio: 160 / 144;
             display: flex;
             align-items: center;
             justify-content: center;
+        }
+
+        /* Ensure game canvas image fills its container */
+        .game-canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            image-rendering: pixelated;
         }
 
         .game-placeholder {
@@ -764,8 +773,8 @@
             <div class="bottom-stats">
                 <div class="bottom-stat"><span class="bottom-stat-label">Location</span><span class="bottom-stat-value" id="stat-location">-</span></div>
                 <div class="bottom-stat"><span class="bottom-stat-label">Map ID</span><span class="bottom-stat-value mono" id="stat-map-id">-</span></div>
-                <div class="bottom-stat"><span class="bottom-stat-label">Local</span><span class="bottom-stat-value mono" id="stat-local">(0,0)</span></div>
-                <div class="bottom-stat"><span class="bottom-stat-label">Global</span><span class="bottom-stat-value mono" id="stat-global">(0,0)</span></div>
+                <div class="bottom-stat"><span class="bottom-stat-label">(Y,X) Local</span><span class="bottom-stat-value mono" id="stat-local">(0,0)</span></div>
+                <div class="bottom-stat"><span class="bottom-stat-label">(Y,X) Global</span><span class="bottom-stat-value mono" id="stat-global">(0,0)</span></div>
                 <div class="bottom-stat"><span class="bottom-stat-label">Money</span><span class="bottom-stat-value mono" id="stat-money">₽0</span></div>
                 <div class="bottom-stat"><span class="bottom-stat-label">Seen</span><span class="bottom-stat-value" id="stat-seen">0</span></div>
                 <div class="bottom-stat"><span class="bottom-stat-label">Caught</span><span class="bottom-stat-value" id="stat-caught">0</span></div>
@@ -800,21 +809,20 @@
             return questDefinitions;
         }
         async function updateQuest(questId) {
-            const quests = await loadQuests();
-            const quest = quests.find(q => q.quest_id === questId);
-            const section = document.getElementById('quest-section');
-            if (!quest) return;
-            document.getElementById('quest-id-display').textContent = `Quest ${quest.quest_id}`;
-            document.getElementById('quest-begin').textContent = quest.begin_quest_text;
-            const sub = document.getElementById('subquests'); sub.innerHTML = '';
-            quest.subquest_list.forEach(s => { const li = document.createElement('li'); li.textContent = s; sub.appendChild(li); });
-            const triggers = quest.event_triggers || [];
-            const done = triggers.filter(t => t.completed).length;
-            document.getElementById('quest-progress').textContent = `Progress: ${Math.round(done/triggers.length*100||0)}%`;
-            if (quest.completed) {
-                section.innerHTML = `<div class="section-title">Quest ${quest.quest_id} Completed!</div><div class="mono">${quest.end_quest_text}</div>`;
-                section.classList.add('quest-complete');
-                setTimeout(() => { section.innerHTML = ''; section.classList.remove('quest-complete'); }, 5000);
+            try {
+                const quests = await loadQuests();
+                const quest = quests.find(q => q.quest_id === questId);
+                const section = document.getElementById('quest-section');
+                if (!quest) return;
+                document.getElementById('quest-id-display').textContent = `Quest ${quest.quest_id}`;
+                document.getElementById('quest-begin').textContent = quest.begin_quest_text;
+                const sub = document.getElementById('subquests'); sub.innerHTML = '';
+                quest.subquest_list.forEach(s => { const li = document.createElement('li'); li.textContent = s; sub.appendChild(li); });
+                const triggers = quest.event_triggers || [];
+                const done = triggers.filter(t => t.completed).length;
+                document.getElementById('quest-progress').textContent = `Progress: ${Math.round(done/triggers.length*100||0)}%`;
+            } catch (err) {
+                console.error('updateQuest error', err);
             }
         }
         function updateGrokStatus(data) {
@@ -823,12 +831,14 @@
             if (data.response) container.innerHTML += `<div><strong>Response:</strong> ${data.response}</div>`;
         }
         function updateLocation(data) {
+            console.log('updateLocation:', data);
             document.getElementById('stat-location').textContent = data.map_name || '';
             document.getElementById('stat-map-id').textContent = data.map_id;
             document.getElementById('stat-global').textContent = `(${data.gx},${data.gy})`;
             document.getElementById('stat-local').textContent = `(${data.x},${data.y})`;
         }
         function updateStats(stats) {
+            console.log('updateStats:', stats);
             document.getElementById('stat-money').textContent = `₽${stats.money}`;
             document.getElementById('stat-seen').textContent = stats.pokedex || 0;
             document.getElementById('stat-caught').textContent = stats.pokedex_caught || 0;
@@ -852,23 +862,7 @@
             viz.appendChild(span);
             if (viz.children.length > 10) viz.removeChild(viz.children[0]);
         }
-        // Set up SSE
-        const source = new EventSource('/stream');
-        source.onmessage = async e => {
-            console.log('Raw SSE /stream:', e.data);
-            const msg = JSON.parse(e.data);
-            switch (msg.type) {
-                case 'location': updateLocation(msg.data); break;
-                case 'stats': updateStats(msg.data); break;
-                case 'llm_usage': updateLLMUsage(msg.data); break;
-                case 'current_quest': await updateQuest(msg.data); break;
-                case 'grok_thinking': updateGrokStatus({thinking: msg.data}); break;
-                case 'grok_response': updateGrokStatus({response: msg.data}); break;
-                case 'action': renderAction(msg.data); break;
-            }
-        };
-
-        // Setup SSE for live updates
+        // Setup SSE for live updates via new SSE server
         const eventSource = new EventSource('/events');
 
         eventSource.onmessage = async (e) => {
@@ -882,7 +876,7 @@
                         updateLocation(msg.data);
                         break;
                     case 'current_quest':
-                        updateQuest(msg.data);
+                        updateQuest(msg.data).catch(err => console.error('updateQuest error', err));
                         break;
                     case 'pokemon_team':
                         await updatePokemonTeam(msg.data);
@@ -896,8 +890,30 @@
                     case 'grok_thinking':
                         updateGrokStatus(msg.data);
                         break;
+                    case 'grok_response':
+                        updateGrokStatus({response: msg.data});
+                        break;
+                    case 'action':
+                        renderAction(msg.data);
+                        break;
                     case 'game_state':
                         await handleFullGameState(msg.data);
+                        break;
+                    case 'game_screen':
+                        // Render actual game screen image
+                        const screenContainer = document.querySelector('.game-screen');
+                        if (screenContainer) {
+                            screenContainer.innerHTML = '';
+                            const img = document.createElement('img');
+                            img.src = msg.data;
+                            img.alt = 'Game Screen';
+                            img.className = 'game-canvas';
+                            screenContainer.appendChild(img);
+                        }
+                        break;
+                    case 'quest_payload':
+                        // Update quest UI when full payload is received
+                        updateQuest(msg.data.quest_id).catch(err => console.error('updateQuest error', err));
                         break;
                 }
             } catch (err) {

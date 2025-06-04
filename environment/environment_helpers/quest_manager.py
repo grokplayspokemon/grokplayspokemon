@@ -12,6 +12,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
 from environment.data.environment_data.item_handler import ItemHandler
+from environment.environment_helpers.quest_helper import QuestWarpBlocker
+
+# Simple nurse joy coordinate mapping (global coordinates for standing in front of nurse joy)
+NURSE_JOY_COORD_MAP = {
+    # Map ID: (global_y, global_x) coordinate for standing in front of nurse joy
+    # These would need to be filled in with actual coordinates
+    # For now, using placeholder coordinates
+}
 
 class QuestManager:
     """
@@ -62,6 +70,9 @@ class QuestManager:
 
         self.current_quest_id: Optional[int] = None # Will be set by get_current_quest()
         
+        # FIXED: Store reference to QuestProgressionEngine once it's created
+        self.quest_progression_engine = None
+        
         self.a_action_index = VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_A)
         self.up_action_index = VALID_ACTIONS.index(WindowEvent.PRESS_ARROW_UP)
         self.down_action_index = VALID_ACTIONS.index(WindowEvent.PRESS_ARROW_DOWN)
@@ -75,6 +86,9 @@ class QuestManager:
         self.item_handler = ItemHandler(self.env) # Assuming ItemHandler is correctly defined
         self.pressed_button_dict: Dict[int, Dict[Tuple[int, int], Dict[int, int]]] = {} 
         self.last_num_potions = 0
+        
+        # Initialize simple warp blocker
+        self.warp_blocker = QuestWarpBlocker(self.env)
 
         # Initial call to determine current quest
         self.get_current_quest()
@@ -104,7 +118,14 @@ class QuestManager:
         Sets self.current_quest_id and updates env and navigator.
         Returns the current quest ID (int) or None if no quest is currently actionable.
         """
-        self._load_quest_completion_status() # Ensure we have the latest status
+        # FIXED: Use QuestProgressionEngine's status if available
+        if hasattr(self, 'quest_progression_engine') and self.quest_progression_engine is not None:
+            # Get status from QuestProgressionEngine
+            quest_status = self.quest_progression_engine.get_quest_status()
+            self.quest_completed_status = {str(qid).zfill(3): completed for qid, completed in quest_status.items()}
+        else:
+            # Fallback to loading from file
+            self._load_quest_completion_status() # Ensure we have the latest status
 
         for quest_def in self.quest_definitions: # Iterate in defined order
             quest_id_str = str(quest_def["quest_id"]).zfill(3)
@@ -127,6 +148,16 @@ class QuestManager:
                     print(f"QuestManager: Current quest updated to {quest_id_int} ({quest_def.get('begin_quest_text', '')[:50]}...)")
                 
                 self.current_quest_id = quest_id_int
+                # Update warp blocker with new quest
+                self.warp_blocker.update_quest_blocks(self.current_quest_id)
+                
+                # Update stage manager stage to match quest (simple 1:1 mapping for now)
+                if hasattr(self.env, 'stage_manager'):
+                    self.env.stage_manager.stage = quest_id_int
+                    # Call update to load the stage configuration from STAGE_DICT
+                    self.env.stage_manager.update({})
+                    print(f"QuestManager: Updated stage_manager.stage to {quest_id_int}, blockings: {len(self.env.stage_manager.blockings)}")
+                
                 if hasattr(self.env, 'current_loaded_quest_id'):
                     self.env.current_loaded_quest_id = self.current_quest_id
                 if self.nav and hasattr(self.nav, 'active_quest_id'):
@@ -167,16 +198,51 @@ class QuestManager:
 
     def filter_action(self, action: int) -> int:
         """
-        Inspect or modify the given action based on explicit hard-coded quest logic
-        for the current_quest_id determined by get_current_quest().
+        Inspect or modify the given action based on quest logic and warp blocking.
         """
+        print(f"QuestManager.filter_action called with action {action}")  # DEBUG
+        
+        # CRITICAL: Do not override actions when dialog is active - player needs to interact
+        try:
+            dialog = self.env.read_dialog()
+            if dialog and dialog.strip():
+                print(f"QuestManager: Dialog active, allowing player action {action} for interaction")
+                return action
+        except Exception as e:
+            print(f"QuestManager: Error checking dialog in filter_action: {e}")
+        
+        # FIXED: Don't reload quest system for PATH_FOLLOW_ACTION - let environment handle it directly
+        from environment.environment import PATH_FOLLOW_ACTION
+        if action == PATH_FOLLOW_ACTION:
+            print(f"QuestManager: PATH_FOLLOW_ACTION detected, passing through without quest reload")
+            return action
+        
         self.get_current_quest() # Ensure current_quest_id is up-to-date
 
         active_quest_id = self.current_quest_id # Use the ID set by get_current_quest
+        print(f"QuestManager: Active quest ID = {active_quest_id}")  # DEBUG
         
         # If no quest is active, or no specific logic, return original action
         if active_quest_id is None:
             return action
+
+        x, y, map_id = self.env.get_game_coords()
+        
+        # Apply warp blocking via stage_manager.scripted_stage_blocking()
+        # The warp_blocker automatically updates stage_manager.blockings when quest changes
+        if hasattr(self.env, 'stage_manager') and hasattr(self.env.stage_manager, 'scripted_stage_blocking'):
+            print(f"QuestManager: Calling stage_manager.scripted_stage_blocking with action {action}")  # DEBUG
+            action = self.env.stage_manager.scripted_stage_blocking(action)
+            print(f"QuestManager: stage_manager returned action {action}")  # DEBUG
+        
+        # Apply scripted movement via stage_manager.scripted_stage_movement()
+        if hasattr(self.env, 'stage_manager') and hasattr(self.env.stage_manager, 'scripted_stage_movement'):
+            print(f"QuestManager: Calling stage_manager.scripted_stage_movement with action {action}")  # DEBUG
+            action = self.env.stage_manager.scripted_stage_movement(action)
+            print(f"QuestManager: stage_manager scripted movement returned action {action}")  # DEBUG
+
+        # Continue with existing hard-coded logic as fallback
+        # TODO: Gradually replace this with more warp blocker rules
 
         # Example: Keep hard-coded logic, but now it relies on self.current_quest_id
         # This part needs careful review to ensure it aligns with the new quest progression model.
@@ -194,7 +260,23 @@ class QuestManager:
         #    if prev_quest_id in self.pressed_button_dict:
         #        del self.pressed_button_dict[prev_quest_id]
 
+        # potion from route 1 guy: (x,y) = (85, 340)
+        # if active_quest_id == 7:
+        #     if (gy, gx) == (85, 340):
+        #         # need to determine if a has been pressed to get the potion. without dialog stuff,
+        #         # the safest way to do it is check potion quantity in bag before and after.
+        #         if self.item_handler.get_item_quantity("POTION") > 0:
+        
 
+        
+        # if active_quest_id == 2 and map_id == 37:
+        #     if (y, x) == (7, 3) or (y, x) == (7, 4):
+        #         return self.down_action_index
+        
+        # if active_quest_id == 3:
+        #     if (gy, gx) == (345, 89) and action == self.up_action_index:
+        #         return self.down_action_index
+        
         # Hard-coded logic for quest 014: Path following (example, assuming env handles it)
         if active_quest_id == 14:
             # Assuming env.load_coordinate_path itself checks if path is already loaded for this quest
@@ -229,26 +311,26 @@ class QuestManager:
         if active_quest_id == 5 and gy == 338 and gx == 94:
             return self.up_action_index
         
-        if active_quest_id == 2 or active_quest_id == 3:
-            if active_quest_id == 3:
-                if (gy, gx) == (340, 94) or (gy, gx) == (340, 95):
-                    return self.up_action_index
-            # These are very specific coordinate-based actions.
-            # Consider if these should be defined in coordinate paths or as micro-objectives.
-            if (gy, gx) == (355, 78) or (gy, gx) == (355, 77): return self.right_action_index
-            elif (gy, gx) == (343, 89): return self.down_action_index
-            elif (gy, gx) == (344, 89): return self.down_action_index
-            elif (gy, gx) == (349, 82): return self.down_action_index
+        # if active_quest_id == 2 or active_quest_id == 3:
+        #     if active_quest_id == 3:
+        #         if (gy, gx) == (340, 94) or (gy, gx) == (340, 95):
+        #             return self.up_action_index
+        #     # These are very specific coordinate-based actions.
+        #     # Consider if these should be defined in coordinate paths or as micro-objectives.
+        #     if (gy, gx) == (355, 78) or (gy, gx) == (355, 77): return self.right_action_index
+        #     elif (gy, gx) == (343, 89): return self.down_action_index
+        #     elif (gy, gx) == (344, 89): return self.down_action_index
+        #     elif (gy, gx) == (349, 82): return self.down_action_index
         
         if active_quest_id == 12: # Talk to Oak
             if (gy, gx) == (348, 110): return self.a_action_index
         
         # Simplified talk to Nurse Joy for any Pokecenter heal quest if standing in front
         # Example: if current quest involves healing and player is at (heal_spot_x, heal_spot_y)
-        # current_quest_def = self.get_quest_definition(active_quest_id)
-        # if current_quest_def and "Heal" in current_quest_def.get("begin_quest_text", ""):
-        #    if map_id in POKECENTER_MAP_IDS and (gy, gx) == NURSE_JOY_COORD_MAP.get(map_id):
-        #        return self.a_action_index
+        current_quest_def = self.get_quest_definition(active_quest_id)
+        if current_quest_def and "Heal" in current_quest_def.get("begin_quest_text", ""):
+           if map_id in self.env.read_tileset() and (gy, gx) == NURSE_JOY_COORD_MAP.get(map_id): # need to obtain local coord for standing in front of nurse joy
+               return self.a_action_index
 
         return action
 
@@ -287,3 +369,150 @@ class QuestManager:
         return None
 
 # End of QuestManager enforcement module 
+
+def verify_quest_system_integrity(env, navigator):
+    """Comprehensive quest system validation protocol with content verification"""
+    
+    # Phase 1: File System Verification with correct paths
+    quest_files = ['012_coords.json', '013_coords.json', '014_coords.json']
+    print("=== COORDINATE FILE ACCESSIBILITY VERIFICATION ===")
+    
+    for quest_id, file_name in zip([12, 13, 14], quest_files):
+        quest_dir_name = f"{quest_id:03d}"
+        file_path = Path(__file__).parent / "quest_paths" / quest_dir_name / file_name
+        
+        status = "EXISTS" if file_path.exists() else "MISSING"
+        print(f"Quest file {file_name}: {status}")
+        
+        if file_path.exists():
+            # Validate content structure
+            try:
+                with open(file_path, 'r') as f:
+                    content = json.load(f)
+                print(f"  → Structure: {list(content.keys())} maps")
+                for map_id, coords in content.items():
+                    print(f"    Map {map_id}: {len(coords)} coordinates")
+                    if coords:
+                        print(f"      First: {coords[0]}, Last: {coords[-1]}")
+            except Exception as e:
+                print(f"  → Content validation error: {e}")
+    
+    # Phase 2: Quest Load Sequence Testing with content verification
+    print(f"\n=== QUEST LOADING CONTENT VERIFICATION ===")
+    for quest_id in [12, 13, 14]:
+        print(f"\n--- TESTING QUEST {quest_id:03d} LOAD ---")
+        
+        # Store original navigator state
+        original_coords = navigator.sequential_coordinates.copy() if navigator.sequential_coordinates else []
+        original_index = navigator.current_coordinate_index
+        original_quest_id = getattr(navigator, 'active_quest_id', None)
+        
+        # Test quest loading
+        success = navigator.load_coordinate_path(quest_id)
+        if success:
+            print(f"✓ Quest {quest_id:03d}: {len(navigator.sequential_coordinates)} coordinates loaded")
+            if navigator.sequential_coordinates:
+                print(f"  First: {navigator.sequential_coordinates[0]}")
+                print(f"  Last: {navigator.sequential_coordinates[-1]}")
+                
+                # Content uniqueness verification
+                coord_set = set(navigator.sequential_coordinates)
+                print(f"  Unique coordinates: {len(coord_set)}/{len(navigator.sequential_coordinates)}")
+                
+                # Validate against expected content
+                quest_dir_name = f"{quest_id:03d}"
+                quest_file_name = f"{quest_dir_name}_coords.json"
+                file_path = Path(__file__).parent / "quest_paths" / quest_dir_name / quest_file_name
+                
+                if file_path.exists():
+                    with open(file_path, 'r') as f:
+                        expected_content = json.load(f)
+                    
+                    # Flatten expected coordinates for comparison
+                    expected_coords = []
+                    for map_coords in expected_content.values():
+                        expected_coords.extend([tuple(coord) for coord in map_coords])
+                    
+                    loaded_coords = [tuple(coord) for coord in navigator.sequential_coordinates]
+                    
+                    if loaded_coords == expected_coords:
+                        print(f"  ✓ Content matches file exactly")
+                    else:
+                        print(f"  ⚠ Content mismatch detected")
+                        print(f"    Expected: {len(expected_coords)} coords")
+                        print(f"    Loaded: {len(loaded_coords)} coords")
+        else:
+            print(f"✗ Quest {quest_id:03d}: LOAD FAILED")
+        
+        # Restore original navigator state
+        navigator.sequential_coordinates = original_coords
+        navigator.current_coordinate_index = original_index
+        navigator.active_quest_id = original_quest_id
+    
+    # Phase 3: Position Alignment Verification  
+    current_pos = navigator._get_player_global_coords()
+    print(f"\nCurrent player position: {current_pos}")
+    
+    return True
+
+def determine_starting_quest(player_pos, map_id, completed_quests, quest_ids_all):
+    """Determine the most appropriate starting quest based on player position and game state"""
+    
+    if map_id == 40:  # Oak's Lab
+        # If standing on Quest 12 return path in Lab, prioritize it
+        if player_pos and player_pos in [(356, 110), (355, 110), (354, 110), (353, 110), (352, 110), (351, 110), (350, 110), (349, 110), (348, 110)]:
+            if not completed_quests.get(12, False):
+                return 12
+            elif not completed_quests.get(13, False):
+                return 13
+        # Default Oak's Lab quests: try Quest 11 first, then 12 and 13
+        for quest_id in [11, 12, 13]:
+            if not completed_quests.get(quest_id, False):
+                return quest_id
+    
+    elif map_id == 0:  # Pallet Town
+        # Check if player is on quest 13 or 14 coordinates
+        if not completed_quests.get(13, False):
+            return 13
+        elif not completed_quests.get(14, False):
+            return 14
+    
+    # Fallback: First uncompleted quest
+    for quest_id in quest_ids_all:
+        if not completed_quests.get(quest_id, False):
+            return quest_id
+    
+    return quest_ids_all[0]  # Ultimate fallback
+
+def describe_trigger(trg):
+    """Function to describe trigger criteria for UI display"""
+    ttype = trg.get('type')
+    if ttype == 'current_map_id_is':
+        return f"Map ID == {trg['map_id']}"
+    elif ttype == 'previous_map_id_was':
+        return f"Previous Map ID == {trg['map_id']}"
+    elif ttype == 'dialog_contains_text':
+        return f"Dialog contains \"{trg['text']}\""
+    elif ttype == 'party_size_is':
+        return f"Party size == {trg['size']}"
+    elif ttype == 'event_completed':
+        event_name = trg.get('event_name', '')
+        opponent_id = trg.get('opponent_identifier', '')
+        if event_name:
+            display_text = f"Event completed: {event_name}"
+            if opponent_id:
+                display_text += f" (vs {opponent_id})"
+            return display_text
+        else:
+            return "Event completed (missing event_name)"
+    elif ttype == 'battle_won':
+        # Legacy support - redirect to event_completed description
+        return f"Battle won vs {trg.get('opponent_identifier','')} (legacy)"
+    elif ttype == 'item_received_dialog':
+        return f"Item received dialog \"{trg['text']}\""
+    elif ttype == 'item_is_in_inventory':
+        return f"Inventory has >= {trg.get('quantity_min',1)} x {trg.get('item_name','')}"
+    elif ttype == 'party_hp_is_full':
+        return "Party HP is full"
+    else:
+        return str(trg) 

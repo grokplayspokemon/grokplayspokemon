@@ -1,6 +1,10 @@
 from environment.environment import RedGymEnv
 
 class EnvWrapper(RedGymEnv):
+    def __init__(self, config):
+        super().__init__(config)
+        self.reset(options={"state": None})
+
     """
     A drop-in wrapper ensuring:
       1) Exactly one action per step()
@@ -8,6 +12,7 @@ class EnvWrapper(RedGymEnv):
     """
     def step(self, action):
         # Execute original step logic
+
         raw_obs, reward, reset, done, info = super().step(action)
 
         # Freshly gather observation and dialog to avoid stale data

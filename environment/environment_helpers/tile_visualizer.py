@@ -53,13 +53,16 @@ def overlay_on_screenshot(screenshot, collision_map_str, alpha=128):
     
     Args:
         screenshot (PIL.Image): Original screenshot
-        collision_map_str (str): ASCII collision map from emulator
+        collision_map_str (str): ASCII collision map from emulator (numeric or character format)
         alpha (int): Transparency value (0-255)
         
     Returns:
         PIL.Image: Screenshot with overlay
     """
-    overlay = create_tile_overlay(collision_map_str, alpha)
+    # Convert numeric format to visual format if needed
+    converted_map_str = convert_numeric_to_visual_map(collision_map_str)
+    
+    overlay = create_tile_overlay(converted_map_str, alpha)
     if overlay is None:
         return screenshot
         
@@ -68,4 +71,71 @@ def overlay_on_screenshot(screenshot, collision_map_str, alpha=128):
         screenshot = screenshot.convert('RGBA')
     
     # Composite the images
-    return Image.alpha_composite(screenshot, overlay) 
+    return Image.alpha_composite(screenshot, overlay)
+
+def convert_numeric_to_visual_map(collision_map_str):
+    """
+    Convert numeric collision map format to visual character format.
+    
+    Args:
+        collision_map_str (str): Numeric collision map (0=walkable, 1=wall, 2=sprite, 3-6=player)
+        
+    Returns:
+        str: Visual collision map with borders and characters
+    """
+    if not collision_map_str or not isinstance(collision_map_str, str):
+        return None
+    
+    lines = collision_map_str.strip().split('\n')
+    
+    # Filter out legend lines and empty lines
+    map_lines = []
+    in_legend = False
+    for line in lines:
+        line = line.strip()
+        if line.startswith('Legend:'):
+            in_legend = True
+            continue
+        if in_legend:
+            continue
+        if line and all(c in '0123456789 ' for c in line):  # Only lines with numbers and spaces
+            map_lines.append(line)
+    
+    if not map_lines:
+        return None
+    
+    # Convert numeric codes to visual characters
+    visual_lines = []
+    for line in map_lines:
+        if not line.strip():  # Skip empty lines
+            continue
+        visual_line = "|"  # Add border
+        for char in line.split():
+            if char == '0':  # walkable
+                visual_line += '·'
+            elif char == '1':  # wall/obstacle
+                visual_line += '█'
+            elif char == '2':  # sprite/NPC
+                visual_line += 'S'
+            elif char == '3':  # player facing up
+                visual_line += '↑'
+            elif char == '4':  # player facing down
+                visual_line += '↓'
+            elif char == '5':  # player facing left
+                visual_line += '←'
+            elif char == '6':  # player facing right
+                visual_line += '→'
+            else:
+                visual_line += '?'  # unknown
+        visual_line += "|"  # Add border
+        visual_lines.append(visual_line)
+    
+    # Add top and bottom borders
+    if visual_lines:
+        border_width = len(visual_lines[0])
+        top_border = "+" + "-" * (border_width - 2) + "+"
+        bottom_border = top_border
+        
+        return top_border + "\n" + "\n".join(visual_lines) + "\n" + bottom_border
+    
+    return None 

@@ -17,15 +17,15 @@
             {
                 "type": "current_map_id_is",
                 "map_id": 38,
-                "completed": true
+                "completed": false
             },
             {
                 "type": "dialog_contains_text",
-                "text": "awaits! Let's go!",
-                "completed": true
+                "text": "",
+                "completed": false
             }
         ],
-        "completed": true
+        "completed": false
     },
     {
         "quest_id": "002",
@@ -41,27 +41,19 @@
         "associated_coordinates_file": "002_coords.json",
         "event_triggers": [
             {
-                "type": "previous_map_id_was",
-                "map_id": 38,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 37,
+                "previous_map_id": 38,
+                "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 37,
-                "completed": true
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 37,
-                "completed": true
-            },
-            {
-                "type": "current_map_id_is",
-                "map_id": 0,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 0,
+                "previous_map_id": 37,
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "001"
         ]
@@ -79,17 +71,17 @@
         "associated_coordinates_file": "003_coords.json",
         "event_triggers": [
             {
-                "type": "battle_won",
+                "type": "event_completed",
                 "event_name": "EVENT_FOLLOWED_OAK_INTO_LAB",
-                "completed": true
+                "completed": false
             },
             {
-                "type": "battle_won",
+                "type": "event_completed",
                 "event_name": "EVENT_FOLLOWED_OAK_INTO_LAB_2",
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "002"
         ]
@@ -111,29 +103,25 @@
         "associated_coordinates_file": "004_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 0,
-                "completed": true
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 40,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 0,
+                "previous_map_id": 40,
+                "completed": false
             },
             {
                 "type": "party_size_is",
                 "size": 1,
-                "completed": true
+                "completed": false
             },
             {
-                "type": "battle_won",
+                "type": "event_completed",
                 "opponent_identifier": "RIVAL_OAKSLAB_1",
                 "event_name": "EVENT_BATTLED_RIVAL_IN_OAKS_LAB",
                 "comment": "Ensures rival battle in Oak's lab was won",
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "003"
         ]
@@ -151,17 +139,13 @@
         "associated_coordinates_file": "005_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 12,
-                "completed": true
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 0,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 12,
+                "previous_map_id": 0,
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "004"
         ]
@@ -183,10 +167,10 @@
                 "type": "item_is_in_inventory",
                 "item_name": "POTION",
                 "quantity_min": 1,
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "005"
         ]
@@ -205,17 +189,13 @@
         "associated_coordinates_file": "007_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 1,
-                "completed": true
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 12,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 1,
+                "previous_map_id": 12,
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "006"
         ]
@@ -236,12 +216,13 @@
         "associated_coordinates_file": "008_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 42,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 42,
+                "previous_map_id": 1,
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "007"
         ]
@@ -263,10 +244,16 @@
                 "type": "item_is_in_inventory",
                 "item_name": "OAKS_PARCEL",
                 "quantity_min": 1,
-                "completed": true
+                "completed": false
+            },
+            {
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 1,
+                "previous_map_id": 42,
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "008"
         ]
@@ -285,12 +272,13 @@
         "associated_coordinates_file": "010_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 12,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 12,
+                "previous_map_id": 1,
                 "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "009"
         ]
@@ -310,14 +298,17 @@
         "associated_coordinates_file": "011_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 40,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 0,
+                "previous_map_id": 12,
+                "comment": "Route 1 -> Pallet Town",
                 "completed": false
             },
             {
-                "type": "previous_map_id_was",
-                "map_id": 0,
-                "comment": "Ensures coming from Pallet Town for this specific return",
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 40,
+                "previous_map_id": 0,
+                "comment": "Pallet Town -> Oak's Lab (return)",
                 "completed": false
             }
         ],
@@ -369,17 +360,14 @@
         "associated_coordinates_file": "013_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 0,
-                "completed": true
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 40,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 0,
+                "previous_map_id": 40,
+                "comment": "Oak's Lab -> Pallet Town",
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "012"
         ]
@@ -398,12 +386,14 @@
         "associated_coordinates_file": "014_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 39,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 39,
+                "previous_map_id": 0,
+                "comment": "Pallet Town -> Blues House",
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "013"
         ]
@@ -426,20 +416,16 @@
                 "type": "item_is_in_inventory",
                 "item_name": "TOWN MAP",
                 "quantity_min": 1,
-                "completed": true
+                "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 0,
-                "completed": true
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 39,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 0,
+                "previous_map_id": 39,
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "014"
         ]
@@ -461,20 +447,17 @@
                 "type": "item_is_in_inventory",
                 "item_name": "TOWN MAP",
                 "quantity_min": 1,
-                "completed": true
+                "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 12,
-                "completed": true
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 0,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 12,
+                "previous_map_id": 0,
+                "comment": "Pallet Town -> Route 1",
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "015"
         ]
@@ -494,22 +477,21 @@
         "associated_coordinates_file": "017_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 1,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 1,
+                "previous_map_id": 12,
+                "comment": "Route 1 -> Viridian City",
+                "completed": false
             },
             {
-                "type": "previous_map_id_was",
-                "map_id": 12,
-                "completed": true
-            },
-            {
-                "type": "current_map_id_is",
-                "map_id": 41,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 41,
+                "previous_map_id": 1,
+                "comment": "Viridian City -> Viridian City Poke Center",
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "016"
         ]
@@ -532,15 +514,15 @@
             {
                 "type": "dialog_contains_text",
                 "text": "fighting fit!    \u25bc",
-                "completed": true
+                "completed": false
             },
             {
                 "type": "current_map_id_is",
                 "map_id": 41,
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "017"
         ]
@@ -559,17 +541,14 @@
         "associated_coordinates_file": "019_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 1,
-                "completed": true
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 41,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 1,
+                "previous_map_id": 41,
+                "comment": "41 -> 1",
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "018"
         ]
@@ -591,10 +570,10 @@
             {
                 "type": "current_map_id_is",
                 "map_id": 42,
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "019"
         ]
@@ -616,15 +595,15 @@
             {
                 "type": "dialog_contains_text",
                 "text": "May I help you?",
-                "completed": true
+                "completed": false
             },
             {
                 "type": "current_map_id_is",
                 "map_id": 42,
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "020"
         ]
@@ -650,20 +629,17 @@
                 "type": "item_is_in_inventory",
                 "item_name": "POKE_BALL",
                 "quantity_min": 4,
-                "completed": true
+                "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 1,
-                "completed": true
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 42,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 1,
+                "previous_map_id": 42,
+                "comment": "42 -> 1",
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "021"
         ]
@@ -688,15 +664,15 @@
             {
                 "type": "party_pokemon_species_is",
                 "species_name": "NIDORAN_M",
-                "completed": true
+                "completed": false
             },
             {
                 "type": "current_map_id_is",
                 "map_id": 33,
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "022"
         ]
@@ -717,20 +693,20 @@
             {
                 "type": "dialog_contains_text",
                 "text": "get any stronger?",
-                "completed": true
+                "completed": false
             },
             {
                 "type": "battle_type_is",
                 "battle_type_name": "TRAINER",
-                "completed": true
+                "completed": false
             },
             {
                 "type": "current_map_id_is",
                 "map_id": 33,
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "023"
         ]
@@ -751,13 +727,13 @@
         "associated_coordinates_file": "025_coords.json",
         "event_triggers": [
             {
-                "type": "battle_won",
+                "type": "event_completed",
                 "opponent_identifier": "RIVAL_ROUTE22_1",
                 "event_name": "EVENT_BEAT_ROUTE22_RIVAL_1ST_BATTLE",
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "024"
         ]
@@ -783,29 +759,29 @@
             {
                 "type": "coordinates_are",
                 "x_min": 90,
-                "completed": true
+                "completed": false
             },
             {
                 "type": "party_hp_is_full",
-                "completed": true
+                "completed": false
             },
             {
                 "type": "item_received_dialog",
                 "text": "found POTION!",
-                "completed": true
+                "completed": false
             },
             {
                 "type": "current_map_id_is",
                 "map_id": 13,
-                "completed": true
+                "completed": false
             },
             {
                 "type": "current_map_id_is",
                 "map_id": 50,
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "025"
         ]
@@ -824,17 +800,14 @@
         "associated_coordinates_file": "027_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 51,
-                "completed": true
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 50,
-                "completed": true
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 51,
+                "previous_map_id": 50,
+                "comment": "50 -> 51",
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "026"
         ]
@@ -856,10 +829,10 @@
                 "type": "current_map_id_is",
                 "map_id": 51,
                 "comment": "Player has navigated to the area of the second NPC / first trainer battle of quest 029. Precise coord check or pre-battle dialog for trainer 1 would be better.",
-                "completed": true
+                "completed": false
             }
         ],
-        "completed": true,
+        "completed": false,
         "required_completions": [
             "027"
         ]
@@ -880,7 +853,7 @@
         "associated_coordinates_file": "029_coords.json",
         "event_triggers": [
             {
-                "type": "battle_won",
+                "type": "event_completed",
                 "opponent_identifier": "BUG_CATCHER_VF1",
                 "event_name": "EVENT_BEAT_VIRIDIAN_FOREST_TRAINER_0",
                 "completed": false
@@ -911,7 +884,7 @@
         "associated_coordinates_file": "030_coords.json",
         "event_triggers": [
             {
-                "type": "battle_won",
+                "type": "event_completed",
                 "opponent_identifier": "BUG_CATCHER_VF2",
                 "event_name": "EVENT_BEAT_VIRIDIAN_FOREST_TRAINER_1",
                 "completed": false
@@ -946,7 +919,7 @@
                 "completed": false
             },
             {
-                "type": "battle_won",
+                "type": "event_completed",
                 "opponent_identifier": "BUG_CATCHER_VF3",
                 "event_name": "EVENT_BEAT_VIRIDIAN_FOREST_TRAINER_2",
                 "completed": false
@@ -954,7 +927,7 @@
             {
                 "type": "previous_map_id_was",
                 "map_id": 51,
-                "completed": true
+                "completed": false
             }
         ],
         "completed": false,
@@ -977,14 +950,11 @@
         "associated_coordinates_file": "032_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 2,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 2,
+                "previous_map_id": 13,
+                "comment": "13 -> 2",
                 "completed": false
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 13,
-                "completed": true
             }
         ],
         "completed": false,
@@ -1069,13 +1039,10 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 2,
-                "completed": false
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 56,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 2,
+                "previous_map_id": 56,
+                "comment": "56 -> 2",
                 "completed": false
             }
         ],
@@ -1131,7 +1098,7 @@
         "associated_coordinates_file": "037_coords.json",
         "event_triggers": [
             {
-                "type": "battle_won",
+                "type": "event_completed",
                 "opponent_identifier": "JR_TRAINER_M_PEWTERGYM",
                 "event_name": "EVENT_BEAT_PEWTER_GYM_TRAINER_0",
                 "completed": false
@@ -1142,13 +1109,10 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 58,
-                "completed": false
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 2,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 58,
+                "previous_map_id": 2,
+                "comment": "2 -> 58",
                 "completed": false
             },
             {
@@ -1177,13 +1141,10 @@
         "associated_coordinates_file": "038_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 54,
-                "completed": false
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 2,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 54,
+                "previous_map_id": 2,
+                "comment": "2 -> 54",
                 "completed": false
             }
         ],
@@ -1213,13 +1174,10 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 2,
-                "completed": false
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 54,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 2,
+                "previous_map_id": 54,
+                "comment": "54 -> 2",
                 "completed": false
             }
         ],
@@ -1241,13 +1199,10 @@
         "associated_coordinates_file": "040_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 58,
-                "completed": false
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 2,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 58,
+                "previous_map_id": 2,
+                "comment": "2 -> 58",
                 "completed": false
             }
         ],
@@ -1275,13 +1230,10 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 2,
-                "completed": false
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 58,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 2,
+                "previous_map_id": 58,
+                "comment": "58 -> 2",
                 "completed": false
             }
         ],
@@ -1304,13 +1256,10 @@
         "associated_coordinates_file": "042_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 14,
-                "completed": false
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 2,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 14,
+                "previous_map_id": 2,
+                "comment": "2 -> 14",
                 "completed": false
             }
         ],
@@ -1367,13 +1316,10 @@
         "associated_coordinates_file": "044_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 15,
-                "completed": false
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 14,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 15,
+                "previous_map_id": 14,
+                "comment": "14 -> 15",
                 "completed": false
             }
         ],
@@ -1427,13 +1373,10 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 15,
-                "completed": false
-            },
-            {
-                "type": "previous_map_id_was",
-                "map_id": 68,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 15,
+                "previous_map_id": 68,
+                "comment": "68 -> 15",
                 "completed": false
             }
         ],

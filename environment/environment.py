@@ -58,8 +58,13 @@ from environment.data.recorder_data.global_map import GLOBAL_MAP_SHAPE, local_to
 from debug.debug import debug_print
 from environment.data.environment_data.warps import WARP_DICT
 from environment.data.recorder_data.global_map import local_to_global, global_to_local, MAP_DATA
+from environment.environment_helpers.navigator import InteractiveNavigator
 import itertools
 import tempfile
+
+from environment.environment_helpers.tile_visualizer import overlay_on_screenshot
+from environment.environment_helpers.quest_path_visualizer import QuestPathVisualizer
+from environment.environment_helpers.stage_helper import StageManager
 
 PIXEL_VALUES = np.array([0, 85, 153, 255], dtype=np.uint8)
 VISITED_MASK_SHAPE = (144 // 16, 160 // 16, 1)
@@ -72,7 +77,7 @@ VALID_ACTIONS = [
     WindowEvent.PRESS_ARROW_UP,      # 3: up
     WindowEvent.PRESS_BUTTON_A,      # 4: a
     WindowEvent.PRESS_BUTTON_B,      # 5: b
-    None,                            # 6: path-follow (handled in step())
+    None,                            # 6: path-follow (handled in step()) - KEY "5"
     WindowEvent.PRESS_BUTTON_START,  # 7: start
 ]
 
@@ -92,7 +97,7 @@ from environment.environment_helpers.tile_visualizer import overlay_on_screensho
 
 VALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start"]
 
-PATH_FOLLOW_ACTION = 6  # discrete action index for path-follow (key 6)
+PATH_FOLLOW_ACTION = 6  # discrete action index for path-follow (key "5")
 ACTION_SPACE = spaces.Discrete(len(VALID_ACTIONS))  # total actions including path-follow and start
 
 # x, y, map_n
@@ -117,6 +122,10 @@ class RedGymEnv(Env):
         # Configuration verified; removed debug print to reduce log spam
         if isinstance(env_config, dict):
             env_config = DictConfig(env_config)
+
+        self.navigator = None # Initialize navigator attribute
+        self.persisted_loaded_quest_statuses = None
+        self.persisted_loaded_trigger_statuses = None
 
         self.video_dir = Path(env_config.video_dir)
         self.headless = env_config.headless
@@ -190,21 +199,23 @@ class RedGymEnv(Env):
         self.animate_scripts = env_config.animate_scripts
         # Track previous map for trigger testing
         self.prev_map_id: int | None = None
-        self.exploration_inc = env_config.exploration_inc
-        self.exploration_max = env_config.exploration_max
-        self.max_steps_scaling = env_config.max_steps_scaling
-        self.map_id_scalefactor = env_config.map_id_scalefactor
+        self.exploration_inc = env_config.get("exploration_inc", 0.01)
+        self.exploration_max = env_config.get("exploration_max", 1.0)
+        self.max_steps_scaling = env_config.get("max_steps_scaling", 0.0)
+        self.map_id_scalefactor = env_config.get("map_id_scalefactor", 1.0)
         self.action_space = ACTION_SPACE
         self.door_warp = False
         self.on_a_warp_tile = False
         self.next_to_warp_tile = False
         self.action_taken = None
         self.last_dialog = ''
-        self.current_dialog = ''        
+        self.current_dialog = ''
+        self.environment_map_history = deque(maxlen=3)
+        self.environment_map_history.append(-1)
 
-        # For saving replays
-        self.replays_base_dir = Path(__file__).parent / "replays" / "recordings"
-        self.current_run_dir = None
+        # For saving replays - use RunManager for unified run management
+        self.current_run_info = None
+        self.current_run_dir = None  # Maintain backward compatibility
         self.path_trace_data = {}
         # Control whether to record new run directories and traces
         try:
@@ -287,6 +298,9 @@ class RedGymEnv(Env):
         if not self.skip_safari_zone:
             obs_dict["safari_steps"] = spaces.Box(low=0, high=502.0, shape=(1,), dtype=np.uint32)
 
+        # Add minimap warp observations for comprehensive warp detection
+        obs_dict["minimap_warp_obs"] = spaces.Box(low=0, high=829, shape=(9, 10), dtype=np.uint16)
+
         if self.use_global_map:
             obs_dict["global_map"] = spaces.Box(
                 low=0, high=255, shape=self.global_map_shape, dtype=np.uint8
@@ -311,7 +325,9 @@ class RedGymEnv(Env):
 
         self.first = True
         self.item_handler = ItemHandler(self)
-
+        self.navigator = InteractiveNavigator(self)
+        self.stage_manager = StageManager(self)
+        
         with RedGymEnv.lock:
             env_id = (
                 (int(RedGymEnv.env_id.buf[0]) << 24)
@@ -338,68 +354,53 @@ class RedGymEnv(Env):
         self._warp_info_cache = {}
         self._new_warp_info = {}
 
+        # Initialize warp-related cache variables
+        self._is_warping = None
+        self._minimap_warp_obs = None
+
+        # Quest path visualizer
+        self.quest_visualizer = QuestPathVisualizer()
+        self.show_quest_paths = True  # Enable quest path visualization by default
+        self.quest_visualization_ids = [1, 2, 3, 4, 5]  # First 5 quests by default
+
         self.init_mem()
 
+    def set_navigator(self, navigator):
+        self.navigator = navigator
+
     def _load_all_path_data(self):
-        completions_file_path = Path(__file__).parent / "required_completions.json"
-        paths_root_dir = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046"
+        print(f"QUEST_INIT: _load_all_path_data called")
+        # Use the corrected continuous coordinates file
+        continuous_coords_path = Path(__file__).parent.parent / "combined_quest_coordinates_continuous.json"
+        print(f"QUEST_INIT: Looking for coordinates at: {continuous_coords_path}")
         
         self.combined_path = []
         try:
-            with open(completions_file_path, 'r') as f:
-                completions_data = json.load(f)
+            with open(continuous_coords_path, 'r') as f:
+                coords_data = json.load(f)
             
-            for quest_info in completions_data:
-                quest_id_str = quest_info.get("quest_id")
-                coords_filename = quest_info.get("associated_coordinates_file")
-                
-                if not quest_id_str or not coords_filename:
-                    print(f"Skipping quest due to missing id or coords_filename: {quest_info}")
-                    continue
-                
-                coord_file_path = paths_root_dir / quest_id_str / coords_filename
-                if coord_file_path.exists():
+            # Extract coordinates from the continuous file
+            coordinates = coords_data.get("coordinates", [])
+            for coord_pair in coordinates:
+                if isinstance(coord_pair, list) and len(coord_pair) == 2:
                     try:
-                        with open(coord_file_path, 'r') as cf:
-                            coords_data = json.load(cf)
-                        # Handle both dict (map_id -> list of coords) and flat list; flatten all map segments for multi-map quests
-                        if isinstance(coords_data, dict):
-                            # Multi-map quest: flatten all defined map segments in file order
-                            for map_id_str, coord_list in coords_data.items():
-                                if not isinstance(coord_list, list):
-                                    print(f"Environment: Invalid coordinate list for map {map_id_str} in {coord_file_path}")
-                                    continue
-                                # Append each [y,x] pair
-                                for pair in coord_list:
-                                    if isinstance(pair, list) and len(pair) == 2:
-                                        try:
-                                            gy, gx = int(pair[0]), int(pair[1])
-                                            self.combined_path.append((gy, gx))
-                                        except Exception:
-                                            print(f"Environment: Invalid coordinate values {pair} in {coord_file_path}")
-                                    else:
-                                        print(f"Environment: Invalid coordinate format {pair} in {coord_file_path}")
-                        elif isinstance(coords_data, list):
-                            for coord_pair in coords_data:
-                                if isinstance(coord_pair, list) and len(coord_pair) == 2:
-                                    self.combined_path.append(tuple(coord_pair))
-                                else:
-                                    print(f"Warning: Invalid coordinate format {coord_pair} in {coord_file_path}")
-                        else:
-                            print(f"Warning: Unexpected coordinate data format in {coord_file_path}")
-                    except json.JSONDecodeError as e:
-                        print(f"Error decoding JSON from {coord_file_path}: {e}")
-                    except Exception as e:
-                        print(f"Error reading or processing {coord_file_path}: {e}")
+                        gy, gx = int(coord_pair[0]), int(coord_pair[1])
+                        self.combined_path.append((gy, gx))
+                    except Exception:
+                        print(f"Environment: Invalid coordinate values {coord_pair}")
                 else:
-                    print(f"Coordinate file not found: {coord_file_path}")
+                    print(f"Environment: Invalid coordinate format {coord_pair}")
             
-            print(f"Loaded a total of {len(self.combined_path)} coordinates for path following.")
+            print(f"Loaded a total of {len(self.combined_path)} coordinates for path following from continuous file.")
+            
+            # Store quest start indices for reference
+            self.quest_start_indices = coords_data.get("quest_start_indices", {})
+            print(f"Quest start indices loaded: {len(self.quest_start_indices)} quests")
 
         except FileNotFoundError:
-            print(f"Error: {completions_file_path} not found. Path data not loaded.")
+            print(f"Error: {continuous_coords_path} not found. Path data not loaded.")
         except json.JSONDecodeError as e:
-            print(f"Error decoding JSON from {completions_file_path}: {e}. Path data not loaded.")
+            print(f"Error decoding JSON from {continuous_coords_path}: {e}. Path data not loaded.")
         except Exception as e:
             print(f"An unexpected error occurred during path loading: {e}. Path data not loaded.")
 
@@ -462,63 +463,117 @@ class RedGymEnv(Env):
     def update_state(self, state: bytes):
         self.reset(seed=None, options={"state": state})
 
-    def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None):
+    def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None, _is_internal_call: bool = False):
         # restart game, skipping credits
         options = options or {}
 
-        # Reset recording attributes for the new run
+        # Use current_call_infos for clarity within this specific reset invocation
+        current_call_infos = {}
+
+        # Reset recording attributes for the new run - but preserve run info if loading from last state
         self.path_trace_data = {}
-        self.current_run_dir = None
+        # Only clear run info if we're not going to load from last ending state
+        if not (self.init_from_last_ending_state and not options.get("state", None)):
+            self.current_run_info = None
+            self.current_run_dir = None
 
         infos = {}
         self.explore_map_dim = 384
         if self.first or options.get("state", None) is not None:
             # We only init seen hidden objs once cause they can only be found once!
             state_loaded_successfully = False
+            explicit_state_provided_this_call = False # Track if an explicit state was given in this call
+
             if options and options.get("state", None) is not None:
                 try:
                     print(f"Attempting to load state from provided 'options'.")
                     self.pyboy.load_state(io.BytesIO(options["state"]))
                     state_loaded_successfully = True
-                    print("State loaded successfully from 'options'.")
+                    explicit_state_provided_this_call = True
+                    # Explicit state loaded, clear any persisted quest/trigger from previous init_from_last_ending_state
+                    self.persisted_loaded_quest_statuses = None
+                    self.persisted_loaded_trigger_statuses = None
+                    print("State loaded successfully from 'options'. Cleared persisted quest/trigger statuses.")
                 except Exception as e:
                     print(f"environment.py: reset(): Error loading state from 'options': {e}")
+                    raise
             elif self.init_state_path:  # Only try if a path is configured
                 try:
                     print(f"Attempting to load state from path: {self.init_state_path}")
-                    # Ensure self.init_state_path is a string or Path object for open()
-                    # If it comes from config, it might be a string. Path() handles it.
                     state_file_to_load = Path(self.init_state_path)
                     with open(state_file_to_load, "rb") as f:
                         self.pyboy.load_state(f)
                     state_loaded_successfully = True
-                    print(f"State loaded successfully from {state_file_to_load}.")
+                    explicit_state_provided_this_call = True
+                    # Explicit state loaded, clear persisted
+                    self.persisted_loaded_quest_statuses = None
+                    self.persisted_loaded_trigger_statuses = None
+                    print(f"State loaded successfully from {state_file_to_load}. Cleared persisted quest/trigger statuses.")
                 except FileNotFoundError:
                     print(f"environment.py: reset(): State file not found at {self.init_state_path}. Starting new game.")
+                    raise
                 except Exception as e: # Catch other errors like corrupted state
                     print(f"environment.py: reset(): Error loading state from {self.init_state_path}: {e}. Starting new game.")
-            elif self.init_from_last_ending_state:
+                    raise
+            elif self.init_from_last_ending_state and not explicit_state_provided_this_call: # Only if no explicit state override in this call
                 try:
-                    state_files = list(self.state_dir.glob("*.state"))
-                    if state_files:
-                        latest = max(state_files, key=lambda f: f.stat().st_mtime)
-                        with open(latest, "rb") as f:
-                            self.pyboy.load_state(f)
-                        state_loaded_successfully = True
-                        print(f"State loaded successfully from last ending state: {latest}")
-                    else:
-                        print(f"environment.py: reset(): No .state files found in {self.state_dir}. Starting new game.")
+                    from .environment_helpers.saver import load_latest_run
+                    
+                    loaded_run_info = load_latest_run(self)
+                    if loaded_run_info:
+                        state_loaded_successfully = True # Assuming state load is part of load_latest_run if applicable
+                        print(f"State loaded successfully from latest run: {loaded_run_info.run_id}")
+                        
+                        from .environment_helpers.saver import load_quest_progress, load_trigger_status
+                        
+                        lqs = load_quest_progress(loaded_run_info)
+                        if lqs is not None: # Check for None explicitly
+                            print(f"environment.py: reset(): Quest progress present. Loaded quest progress from run: {loaded_run_info.run_id}")
+                            current_call_infos["loaded_quest_statuses"] = lqs
+                            self.persisted_loaded_quest_statuses = lqs # PERSIST
+                            print(f"environment.py: reset(): current_call_infos AFTER loading quest_statuses: {current_call_infos}")
+                        else:
+                            print(f"environment.py: reset(): No quest progress (or empty dict) in run: {loaded_run_info.run_id}. Not overriding current_call_infos or persisted.")
+                            # DO NOT set current_call_infos["loaded_quest_statuses"] = {} here
+                            # DO NOT set self.persisted_loaded_quest_statuses = {} here unless we intend to clear previous good data
+                            # If persisted was already {}, it remains {}. If it had data, it keeps it.
+                            if self.persisted_loaded_quest_statuses is None: # Initialize if never set
+                                self.persisted_loaded_quest_statuses = {}
+
+                        lts = load_trigger_status(loaded_run_info)
+                        if lts is not None: # Check for None explicitly
+                            print(f"Loaded trigger status from run: {loaded_run_info.run_id}")
+                            current_call_infos["loaded_trigger_statuses"] = lts
+                            self.persisted_loaded_trigger_statuses = lts # PERSIST
+                            print(f"environment.py: reset(): current_call_infos AFTER loading trigger_statuses: {current_call_infos}")
+                        else:
+                            print(f"environment.py: reset(): No trigger status (or empty dict) in run: {loaded_run_info.run_id}. Not overriding current_call_infos or persisted.")
+                            # DO NOT set current_call_infos["loaded_trigger_statuses"] = {} here
+                            if self.persisted_loaded_trigger_statuses is None: # Initialize if never set
+                                self.persisted_loaded_trigger_statuses = {}
+                    else: 
+                        print(f"environment.py: reset(): No previous runs found for init_from_last_ending_state. Initializing persisted statuses to empty if not set.")
+                        if self.persisted_loaded_quest_statuses is None:
+                            self.persisted_loaded_quest_statuses = {}
+                        if self.persisted_loaded_trigger_statuses is None:
+                            self.persisted_loaded_trigger_statuses = {}
+                        # current_call_infos remains unpopulated for these keys here
                 except Exception as e:
-                    print(f"environment.py: reset(): Error loading last ending state: {e}. Starting new game.")
-            else:
-                print("environment.py: reset(): No initial state path configured and no state in options. Starting new game.")
-
-            if not state_loaded_successfully:
-                # Pyboy usually starts fresh if no state is loaded. 
-                # If an explicit reset to title screen or new game is needed, it would go here.
-                print("environment.py: reset(): Proceeding with a new game session (or default PyBoy state).")
-
-            # These initializations should run whether a state was loaded or a new game started.
+                    print(f"environment.py: reset(): Error loading last ending state: {e}. Initializing persisted to empty if not set.")
+                    if self.persisted_loaded_quest_statuses is None: 
+                        self.persisted_loaded_quest_statuses = {}
+                    if self.persisted_loaded_trigger_statuses is None:
+                        self.persisted_loaded_trigger_statuses = {}
+                    # current_call_infos remains unpopulated for these keys here
+            else: 
+                print("environment.py: reset(): Not configured to load from last ending state or explicit state given. Defaulting/New game.")
+                # if not explicit_state_provided_this_call, persisted statuses are kept.
+                # current_call_infos remains unpopulated for these keys here unless explicit_state_provided_this_call was true (then they are cleared above)
+            
+            # REMOVED: This block was problematic as it always initialized with {} if state_loaded_successfully was false.
+            # if not state_loaded_successfully and not (self.init_from_last_ending_state and not loaded_run_info) : # if not loading from last state and no run was found
+            #     print("environment.py: reset(): Proceeding with a new game session (or PyBoy default state).")
+            
             self.events = EventFlags(self.pyboy)
             self.missables = MissableFlags(self.pyboy)
             self.flags = Flags(self.pyboy)
@@ -533,12 +588,13 @@ class RedGymEnv(Env):
                 state = io.BytesIO()
                 self.pyboy.save_state(state)
                 state.seek(0)
-                infos |= {
-                    "state": {
-                        tuple(
-                            sorted(list(self.required_events) + list(self.required_items))
-                        ): state.read()
-                    },
+                # Removed state binary data from infos as per user's previous instruction
+                current_call_infos |= {
+                    # "state": {
+                    #     tuple(
+                    #         sorted(list(self.required_events) + list(self.required_items))
+                    #     ): state.read()
+                    # },
                     "required_count": len(self.required_events) + len(self.required_items),
                     "env_id": self.env_id,
                 }
@@ -593,36 +649,33 @@ class RedGymEnv(Env):
 
         # Wrap recording session for replay runs
         if self.record_replays:
-            # --- Start of new recording session ---
-            # Determine base name for the run
-            # Ensure pyboy state is loaded and game_coords are from the *actual* starting state
-            # This code block should be after all state loading and initial pyboy setup is complete.
-            
-            # Check if init_state_name was likely used for loading
-            # A bit indirect: if self.init_state_name is set and the path it implies was used for loading.
-            # The actual loading happens above and sets state_loaded_successfully.
-            # For naming, we primarily care if an init_state was specified in the config.
+            # --- Start of new recording session using RunManager ---
+            from .environment_helpers.saver import create_new_run
             
             # Get current game state info for naming AFTER potential state load
             current_map_id_for_name = self.read_m("wCurMap")
-            start_x_for_name, start_y_for_name, _ = self.get_game_coords()
             map_name_str_for_name = self.get_map_name_by_id(current_map_id_for_name)
 
-            if self.init_state_name:  # If an init_state was specified in config
-                base_name = self.init_state_name
-            else:
-                base_name = f"{map_name_str_for_name}_x{start_x_for_name}_y{start_y_for_name}"
-
-            # Use timestamp for naming instead of uuid
-            timestamp = datetime.now().strftime("%m%d%Y_%H%M%S")
-            run_identifier = f"{base_name}__{timestamp}"
-            self.current_run_dir = self.replays_base_dir / run_identifier
-            self.current_run_dir.mkdir(parents=True, exist_ok=True)
-
+            # Create new run using RunManager
+            if not _is_internal_call: # Only create new run if not an internal call
+                self.current_run_info = create_new_run(self, map_name_str_for_name, current_map_id_for_name)
+                self.current_run_dir = self.current_run_info.run_dir  # Set both for compatibility
+            
             # Log the first point in the path trace for the new run.
-            self.update_path_trace()
+            if not _is_internal_call: # Also condition path trace on not being internal, or handle it based on self.current_run_info
+                self.update_path_trace()
         
         self.current_path_target_index = 0 # Reset path index on environment reset
+
+        # If this reset call didn't populate quest/trigger statuses (e.g. self.first=False, no options state),
+        # but they were persisted from a previous init_from_last_ending_state, use them.
+        # Ensure we use persisted if current_call_infos doesn't have the key OR if it's an empty dict from a failed load.
+        if (not current_call_infos.get("loaded_quest_statuses") or current_call_infos.get("loaded_quest_statuses") == {}) and self.persisted_loaded_quest_statuses:
+            current_call_infos["loaded_quest_statuses"] = self.persisted_loaded_quest_statuses
+            print(f"environment.py: reset(): Using self.persisted_loaded_quest_statuses for return info: {self.persisted_loaded_quest_statuses}")
+        if (not current_call_infos.get("loaded_trigger_statuses") or current_call_infos.get("loaded_trigger_statuses") == {}) and self.persisted_loaded_trigger_statuses:
+            current_call_infos["loaded_trigger_statuses"] = self.persisted_loaded_trigger_statuses
+            print(f"environment.py: reset(): Using self.persisted_loaded_trigger_statuses for return info: {self.persisted_loaded_trigger_statuses}")
 
         self.first = False
         # Apply infinite money and health on reset
@@ -642,7 +695,10 @@ class RedGymEnv(Env):
             _, pp_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}PP")
             for slot in range(4):
                 self.pyboy.memory[pp_addr + slot] = 0x3F
-        return self._get_obs(), infos
+
+        # ADDED DEBUG: Print infos right before returning
+        print(f"environment.py: reset(): FINAL current_call_infos before return: {current_call_infos}")
+        return self._get_obs(), current_call_infos
 
     def init_mem(self):
         # Maybe I should preallocate a giant matrix for all map ids
@@ -909,6 +965,7 @@ class RedGymEnv(Env):
                     self.flags.get_bit("BIT_GAVE_SAFFRON_GUARDS_DRINK"), np.uint8
                 ),  # saffron guard
                 "lapras": np.array(self.flags.get_bit("BIT_GOT_LAPRAS"), np.uint8),  # got lapras
+                "minimap_warp_obs": self.get_minimap_warp_obs(),  # minimap warp observations
             }
             | (
                 {}
@@ -965,6 +1022,9 @@ class RedGymEnv(Env):
         warp_tiles = info['warp_tiles']
         self.door_warp = info['door_warp']
         
+        print(f"environment.py: is_next_to_warp_tile(): warp_tiles: {warp_tiles}")
+        print(f"environment.py: is_next_to_warp_tile(): door_warp: {self.door_warp}")
+        
         # now that we have all the warp tiles for this map:
         # for each warp tile, check if the player is 1 tile away from it.
         # we only want to do things if player is 1 tile away from a warp tile.
@@ -986,129 +1046,698 @@ class RedGymEnv(Env):
                     self.on_a_warp_tile = True
                     return False
         return False
+
+    @property
+    def is_warping(self) -> bool:
+        """
+        Detect if the player is currently in a warp transition using multiple methods.
+        
+        Returns:
+            bool: True if currently warping, False otherwise
+        """
+        # Only log detailed diagnostics when state changes or every 100 calls
+        if not hasattr(self, '_warp_debug_call_count'):
+            self._warp_debug_call_count = 0
+        self._warp_debug_call_count += 1
+        
+        previous_state = self._is_warping
+        should_log = (self._warp_debug_call_count % 100 == 0) or (previous_state is None)
+        
+        if self._is_warping is None:
+            if should_log:
+                print(f"IS_WARPING: Cache miss, performing detection...")
+            try:
+                # FIXED: More conservative warp detection to prevent false positives
+                # Method 1: Check warp flag in memory (wd736, bit 2) - BUT with additional validation
+                try:
+                    wd736 = self.read_m(0xD736)
+                    bit_2_set = bool(wd736 & 0b00000100)
+                    
+                    # ENHANCED: Only consider it a warp if BOTH the bit is set AND we're in a transition state
+                    if bit_2_set:
+                        # Additional validation: check if we're actually transitioning
+                        try:
+                            # Check if map transition is actually happening by looking at multiple indicators
+                            in_battle = self.read_m("wIsInBattle") != 0
+                            has_dialog = bool(self.read_dialog().strip())
+                            movement_flags = self.read_m("wMovementFlags")
+                            
+                            # Only consider warping if we have transition indicators AND no other blocking states
+                            if not in_battle and not has_dialog and (movement_flags & 0b1000_0000):
+                                if should_log:
+                                    print(f"IS_WARPING: Method 1 TRIGGERED - validated warp transition (wd736=0x{wd736:02X})")
+                                self._is_warping = True
+                                return True
+                            else:
+                                if should_log:
+                                    print(f"IS_WARPING: Method 1 - bit set but no valid transition state (battle={in_battle}, dialog={has_dialog}, flags=0x{movement_flags:02X})")
+                        except Exception:
+                            # If we can't validate the transition state, be conservative
+                            if should_log:
+                                print(f"IS_WARPING: Method 1 - bit set but validation failed, being conservative")
+                except Exception:
+                    pass
+                
+                # No warp detected - be conservative
+                self._is_warping = False
+                
+            except Exception as e:
+                if should_log:
+                    print(f"IS_WARPING: ERROR in warp detection: {e}")
+                self._is_warping = False
+        
+        # Log state changes
+        if previous_state != self._is_warping:
+            print(f"IS_WARPING: State changed from {previous_state} to {self._is_warping}")
+        
+        return self._is_warping
+
+    def get_warp_debug_info(self) -> dict:
+        """Get detailed warp debug information for UI display"""
+        try:
+            cur_map = self.read_m("wCurMap")
+            
+            debug_info = {
+                "current_map": cur_map,
+                "map_name": MapIds(cur_map).name if cur_map < 248 else "INVALID",
+                "warp_dict_entries": [],
+                "memory_warps": [],
+                "is_warping": getattr(self, '_is_warping', None),
+                "cache_status": {
+                    "is_warping_cached": self._is_warping is not None,
+                    "minimap_cached": self._minimap_warp_obs is not None
+                }
+            }
+            
+            # Get WARP_DICT entries
+            try:
+                map_name = MapIds(cur_map).name
+                warp_entries = WARP_DICT.get(map_name, [])
+                for i, warp in enumerate(warp_entries):
+                    debug_info["warp_dict_entries"].append({
+                        "index": i,
+                        "x": warp.get("x"),
+                        "y": warp.get("y"),
+                        "target_map_id": warp.get("target_map_id"),
+                        "target_map_name": warp.get("target_map_name", "")
+                    })
+            except Exception as e:
+                debug_info["warp_dict_error"] = str(e)
+            
+            # Get memory warps
+            try:
+                n_warps = self.read_m(0xD3AE)
+                debug_info["n_warps_memory"] = n_warps
+                
+                if n_warps > 0:
+                    warp_entries_addr = 0xD3B1
+                    for i in range(min(n_warps, 16)):  # Safety limit
+                        warp_addr = warp_entries_addr + i * 4
+                        warp_y = self.read_m(warp_addr + 0)
+                        warp_x = self.read_m(warp_addr + 1)
+                        warp_point = self.read_m(warp_addr + 2)
+                        warp_dest = self.read_m(warp_addr + 3)
+                        
+                        debug_info["memory_warps"].append({
+                            "index": i,
+                            "x": warp_x,
+                            "y": warp_y,
+                            "warp_point": warp_point,
+                            "dest_map": warp_dest
+                        })
+            except Exception as e:
+                debug_info["memory_warp_error"] = str(e)
+                
+            return debug_info
+            
+        except Exception as e:
+            return {"error": str(e)}
+
+    def get_minimap_warp_obs(self) -> np.ndarray:
+        """Generate a 9x10 minimap showing warp points visible on screen with unique IDs"""
+        
+        # Use cached result if available
+        if self._minimap_warp_obs is not None:
+            return self._minimap_warp_obs
+            
+        # Initialize minimap (9x10 to match downsampled game area)
+        minimap = np.zeros((9, 10), dtype=np.uint16)
+        
+        try:
+            # Get current map information
+            cur_map = self.read_m("wCurMap")
+            
+            # Handle invalid maps gracefully
+            if cur_map >= 248:
+                self._minimap_warp_obs = minimap
+                return minimap
+            
+            # Try to get warps from WARP_DICT first (preferred method)
+            try:
+                map_name = MapIds(cur_map).name
+                warp_entries = WARP_DICT.get(map_name, [])
+                
+                for i, warp in enumerate(warp_entries):
+                    warp_x = warp.get("x")
+                    warp_y = warp.get("y")
+                    target_map_id = warp.get("target_map_id", 0)
+                    
+                    if warp_x is not None and warp_y is not None:
+                        # Convert local coordinates to minimap coordinates
+                        # Game screen shows 20x18 tiles, minimap is 10x9 (downsampled 2:1)
+                        minimap_x = min(warp_x // 2, 9)
+                        minimap_y = min(warp_y // 2, 8)
+                        
+                        # Generate unique warp ID using hash
+                        warp_id = hash((cur_map, warp_x, warp_y, target_map_id)) % 829 + 1
+                        minimap[minimap_y, minimap_x] = warp_id
+                        
+            except Exception as dict_error:
+                # Fallback: Read warps from memory (only log critical errors)
+                try:
+                    n_warps = self.read_m(0xD3AE)  # wNumberOfWarps
+                    
+                    if n_warps > 0:
+                        warp_entries_addr = 0xD3B1  # wWarpEntries
+                        for i in range(min(n_warps, 50)):  # Safety limit
+                            warp_addr = warp_entries_addr + i * 4
+                            warp_y = self.read_m(warp_addr + 0)
+                            warp_x = self.read_m(warp_addr + 1)
+                            warp_point = self.read_m(warp_addr + 2)
+                            warp_dest = self.read_m(warp_addr + 3)
+                            
+                            # Convert to minimap coordinates
+                            minimap_x = min(warp_x // 2, 9)
+                            minimap_y = min(warp_y // 2, 8)
+                            
+                            # Generate unique warp ID
+                            warp_id = hash((cur_map, warp_x, warp_y, warp_dest)) % 829 + 1
+                            minimap[minimap_y, minimap_x] = warp_id
+                            
+                except Exception as memory_error:
+                    # Only log if we can't get any warp data at all
+                    if np.count_nonzero(minimap) == 0:
+                        print(f"MINIMAP WARP: Both WARP_DICT and memory fallback failed: dict_error={dict_error}, memory_error={memory_error}")
+                    
+        except Exception as e:
+            print(f"MINIMAP WARP: Critical error generating minimap: {e}")
+            # Return empty minimap on any error
+            minimap = np.zeros((9, 10), dtype=np.uint16)
+        
+        # Cache the result
+        self._minimap_warp_obs = minimap
+        return minimap
+
+    def clear_warp_cache(self) -> None:
+        """Clear warp-related cache to ensure fresh collision detection"""
+        self._is_warping = None
+        self._minimap_warp_obs = None
     
     def step(self, action):
-        self.action_taken = action
+        self.step_count += 1
+        
+        # DEBUGGING: Force log every action at the start of step
+        print(f"\n=== STEP {self.step_count}: ACTION {action} START ===")
+        if action == PATH_FOLLOW_ACTION:
+            print(f"STEP {self.step_count}: PATH_FOLLOW_ACTION detected")
+        print(f"STEP {self.step_count}: Location: {self.get_game_coords()}")
+        
+        # COMPLETELY DISABLED: All warp detection and blocking
+        # self.clear_warp_cache()
+        # is_warping_result = self.is_warping
+        # if is_warping_result:
+        #     print(f"STEP {self.step_count}: WARP DETECTED - Skipping action {action}")
+        #     return self._get_obs(), 0.0, False, False, {"warp_skip": "true", "reason": "warp_transition"}
         
         dialog = self.read_dialog() or ''
 
-        self.next_to_warp_tile = self.is_next_to_warp_tile()
-        # print(f"environment.py: step(): self.next_to_warp_tile=={self.next_to_warp_tile}")
-        # print(f"environment.py: step(): self.on_a_warp_tile=={self.on_a_warp_tile}")
-        if self.next_to_warp_tile and dialog == "" and not self.on_a_warp_tile:
-            try:
-                self._handling_warp = True
-                # print(f"environment.py: step(): self._handling_warp=={self._handling_warp}")
-                self.navigator.warp_tile_handler()
-            except Exception as e:
-                print(f"Error in warp_tile_handler(): {e}")
-                obs = self._get_obs()
-                reset = False
-                info = {"capture_error": str(e)}
-                return obs, 0.0, reset, False, info
-            finally:
-                self._handling_warp = False
+        # COMPLETELY DISABLED: Warp tile checking
+        # self.next_to_warp_tile = self.is_next_to_warp_tile()
+        # if self.next_to_warp_tile and dialog == "" and not self.on_a_warp_tile:
+        #     try:
+        #         self._handling_warp = True
+        #         self.navigator.warp_tile_handler()
+        #     except Exception as e:
+        #         print(f"Error in warp_tile_handler(): {e}")
+        #         obs = self._get_obs()
+        #         reset = False
+        #         info = {"capture_error": str(e)}
+        #         return obs, 0.0, reset, False, info
+        #     finally:
+        #         self._handling_warp = False
 
         reset = False # Initialize reset here
-        # Detect any active dialog: pause path-follow for any dialog
-        raw_dialog = self.read_dialog() or ''
-        if raw_dialog.strip() and action == PATH_FOLLOW_ACTION:
-            print("environment.py: step(): Navigation paused: dialog active, cannot move to next coordinate.")
-            return self._get_obs(), 0.0, reset, False, {}
+        
+        # COMPLETELY DISABLED: Dialog detection blocking
+        # raw_dialog = self.read_dialog() or ''
+        # if raw_dialog.strip() and action == PATH_FOLLOW_ACTION:
+        #     print("environment.py: step(): Navigation paused: dialog active, cannot move to next coordinate.")
+        #     return self._get_obs(), 0.0, reset, False, {}
 
-        # --- BEGIN FIXED QUEST 12 PATH FOLLOWING LOGIC ---
-        # Use discrete action PATH_FOLLOW_ACTION (index 7) to follow quest 12 path
-        if action == PATH_FOLLOW_ACTION and hasattr(self, 'combined_path') and self.combined_path:
-            player_x, player_y, map_n = self.get_game_coords()
-            current_gy, current_gx = local_to_global(player_y, player_x, map_n)
+        # --- BEGIN SIMPLE PATH FOLLOWING LOGIC ---
+        # Use discrete action PATH_FOLLOW_ACTION (key "5") to follow quest path
+        if action == PATH_FOLLOW_ACTION:
+            print(f"\n=== PATH_FOLLOW DEBUG: Key '5' pressed ===")
+            print(f"PATH_FOLLOW: Starting simple path following at {self.get_game_coords()}")
+            print(f"PATH_FOLLOW: Step count: {self.step_count}")
             
-            quest_name_for_log = f"Quest {self.current_loaded_quest_id}" if self.current_loaded_quest_id else "Current Path"
-            
-            debug_print(f"[{quest_name_for_log}Follow] Current position: ({current_gy}, {current_gx}) [Y={current_gy}, X={current_gx}]")
-            debug_print(f"[{quest_name_for_log}Follow] Path index: {self.current_path_target_index}/{len(self.combined_path)}")
-            
-            determined_new_action = False
-            if self.current_path_target_index >= len(self.combined_path):
-                debug_print(f"[{quest_name_for_log}Follow] {quest_name_for_log} complete - at end of coordinate list")
-            else:
-                target_gy, target_gx = self.combined_path[self.current_path_target_index]
-                debug_print(f"[{quest_name_for_log}Follow] Target coordinate: ({target_gy}, {target_gx}) [Y={target_gy}, X={target_gx}]")
-
-                if (current_gy, current_gx) == (target_gy, target_gx):
-                    debug_print(f"[{quest_name_for_log}Follow] Reached target coordinate, advancing index")
-                    self.current_path_target_index += 1
-                    if self.current_path_target_index >= len(self.combined_path):
-                        debug_print(f"[{quest_name_for_log}Follow] {quest_name_for_log} completed - reached final coordinate!")
-                    else:
-                        # Advanced to new target, get new coords for this step's move determination
-                        target_gy, target_gx = self.combined_path[self.current_path_target_index]
-                        debug_print(f"[{quest_name_for_log}Follow] New target coordinate: ({target_gy}, {target_gx})")
+            # Use environment's own coordinate system for consistency
+            if not hasattr(self, 'combined_path') or not self.combined_path:
+                print("PATH_FOLLOW: No coordinates loaded, loading quest 002...")
+                success = self.load_coordinate_path(2)
+                if not success or not self.combined_path:
+                    print("PATH_FOLLOW: ERROR - Failed to load quest 002")
+                    print("PATH_FOLLOW: RETURNING EARLY - load_failed")
+                    return self._get_obs(), 0.0, False, False, {"path_follow": "load_failed"}
+                print(f"PATH_FOLLOW: Quest 002 loaded - {len(self.combined_path)} coordinates")
                 
-                # Determine move from current_pos to (potentially new) target_pos
-                # Only if we are not already at the new target
-                if not ((current_gy, current_gx) == (target_gy, target_gx) and 
-                        self.current_path_target_index >= len(self.combined_path)):
-
-                    # FIXED: Y increases going DOWN, X increases going RIGHT
-                    delta_gy = target_gy - current_gy  # Positive = need to go DOWN
-                    delta_gx = target_gx - current_gx  # Positive = need to go RIGHT
+                # SYNC WITH NAVIGATOR: Find closest coordinate to current position
+                if hasattr(self, 'navigator') and self.navigator and hasattr(self.navigator, 'current_coordinate_index'):
+                    print(f"PATH_FOLLOW: Syncing with Navigator index {self.navigator.current_coordinate_index}")
+                    self.current_path_target_index = self.navigator.current_coordinate_index
+                else:
+                    # Find closest coordinate to current position as fallback
+                    player_x, player_y, map_id = self.get_game_coords()
+                    current_global = local_to_global(player_y, player_x, map_id)
                     
-                    debug_print(f"[Quest12PathFollow] Delta Y: {delta_gy} (positive=DOWN, negative=UP)")
-                    debug_print(f"[Quest12PathFollow] Delta X: {delta_gx} (positive=RIGHT, negative=LEFT)")
+                    closest_distance = float('inf')
+                    closest_index = 0
                     
-                    new_action_event = None
-                    direction_name = ""
-                    if delta_gy > 0: 
-                        new_action_event = WindowEvent.PRESS_ARROW_DOWN
-                        direction_name = "DOWN"
-                    elif delta_gy < 0: 
-                        new_action_event = WindowEvent.PRESS_ARROW_UP
-                        direction_name = "UP"
-                    elif delta_gx > 0: 
-                        new_action_event = WindowEvent.PRESS_ARROW_RIGHT
-                        direction_name = "RIGHT"
-                    elif delta_gx < 0: 
-                        new_action_event = WindowEvent.PRESS_ARROW_LEFT
-                        direction_name = "LEFT"
-
-                    if new_action_event:
+                    for i, coord in enumerate(self.combined_path):
+                        distance = abs(coord[0] - current_global[0]) + abs(coord[1] - current_global[1])
+                        if distance < closest_distance:
+                            closest_distance = distance
+                            closest_index = i
+                    
+                    print(f"PATH_FOLLOW: No Navigator sync available, snapped to closest coordinate at index {closest_index} (distance {closest_distance})")
+                    self.current_path_target_index = closest_index
+            
+            # Check if path is complete
+            if self.current_path_target_index >= len(self.combined_path):
+                print("PATH_FOLLOW: Quest 002 path complete! All coordinates reached.")
+                print("PATH_FOLLOW: RETURNING EARLY - quest_complete")
+                return self._get_obs(), 0.0, False, False, {"path_follow": "quest_complete"}
+            
+            # Get current position in global coordinates
+            player_x, player_y, map_id = self.get_game_coords()
+            current_global = local_to_global(player_y, player_x, map_id)
+            
+            # Check if player has changed maps unexpectedly (manual warp/movement)
+            expected_map_area = self._get_expected_map_for_current_path_index()
+            if expected_map_area and map_id not in expected_map_area:
+                print(f"PATH_FOLLOW: WARNING - Player on unexpected map {map_id}. Expected one of: {expected_map_area}")
+                print(f"PATH_FOLLOW: Attempting to find path coordinates on current map...")
+                
+                # Look for coordinates on the current map in the ENTIRE quest path
+                map_coordinates = []
+                for i, coord in enumerate(self.combined_path):
+                    # Convert global coord back to local to check map
+                    try:
+                        result = global_to_local(coord[0], coord[1], map_id)
+                        if result is not None:
+                            local_y, local_x = result
+                            # BOUNDS CHECK: Use actual map dimensions from MAP_DATA
+                            if map_id in MAP_DATA:
+                                tile_width, tile_height = MAP_DATA[map_id]["tileSize"]
+                                if local_x >= 0 and local_y >= 0 and local_x < tile_width and local_y < tile_height:
+                                    # This coordinate is actually on the current map
+                                    distance = abs(coord[0] - current_global[0]) + abs(coord[1] - current_global[1])
+                                    map_coordinates.append((i, coord, distance))
+                    except:
+                        continue
+                
+                if map_coordinates:
+                    # Find closest coordinate on current map
+                    best_entry = min(map_coordinates, key=lambda x: x[2])
+                    best_index, best_coord, best_distance = best_entry
+                    print(f"PATH_FOLLOW: Found {len(map_coordinates)} coordinates on map {map_id}. Closest at index {best_index}, distance {best_distance}")
+                    self.current_path_target_index = best_index
+                    print(f"PATH_FOLLOW: Successfully realigned to quest path on current map")
+                else:
+                    print(f"PATH_FOLLOW: ERROR - No path coordinates found on current map {map_id}.")
+                    print(f"PATH_FOLLOW: Quest {self.current_loaded_quest_id} may not include coordinates for this map.")
+                    print(f"PATH_FOLLOW: Try loading a different quest or manually navigate to the correct map.")
+                    return self._get_obs(), 0.0, False, False, {"path_follow": "quest_not_for_current_map"}
+            
+            # Get next target coordinate
+            target_coord = self.combined_path[self.current_path_target_index]  # (gy, gx)
+            
+            print(f"PATH_FOLLOW: Current global: {current_global}, Target: {target_coord}")
+            print(f"PATH_FOLLOW: Path index: {self.current_path_target_index}/{len(self.combined_path)}")
+            
+            # Calculate distance and direction
+            dy = target_coord[0] - current_global[0]  # gy difference
+            dx = target_coord[1] - current_global[1]  # gx difference
+            distance = abs(dy) + abs(dx)
+            
+            print(f"PATH_FOLLOW: Distance = {distance}, dy = {dy}, dx = {dx}")
+            
+            # If we're at the target coordinate, advance to next and continue processing
+            if distance == 0:
+                print("PATH_FOLLOW: Reached target, advancing to next coordinate")
+                self.current_path_target_index += 1
+                
+                # Continue processing to potentially move to the new target in the same step
+                # Check if path is complete after advancing
+                if self.current_path_target_index >= len(self.combined_path):
+                    print("PATH_FOLLOW: Quest 002 path complete after advancing! All coordinates reached.")
+                    print("PATH_FOLLOW: RETURNING EARLY - quest_complete")
+                    return self._get_obs(), 0.0, False, False, {"path_follow": "quest_complete"}
+                
+                # Get the new target coordinate and continue to movement logic
+                target_coord = self.combined_path[self.current_path_target_index]
+                
+                print(f"PATH_FOLLOW: Advanced to new target: {target_coord}")
+                print(f"PATH_FOLLOW: New path index: {self.current_path_target_index}/{len(self.combined_path)}")
+                
+                # Recalculate distance and direction for new target
+                dy = target_coord[0] - current_global[0]
+                dx = target_coord[1] - current_global[1]
+                distance = abs(dy) + abs(dx)
+                
+                print(f"PATH_FOLLOW: New target distance = {distance}, dy = {dy}, dx = {dx}")
+                
+                # If new target is also at distance 0, we're done for this step
+                if distance == 0:
+                    print("PATH_FOLLOW: New target also at distance 0, continuing next step")
+                    print("PATH_FOLLOW: RETURNING EARLY - advanced_to_same_position")
+                    return self._get_obs(), 0.0, False, False, {"path_follow": "advanced_to_same_position"}
+            
+            # If distance is not 1, we need to handle off-path scenarios
+            if distance != 1:
+                print(f"PATH_FOLLOW: WARNING - Distance is {distance}, not 1. Player may be off-path.")
+                
+                # First, check if player is severely off-path (distance > 5)
+                if distance > 5:
+                    print(f"PATH_FOLLOW: Player appears to be far off-path (distance {distance}). Attempting full path re-alignment...")
+                    
+                    # Find the nearest coordinate in the ENTIRE path, not just ahead
+                    best_distance = float('inf')
+                    best_index = self.current_path_target_index
+                    
+                    for i, coord in enumerate(self.combined_path):
+                        coord_distance = abs(coord[0] - current_global[0]) + abs(coord[1] - current_global[1])
+                        if coord_distance < best_distance:
+                            best_distance = coord_distance
+                            best_index = i
+                    
+                    print(f"PATH_FOLLOW: Re-aligned to nearest coordinate at index {best_index}, distance {best_distance}")
+                    self.current_path_target_index = best_index
+                    target_coord = self.combined_path[best_index]
+                    dy = target_coord[0] - current_global[0]
+                    dx = target_coord[1] - current_global[1]
+                    distance = best_distance
+                    
+                    # If still too far after re-alignment, there might be a problem
+                    if distance > 10:
+                        print(f"PATH_FOLLOW: ERROR - Even after re-alignment, distance is {distance}. Path may be invalid for current map.")
+                        print("PATH_FOLLOW: RETURNING EARLY - path_alignment_failed")
+                        return self._get_obs(), 0.0, False, False, {"path_follow": "path_alignment_failed"}
+                
+                else:
+                    # Player is slightly off-path, look ahead for a nearby coordinate
+                    print(f"PATH_FOLLOW: Player slightly off-path (distance {distance}). Looking for closer coordinate...")
+                    
+                    # Look ahead in the path for a coordinate with distance 1 ON THE CURRENT MAP
+                    closest_distance = distance
+                    closest_index = self.current_path_target_index
+                    
+                    for check_index in range(self.current_path_target_index, 
+                                           min(self.current_path_target_index + 20, len(self.combined_path))):
+                        check_coord = self.combined_path[check_index]
+                        
+                        # Verify this coordinate is on the current map
                         try:
-                            # Override to movement action index
-                            action = VALID_ACTIONS.index(new_action_event)
-                            determined_new_action = True
-                            debug_print(f"[Quest12PathFollow] Moving {direction_name} (action {action})")
-                        except ValueError:
-                            debug_print(f"[Quest12PathFollow] ERROR - Could not find action for {new_action_event}")
-                    else:
-                        debug_print(f"[Quest12PathFollow] No movement needed - already at target or zero delta")
-        # --- END FIXED QUEST 12 PATH FOLLOWING LOGIC ---
-
-        # Trigger debug prints
-        cur_map_id = self.read_m("wCurMap")
-        debug_print(f"[TriggerTest] current_map_id_is: {cur_map_id}")
-        debug_print(f"[TriggerTest] previous_map_id_was: {self.prev_map_id}")
-
-        if self.prev_map_id != cur_map_id:
-            player_x, player_y, map_n = self.get_game_coords()
-            prev_map_name = MapIds(self.prev_map_id).name
-            if prev_map_name in WARP_DICT:
-                # Find warp entry matching this map transition
-                for warp in WARP_DICT[prev_map_name]:
-                    if warp.get('target_map_id') == map_n:
-                        warp_entry_x = warp.get('x')
-                        warp_entry_y = warp.get('y')
-                        print(f"Warp entry x: {warp_entry_x}")
-                        print(f"Warp entry y: {warp_entry_y}")
-                        # If player is on warp entry tile, press B multiple times
-                        if (player_x, player_y) == (warp_entry_x, warp_entry_y):
-                            for _ in range(3):
-                                debug_print(f"[TriggerTest] PRESSING B at warp entry ({player_x}, {player_y}) on map {map_n}")
-                                self.run_action_on_emulator(5)
-                            print("Pressed B sequence")
+                            result = global_to_local(check_coord[0], check_coord[1], map_id)
+                            if result is None:
+                                print(f"  Skipping index {check_index}: {check_coord} (coordinate not on map {map_id})")
+                                continue
+                            coord_local_y, coord_local_x = result
+                            
+                            # BOUNDS CHECK: Use actual map dimensions from MAP_DATA
+                            if map_id in MAP_DATA:
+                                tile_width, tile_height = MAP_DATA[map_id]["tileSize"]
+                                if coord_local_x < 0 or coord_local_y < 0 or coord_local_x >= tile_width or coord_local_y >= tile_height:
+                                    print(f"  Skipping index {check_index}: {check_coord} -> local ({coord_local_x}, {coord_local_y}) (out of bounds for map {map_id}, size {tile_width}x{tile_height})")
+                                    continue
+                            else:
+                                print(f"  Skipping index {check_index}: {check_coord} (map {map_id} not found in MAP_DATA)")
+                                continue
+                                
+                            print(f"  Valid coordinate on map {map_id}: {check_coord} -> local ({coord_local_x}, {coord_local_y})")
+                        except Exception as e:
+                            print(f"  Skipping index {check_index}: {check_coord} (conversion error: {e})")
+                            continue
+                        
+                        check_distance = abs(check_coord[0] - current_global[0]) + abs(check_coord[1] - current_global[1])
+                        print(f"  Checking index {check_index}: {check_coord}, distance = {check_distance} (on map {map_id})")
+                        
+                        if check_distance == 1:
+                            print(f"PATH_FOLLOW: Found coordinate with distance 1 at index {check_index} on current map")
+                            self.current_path_target_index = check_index
+                            target_coord = check_coord
+                            dy = target_coord[0] - current_global[0]
+                            dx = target_coord[1] - current_global[1]
+                            distance = 1
                             break
+                        elif check_distance < closest_distance:
+                            closest_distance = check_distance
+                            closest_index = check_index
+                    
+                    # If we didn't find distance 1, use closest (if it was on current map)
+                    if distance != 1:
+                        if closest_index != self.current_path_target_index:
+                            print(f"PATH_FOLLOW: No distance-1 coordinate found, using closest at index {closest_index} on current map")
+                            self.current_path_target_index = closest_index
+                            target_coord = self.combined_path[closest_index]
+                            dy = target_coord[0] - current_global[0]
+                            dx = target_coord[1] - current_global[1]
+                        else:
+                            # Current target is valid but no closer ones found
+                            # Check if there are any other reachable coordinates with better movement options
+                            print(f"PATH_FOLLOW: No closer coordinates found. Checking if current target direction is viable...")
+                            
+                            # If the primary movement direction would be horizontal but we're far away,
+                            # look for coordinates that allow vertical movement instead
+                            if abs(dx) >= abs(dy) and abs(dx) > 2:
+                                print(f"PATH_FOLLOW: Target requires long horizontal movement (dx={dx}). Looking for alternative coordinates...")
+                                # Look for coordinates that are mainly vertical from current position
+                                for alt_check_index in range(self.current_path_target_index, min(self.current_path_target_index + 20, len(self.combined_path))):
+                                    alt_coord = self.combined_path[alt_check_index]
+                                    result = global_to_local(alt_coord[0], alt_coord[1], map_id)
+                                    if result is not None:
+                                        alt_local_y, alt_local_x = result
+                                        if map_id in MAP_DATA:
+                                            tile_width, tile_height = MAP_DATA[map_id]["tileSize"]
+                                            if alt_local_x >= 0 and alt_local_y >= 0 and alt_local_x < tile_width and alt_local_y < tile_height:
+                                                alt_dy = alt_coord[0] - current_global[0]
+                                                alt_dx = alt_coord[1] - current_global[1]
+                                                # Prefer coordinates where vertical movement is dominant and distance is reasonable
+                                                if abs(alt_dy) > abs(alt_dx) and abs(alt_dy) <= 8:
+                                                    print(f"PATH_FOLLOW: Found alternative coordinate at index {alt_check_index}: {alt_coord} (dy={alt_dy}, dx={alt_dx})")
+                                                    self.current_path_target_index = alt_check_index
+                                                    target_coord = alt_coord
+                                                    dy = alt_dy
+                                                    dx = alt_dx
+                                                    break
+                            
+                            print(f"PATH_FOLLOW: Moving toward target {target_coord} (distance {abs(dy) + abs(dx)}, dy={dy}, dx={dx})")
+                            # Keep the current dy, dx values (either original or alternative)
+            
+            # Determine movement direction (prioritize larger delta)
+            # VALID_ACTIONS = [DOWN(0), LEFT(1), RIGHT(2), UP(3), A(4), B(5), PATH(6), START(7)]
+            if abs(dy) > abs(dx):
+                if dy > 0:
+                    movement_action = 0  # DOWN
+                    direction_name = "DOWN"
+                else:
+                    movement_action = 3  # UP
+                    direction_name = "UP"
+            elif dx != 0:
+                if dx > 0:
+                    movement_action = 2  # RIGHT
+                    direction_name = "RIGHT"
+                else:
+                    movement_action = 1  # LEFT
+                    direction_name = "LEFT"
+            else:
+                print("PATH_FOLLOW: ERROR - No movement direction determined")
+                print("PATH_FOLLOW: RETURNING EARLY - no_direction")
+                return self._get_obs(), 0.0, False, False, {"path_follow": "no_direction"}
+            
+            print(f"PATH_FOLLOW: Moving {direction_name} (action {movement_action})")
+            print(f"PATH_FOLLOW: About to call run_action_on_emulator({movement_action})")
+            
+            # COLLISION CHECK: Use the same get_collision_map() as UI before movement
+            print(f"PATH_FOLLOW_COLLISION: Checking collision for direction {direction_name}")
+            collision_map_str = self.get_collision_map()
+            if collision_map_str:
+                print(f"PATH_FOLLOW_COLLISION: Got collision map, parsing...")
+                lines = collision_map_str.strip().split('\n')
+                grid = []
+                
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('Legend:') or not line or not all(c in '0123456789 ' for c in line):
+                        continue
+                    row = [int(x) for x in line.split()]
+                    if len(row) == 10:  # Valid grid row
+                        grid.append(row)
+                
+                if len(grid) == 9:  # Valid 9x10 grid
+                    print(f"PATH_FOLLOW_COLLISION: Parsed {len(grid)}x{len(grid[0])} collision grid")
+                    
+                    # Player is at center (4,4), check target direction
+                    player_row, player_col = 4, 4
+                    target_row, target_col = player_row, player_col
+                    
+                    if direction_name == "UP":
+                        target_row = player_row - 1
+                    elif direction_name == "DOWN":
+                        target_row = player_row + 1
+                    elif direction_name == "LEFT":
+                        target_col = player_col - 1
+                    elif direction_name == "RIGHT":
+                        target_col = player_col + 1
+                    
+                    # Check bounds
+                    if 0 <= target_row < 9 and 0 <= target_col < 10:
+                        target_tile = grid[target_row][target_col]
+                        print(f"PATH_FOLLOW_COLLISION: Player at ({player_row},{player_col}), target ({target_row},{target_col}) = {target_tile}")
+                        
+                        # Check if movement is blocked (1=wall, 2=sprite)
+                        if target_tile == 1:
+                            print(f"PATH_FOLLOW_COLLISION: *** COLLISION DETECTED - Wall at target position! ***")
+                            print(f"PATH_FOLLOW_COLLISION: Blocking movement {direction_name}, trying alternative...")
+                            
+                            # Look for alternative walkable directions
+                            walkable_directions = []
+                            directions_to_check = ["UP", "DOWN", "LEFT", "RIGHT"]
+                            for check_dir in directions_to_check:
+                                check_row, check_col = player_row, player_col
+                                if check_dir == "UP":
+                                    check_row = player_row - 1
+                                elif check_dir == "DOWN":
+                                    check_row = player_row + 1
+                                elif check_dir == "LEFT":
+                                    check_col = player_col - 1
+                                elif check_dir == "RIGHT":
+                                    check_col = player_col + 1
+                                
+                                if 0 <= check_row < 9 and 0 <= check_col < 10:
+                                    check_tile = grid[check_row][check_col]
+                                    if check_tile == 0:  # Walkable
+                                        walkable_directions.append(check_dir)
+                                        print(f"PATH_FOLLOW_COLLISION: Direction {check_dir} is walkable (tile={check_tile})")
+                                    else:
+                                        print(f"PATH_FOLLOW_COLLISION: Direction {check_dir} blocked (tile={check_tile})")
+                            
+                            if walkable_directions:
+                                # Prefer directions that bring us closer to target
+                                best_direction = None
+                                best_score = float('inf')
+                                
+                                for alt_dir in walkable_directions:
+                                    # Calculate how this direction affects our distance to target
+                                    score = 0
+                                    if alt_dir == "UP" and dy < 0:
+                                        score = abs(dy) - 1  # Moving toward target
+                                    elif alt_dir == "DOWN" and dy > 0:
+                                        score = abs(dy) - 1
+                                    elif alt_dir == "LEFT" and dx < 0:
+                                        score = abs(dx) - 1
+                                    elif alt_dir == "RIGHT" and dx > 0:
+                                        score = abs(dx) - 1
+                                    else:
+                                        score = abs(dy) + abs(dx) + 1  # Moving away from target
+                                    
+                                    if score < best_score:
+                                        best_score = score
+                                        best_direction = alt_dir
+                                
+                                if best_direction:
+                                    print(f"PATH_FOLLOW_COLLISION: Using alternative direction: {best_direction}")
+                                    direction_name = best_direction
+                                    if best_direction == "UP":
+                                        movement_action = 3
+                                    elif best_direction == "DOWN":
+                                        movement_action = 0
+                                    elif best_direction == "LEFT":
+                                        movement_action = 1
+                                    elif best_direction == "RIGHT":
+                                        movement_action = 2
+                                else:
+                                    print(f"PATH_FOLLOW_COLLISION: No walkable alternatives found! Skipping movement.")
+                                    print("PATH_FOLLOW: RETURNING EARLY - collision_blocked")
+                                    return self._get_obs(), 0.0, False, False, {"path_follow": "collision_blocked"}
+                            else:
+                                print(f"PATH_FOLLOW_COLLISION: No walkable directions available! Player may be stuck.")
+                                print("PATH_FOLLOW: RETURNING EARLY - no_walkable_directions") 
+                                return self._get_obs(), 0.0, False, False, {"path_follow": "no_walkable_directions"}
+                        elif target_tile == 2:
+                            print(f"PATH_FOLLOW_COLLISION: *** SPRITE COLLISION DETECTED - NPC at target position! ***")
+                            print(f"PATH_FOLLOW_COLLISION: Movement may be blocked by NPC, but attempting...")
+                        else:
+                            print(f"PATH_FOLLOW_COLLISION: Target tile is walkable (tile={target_tile})")
+                    else:
+                        print(f"PATH_FOLLOW_COLLISION: Target position out of bounds: ({target_row},{target_col})")
+                else:
+                    print(f"PATH_FOLLOW_COLLISION: Invalid grid size: {len(grid)} rows")
+            else:
+                print(f"PATH_FOLLOW_COLLISION: No collision map available, proceeding with movement")
+            
+            # Execute the movement
+            self.run_action_on_emulator(movement_action)
+            
+            print(f"PATH_FOLLOW: Movement completed, run_action_on_emulator returned")
+            print(f"PATH_FOLLOW: RETURNING EARLY - moved with direction {direction_name}")
+            print("=== PATH_FOLLOW DEBUG: Returning from PATH_FOLLOW_ACTION block ===\n")
+            
+            return self._get_obs(), 0.0, False, False, {"path_follow": "moved", "direction": direction_name}
 
-        if self.step_count >= self.get_max_steps():
-            self.step_count = 0
+        # --- END SIMPLE PATH FOLLOWING LOGIC ---
+
+        # FIXED: Update previous map ID for trigger evaluation
+        cur_map_id = self.read_m("wCurMap")
+        print(f"environment.py: step(): cur_map_id: {cur_map_id}")
+        print(f"environment.py: step(): self.prev_map_id: {self.prev_map_id}")
+        
+        # only append to map_history if the map id is different from the previous one
+        if -1 in self.environment_map_history: # if the map history is empty, replace -1 with the current map id
+            self.environment_map_history.remove(-1)
+
+        # Use map_history[-2] for previous map
+        player_x, player_y, _ = self.get_game_coords()
+        prev_map = self.environment_map_history[-2] if len(self.environment_map_history) >= 2 else self.get_game_coords()[2]
+        cur_map_id = self.environment_map_history[-1] if len(self.environment_map_history) >= 1 else self.get_game_coords()[2]
+        
+        # try:
+        #     prev_map_name = MapIds(prev_map).name
+        #     cur_map_name = MapIds(cur_map_id).name
+
+        #     if prev_map_name in WARP_DICT:
+        #         # Find warp entry matching this map transition
+        #         for warp in WARP_DICT[prev_map_name]:
+        #             if warp.get('target_map_id') == cur_map_id:
+        #                 warp_entry_x = warp.get('x')
+        #                 warp_entry_y = warp.get('y')
+        #                 print(f"Warp entry x: {warp_entry_x}")
+        #                 print(f"Warp entry y: {warp_entry_y}")
+        #                 # If player is on warp entry tile, press B multiple times
+        #                 if (player_x, player_y) == (warp_entry_x, warp_entry_y):
+        #                     for _ in range(3):
+        #                         debug_print(f"[TriggerTest] PRESSING B at warp entry ({player_x}, {player_y}) on map {cur_map_id}")
+        #                         self.run_action_on_emulator(5)
+        #                     print("Pressed B sequence")
+        #                     break
+        # except Exception as e:
+        #     print(f"Error getting map names: {e}")
+        #     prev_map_name = "None"
+        #     cur_map_id = "None"
+
+
+        # if self.step_count >= self.get_max_steps():
+        #     self.step_count = 0
 
         if self.save_video and self.step_count == 0:
             self.start_video()
@@ -1187,16 +1816,22 @@ class RedGymEnv(Env):
             and self.step_count % self.log_frequency == 0
         ):
             info = info | self.agent_stats(action)
+
         self.required_events = required_events
         self.required_items = required_items
 
-        self.item_handler.scripted_manage_items()
-        
-        self.update_path_trace() # Update path trace with the new state
+        # FIXED: Update previous map ID after processing
+        self.prev_map_id = cur_map_id
+
+        # FIXED: Add step count to info for external tracking
+        info["step_count"] = self.step_count
+        info["current_quest_id"] = getattr(self, 'current_loaded_quest_id', None)
+        info["path_length"] = len(getattr(self, 'combined_path', []))
+        info["path_index"] = getattr(self, 'current_path_target_index', 0)
 
         obs = self._get_obs()
 
-        self.step_count += 1
+        # Note: step_count was already incremented at the beginning of step method
         # print(f"environment.py: step(): self.step_count=={self.step_count}\n")
 
         # Trigger debug: dialog, inventory, battle flags
@@ -1213,6 +1848,8 @@ class RedGymEnv(Env):
 
         # Update prev_map_id for next step
         self.prev_map_id = cur_map_id
+        
+        print(f"STEP {self.step_count}: About to call run_action_on_emulator({action}) at end of step")
         
         # Dynamic STAB selection, infinite PP, and buff stats
         # Map Pokemon type codes to strongest STAB move IDs
@@ -1250,23 +1887,60 @@ class RedGymEnv(Env):
                 self.pyboy.memory[stat_addr] = 0xFF
                 self.pyboy.memory[stat_addr+1] = 0xFF
 
-        # print(f"environment.py: step(): dialog after path follow=={self.read_dialog()}")
-        self.current_dialog = self.read_dialog()
-        return obs, 0.0, reset, False, info
+
+        self.current_dialog_lines = self.get_active_dialog()
+
+        print(f"environment.py: step(): dialog at end of step using get_active_dialog()=={self.get_active_dialog()}")
+        # state_from_memory_string = self.get_state_from_memory()
+        # print(f"environment.py: step(): get_state_from_memory()=={state_from_memory_string}")
+        
+        # This isn't RL so it doesn't matter if we always set done to False and reward to 0.0
+        done = False
+        reward = 0.0
+        truncated = self.step_count >= self.max_steps
+        
+        print(f"=== STEP {self.step_count}: ACTION {action} COMPLETE ===\n")
+        
+        return obs, reward, done, truncated, info
 
     def run_action_on_emulator(self, action):
-        # print(f"environment.py: run_action_on_emulator(): action: {action}")
-        # Skip path-follow placeholder action (no actual button press)
+        # DEBUGGING: Force log every action call with call stack info
+        import traceback
+        print(f"\n*** run_action_on_emulator(): Called with action = {action} ***")
+        print(f"  Action type: {type(action)}")
+        print(f"  Valid actions length: {len(VALID_ACTIONS)}")
+        print(f"  Location before action: {self.get_game_coords()}")
+        print(f"  Step count: {self.step_count}")
+        print("  Call stack (last 3 frames):")
+        for line in traceback.format_stack()[-4:-1]:  # Skip the current frame
+            print(f"    {line.strip()}")
+        
+        # PATH_FOLLOW_ACTION should never reach here directly - it's handled in step()
+        # When navigator calls this with directional actions (0-3), those should execute normally
         if action == PATH_FOLLOW_ACTION:
+            print(f"*** WARNING: PATH_FOLLOW_ACTION reached run_action_on_emulator - this should be handled in step() ***")
             return
+        
+        # Validate action is in valid range
+        if action < 0 or action >= len(VALID_ACTIONS) or VALID_ACTIONS[action] is None:
+            print(f"ERROR: Invalid action {action} passed to run_action_on_emulator")
+            return
+        
+        print(f"  Valid action confirmed: {VALID_ACTIONS[action]}")
+        
         self.action_hist[action] += 1
         # press button then release after some steps
         # TODO: Add video saving logic
 
         # if not self.disable_ai_actions:
+        print(f"  Sending input: {VALID_ACTIONS[action]}")
         self.pyboy.send_input(VALID_ACTIONS[action])
+        print(f"  Sending release: {VALID_RELEASE_ACTIONS[action]}")
         self.pyboy.send_input(VALID_RELEASE_ACTIONS[action], delay=self.emulator_delay)
+        print(f"  Ticking {self.action_freq - 1} frames...")
         self.pyboy.tick(self.action_freq - 1, render=False)
+        
+        print(f"  Location after action: {self.get_game_coords()}")
 
         # TODO: Split this function up. update_seen_coords should not be here!
         self.update_seen_coords()
@@ -1276,6 +1950,7 @@ class RedGymEnv(Env):
             if not self.read_m("wJoyIgnore"):
                 break
             self.pyboy.button("a", 8)
+            print(f"environment.py: step(): Pressed button A, wJoyIgnore after button press: {self.read_m('wJoyIgnore')}")
             self.pyboy.tick(self.action_freq, render=True)
 
         if self.events.get_event("EVENT_GOT_HM01"):
@@ -2006,7 +2681,7 @@ class RedGymEnv(Env):
                 "pokecenter_heal": self.pokecenter_heal,
                 "in_battle": self.read_m("wIsInBattle") > 0,
                 "event": self.event_progress.get("event", None),
-                "max_steps": self.get_max_steps(),
+                # "max_steps": self.get_max_steps(),
                 # redundant but this is so we don't interfere with the swarm logic
                 "required_count": len(self.required_events) + len(self.required_items),
                 "safari_zone": {k.name: v for k, v in self.safari_zone_steps.items()},
@@ -2089,7 +2764,27 @@ class RedGymEnv(Env):
 
     def add_video_frame(self):
         self.full_frame_writer.add_image(self.render()[:, :])
-        self.map_frame_writer.add_image(self.explore_map)
+        
+        # Create map frame with quest paths if enabled
+        map_frame = self.explore_map.copy()
+        if self.show_quest_paths and hasattr(self, 'quest_visualizer'):
+            try:
+                # Overlay quest paths on the explore map
+                map_frame = self.quest_visualizer.overlay_quest_paths_on_map(
+                    map_frame, 
+                    quest_ids=self.quest_visualization_ids,
+                    dot_size=1,  # Smaller dots for video
+                    alpha=200
+                )
+                # Convert back to grayscale for the video writer if needed
+                if len(map_frame.shape) == 3:
+                    # Use RGB to grayscale conversion (weighted average)
+                    map_frame = np.dot(map_frame[...,:3], [0.2989, 0.5870, 0.1140])
+            except Exception as e:
+                print(f"QuestVisualizer: Error in add_video_frame: {e}")
+                map_frame = self.explore_map  # Fallback to original map
+        
+        self.map_frame_writer.add_image(map_frame)
 
         screen_obs = self.screen_obs()
         self.screen_obs_frame_writer.add_image(screen_obs["screen"].squeeze(-1))
@@ -2097,15 +2792,94 @@ class RedGymEnv(Env):
 
     def get_game_coords(self):
         return (self.read_m("wXCoord"), self.read_m("wYCoord"), self.read_m("wCurMap"))
+    
+    def set_quest_visualization(self, enabled: bool, quest_ids: list = None):
+        """
+        Enable or disable quest path visualization.
+        
+        Args:
+            enabled: Whether to show quest paths on the map
+            quest_ids: List of quest IDs to visualize. If None, uses current setting.
+        """
+        self.show_quest_paths = enabled
+        if quest_ids is not None:
+            self.quest_visualization_ids = quest_ids
+        print(f"Quest visualization {'enabled' if enabled else 'disabled'} for quests: {self.quest_visualization_ids}")
+    
+    def get_quest_visualization_map(self, quest_ids: list = None, dot_size: int = 2, alpha: int = 180):
+        """
+        Get the current explore map with quest paths overlaid.
+        
+        Args:
+            quest_ids: List of quest IDs to visualize. If None, uses current setting.
+            dot_size: Size of dots for quest coordinates
+            alpha: Alpha value for quest overlay
+            
+        Returns:
+            Map array with quest paths overlaid
+        """
+        if quest_ids is None:
+            quest_ids = self.quest_visualization_ids
+        
+        if hasattr(self, 'quest_visualizer'):
+            try:
+                return self.quest_visualizer.overlay_quest_paths_on_map(
+                    self.explore_map, 
+                    quest_ids=quest_ids,
+                    dot_size=dot_size,
+                    alpha=alpha
+                )
+            except Exception as e:
+                print(f"QuestVisualizer: Error creating visualization: {e}")
+                return self.explore_map
+        else:
+            print("QuestVisualizer: Quest visualizer not available")
+            return self.explore_map
+    
+    def save_quest_visualization(self, output_path: str = None, quest_ids: list = None):
+        """
+        Save a visualization of the current map with quest paths.
+        
+        Args:
+            output_path: Path to save the image. If None, saves to default location.
+            quest_ids: List of quest IDs to visualize. If None, uses current setting.
+        """
+        if output_path is None:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = Path(__file__).parent.parent / "quest_visualizations"
+            output_dir.mkdir(exist_ok=True)
+            output_path = str(output_dir / f"quest_map_{timestamp}.png")
+        
+        if quest_ids is None:
+            quest_ids = self.quest_visualization_ids
+        
+        if hasattr(self, 'quest_visualizer'):
+            try:
+                self.quest_visualizer.save_quest_map_visualization(
+                    self.explore_map,
+                    output_path,
+                    quest_ids=quest_ids,
+                    dot_size=2,
+                    alpha=200
+                )
+                print(f"Quest visualization saved to: {output_path}")
+                return output_path
+            except Exception as e:
+                print(f"QuestVisualizer: Error saving visualization: {e}")
+                return None
+        else:
+            print("QuestVisualizer: Quest visualizer not available")
+            return None
 
-    def get_max_steps(self):
-        return max(
-            0,
-            self.max_steps,
-            self.max_steps
-            * (len(self.required_events) + len(self.required_items))
-            * self.max_steps_scaling,
-        )
+    # def get_max_steps(self):
+    #     return max(
+    #         0,
+    #         self.max_steps,
+    #         self.max_steps
+    #         * (len(self.required_events) + len(self.required_items))
+    #         * self.max_steps_scaling,
+    #     )
 
     def update_seen_coords(self):
         inc = 0.5 if (self.read_m("wMovementFlags") & 0b1000_0000) else self.exploration_inc
@@ -2323,9 +3097,9 @@ class RedGymEnv(Env):
             return f"map_{map_id_val}"
 
     def update_path_trace(self):
-        # When play.py is controlling replay saving, current_run_dir is set externally.
+        # When play.py is controlling replay saving, current_run_info is set externally.
         # If it's not set (i.e., None), this function should not attempt to trace.
-        if not self.current_run_dir:
+        if not self.current_run_info and not self.current_run_dir:
             return
 
         player_x, player_y, map_n = self.get_game_coords()
@@ -2453,7 +3227,6 @@ class RedGymEnv(Env):
                 result += f"[{b:02X}]"
         return result.strip()
 
-    
     def read_dialog(self) -> str:
         """Read any dialog text currently on screen by scanning the tilemap buffer"""
         # Tilemap buffer is from C3A0 to C507
@@ -2461,7 +3234,7 @@ class RedGymEnv(Env):
         buffer_end = 0xC507
 
         # Get all bytes from the buffer
-        buffer_bytes = [self.pyboy.memory[addr] for addr in range(buffer_start, buffer_end)]
+        buffer_bytes = [self.memory[addr] for addr in range(buffer_start, buffer_end)]
 
         # Look for sequences of text (ignoring long sequences of 0x7F/spaces)
         text_lines = []
@@ -2536,23 +3309,13 @@ class RedGymEnv(Env):
             if text.strip():
                 text_lines.append(text)
 
-        # Join into a single string
         text = "\n".join(text_lines)
-        import re  # for filtering gibberish
-        # Filter out numeric-gibberish and overly long lines
-        filtered = []
-        for line in text_lines:
-            # Drop lines longer than 100 chars
-            if len(line) > 100:
-                continue
-            # Drop lines consisting of 5 or more digits (e.g., memory dumps)
-            if re.fullmatch(r"\d{5,}", line.strip()):
-                continue
-            filtered.append(line)
-        text = "\n".join(filtered)
-        # Post-process for name entry context if any valid text remains
-        if text and ("lower case" in text.lower() or "UPPER CASE" in text):
+
+        # Post-process for name entry context
+        if "lower case" in text.lower() or "UPPER CASE" in text:
+            # We're in name entry, replace ♭ with ED
             text = text.replace("♭", "ED\n")
+
         return text
     
     def update_map_progress(self):
@@ -2650,25 +3413,18 @@ class RedGymEnv(Env):
             self.screen_obs_frame_writer.close()
             self.visited_mask_frame_writer.close()
 
-        # play.py now handles saving of path trace data (coords.json).
-        # We only need to save the ending game state here if current_run_dir is set,
-        # or fall back to the default state_dir saving if not.
-        if hasattr(self, 'current_run_dir') and self.current_run_dir:
-            # Save ending game state in run directory managed by play.py
+        # Use RunManager for saving final state and data
+        if hasattr(self, 'current_run_info') and self.current_run_info:
+            from .environment_helpers.saver import save_final_state
             try:
-                timestamp = datetime.now().strftime("%m%d%Y_%H%M%S")
-                # The end state saved by play.py is now the definitive one.
-                # This one can be considered a backup or removed if truly redundant.
-                # For now, let's keep it but ensure it doesn't conflict with play.py's naming.
-                end_state_name = f"{self.current_run_dir.name}_env_end__{timestamp}.state"
-                end_state_path = self.current_run_dir / end_state_name
-                with open(end_state_path, "wb") as f_end:
-                    self.pyboy.save_state(f_end)
-                print(f"Saved environment's ending game state to {end_state_path}")
+                # Save final state and coordinates using RunManager
+                save_final_state(self, self.current_run_info, coords_data=self.path_trace_data)
+                print(f"Saved final run data to {self.current_run_info.run_dir}")
             except Exception as e:
-                print(f"Error saving environment's ending game state: {e}")
+                print(f"Error saving final run data: {e}")
             finally:
                 # Clear for next potential full re-initialization if object is reused
+                self.current_run_info = None
                 self.current_run_dir = None
                 self.path_trace_data = {}
         else:
@@ -2684,65 +3440,70 @@ class RedGymEnv(Env):
                 print(f"Error saving fallback ending game state: {e}")
 
     def load_coordinate_path(self, quest_id: int) -> bool:
-        """Enhanced coordinate loading with comprehensive validation and error correction"""
+        """Load coordinates from the same continuous file that Navigator uses"""
         
-        # VALIDATION PROTOCOL: Quest ID parameter verification
+        print(f"ENV_QUEST_LOAD: load_coordinate_path called with quest_id = {quest_id}")
+        
+        # VALIDATION: Quest ID parameter verification
         if not isinstance(quest_id, int) or quest_id < 1:
-            print(f"Environment: ERROR - Invalid quest ID: {quest_id}")
+            print(f"ENV_QUEST_LOAD: ERROR - Invalid quest ID: {quest_id}")
             return False
         
-        # CONSTRUCT FILE PATH: Quest-specific directory structure
-        quest_dir_name = f"{quest_id:03d}"
-        quest_file_name = f"{quest_dir_name}_coords.json"
+        # USE SAME FILE AS NAVIGATOR: combined continuous coordinates
+        continuous_coords_path = Path(__file__).parent / "environment_helpers" / "quest_paths" / "combined_quest_coordinates_continuous.json"
         
-        # PRIMARY PATH: use quest_paths directory
-        base = Path(__file__).parent / "environment_helpers" / "quest_paths"
-        primary_path = base / quest_dir_name / quest_file_name
-        
-        # FALLBACK PATHS: legacy compatibility locations
-        fallback_paths = [
-            Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name,
-            Path(__file__).parent / quest_file_name,
-            Path(__file__).parent.parent / quest_file_name,
-            Path(__file__).parent / "coordinates" / quest_file_name,
-        ]
-        
-        # FILE EXISTENCE VALIDATION
-        if primary_path.exists():
-            target_file_path = primary_path
-        else:
-            target_file_path = next((p for p in fallback_paths if p.exists()), None)
-
-        if not target_file_path:
-            print(f"Environment: ERROR - Coordinate file not found for Quest {quest_id:03d}")
-            print(f"  Primary path: {primary_path}")
-            for i, fallback in enumerate(fallback_paths):
-                print(f"  Fallback {i+1}: {fallback}")
+        if not continuous_coords_path.exists():
+            print(f"ENV_QUEST_LOAD: ERROR - Continuous coords file not found: {continuous_coords_path}")
             return False
         
-        # COORDINATE FILE LOADING WITH VALIDATION
         try:
-            with open(target_file_path, 'r') as f:
-                coordinate_data = json.load(f)
+            with open(continuous_coords_path, 'r') as f:
+                coords_data = json.load(f)
             
-            print(f"Environment: Successfully loaded coordinate file for Quest {quest_id:03d}")
-            print(f"  File path: {target_file_path}")
-            print(f"  Maps found: {list(coordinate_data.keys())}")
+            print(f"ENV_QUEST_LOAD: Successfully loaded continuous coordinates file")
             
-            # COORDINATE FLATTENING: Convert map-specific coordinates to sequential list
+            # GET QUEST START/END INDICES (same logic as Navigator)
+            quest_start_indices = coords_data.get("quest_start_indices", {})
+            quest_key = str(quest_id)
+            
+            if quest_key not in quest_start_indices:
+                print(f"ENV_QUEST_LOAD: ERROR - Quest {quest_id} not found in quest_start_indices")
+                return False
+            
+            start_idx = quest_start_indices[quest_key]
+            
+            # Calculate end index
+            all_quest_ids = sorted([int(k) for k in quest_start_indices.keys()])
+            current_quest_index = all_quest_ids.index(quest_id)
+            
+            if current_quest_index < len(all_quest_ids) - 1:
+                next_quest_id = all_quest_ids[current_quest_index + 1]
+                end_idx = quest_start_indices[str(next_quest_id)]
+            else:
+                # Last quest - use all remaining coordinates
+                total_coordinates = len(coords_data.get("coordinates", []))
+                end_idx = total_coordinates
+            
+            print(f"ENV_QUEST_LOAD: Quest {quest_id} indices: start={start_idx}, end={end_idx}")
+            
+            # EXTRACT COORDINATES for this quest
+            all_coordinates = coords_data.get("coordinates", [])
+            quest_coordinates = all_coordinates[start_idx:end_idx]
+            
+            if not quest_coordinates:
+                print(f"ENV_QUEST_LOAD: ERROR - No coordinates found for Quest {quest_id}")
+                return False
+            
+            # CONVERT TO TUPLE FORMAT
             flattened_coordinates = []
-            # Normalize keys by integer part before underscore when sorting
-            for map_id in sorted(coordinate_data.keys(), key=lambda k: int(k.split('_')[0])):
-                map_coords = coordinate_data[map_id]
-                for coord in map_coords:
-                    if isinstance(coord, list) and len(coord) == 2:
-                        flattened_coordinates.append(tuple(coord))
-                    else:
-                        print(f"Environment: WARNING - Invalid coordinate format: {coord}")
+            for coord in quest_coordinates:
+                if isinstance(coord, list) and len(coord) == 2:
+                    flattened_coordinates.append(tuple(coord))
+                else:
+                    print(f"ENV_QUEST_LOAD: WARNING - Invalid coordinate format: {coord}")
             
-            # CONTENT VALIDATION: Ensure coordinates were successfully processed
             if not flattened_coordinates:
-                print(f"Environment: ERROR - No valid coordinates found in Quest {quest_id:03d} file")
+                print(f"ENV_QUEST_LOAD: ERROR - No valid coordinates processed for Quest {quest_id}")
                 return False
             
             # ENVIRONMENT STATE SYNCHRONIZATION
@@ -2750,24 +3511,49 @@ class RedGymEnv(Env):
             self.current_path_target_index = 0
             self.current_loaded_quest_id = quest_id
             
-            print(f"Environment: Quest {quest_id:03d} loaded - {len(flattened_coordinates)} coordinates")
+            print(f"ENV_QUEST_LOAD: Quest {quest_id:03d} loaded - {len(flattened_coordinates)} coordinates from continuous file")
             print(f"  First coordinate: {flattened_coordinates[0]}")
             print(f"  Last coordinate: {flattened_coordinates[-1]}")
-            
-            # COORDINATE INTEGRITY VERIFICATION
-            expected_coord_count = sum(len(coords) for coords in coordinate_data.values())
-            if len(flattened_coordinates) != expected_coord_count:
-                print(f"Environment: WARNING - Coordinate count mismatch")
-                print(f"  Expected: {expected_coord_count}, Loaded: {len(flattened_coordinates)}")
+            print(f"  Player currently at: {self.get_game_coords()}")
             
             return True
             
         except json.JSONDecodeError as e:
-            print(f"Environment: ERROR - JSON parsing failed for Quest {quest_id:03d}: {e}")
+            print(f"ENV_QUEST_LOAD: ERROR - JSON parsing failed: {e}")
             return False
         except Exception as e:
-            print(f"Environment: ERROR - Unexpected error loading Quest {quest_id:03d}: {e}")
+            print(f"ENV_QUEST_LOAD: ERROR - Unexpected error: {e}")
             return False
+
+    def _get_expected_map_for_current_path_index(self):
+        """
+        Get the expected map ID(s) for the current path index and nearby coordinates.
+        Returns a set of map IDs that the player should reasonably be on.
+        """
+        if not hasattr(self, 'combined_path') or not self.combined_path:
+            return None
+        
+        if not hasattr(self, 'current_path_target_index'):
+            return None
+        
+        # Check current target and nearby coordinates (±3 indices) to get expected maps
+        expected_maps = set()
+        start_idx = max(0, self.current_path_target_index - 3)
+        end_idx = min(len(self.combined_path), self.current_path_target_index + 4)
+        
+        for i in range(start_idx, end_idx):
+            try:
+                coord = self.combined_path[i]
+                # Try to find which map this coordinate belongs to by testing all known maps
+                for test_map_id in range(248):  # Test all valid map IDs
+                    result = global_to_local(coord[0], coord[1], test_map_id)
+                    if result is not None:
+                        expected_maps.add(test_map_id)
+                        break
+            except:
+                continue
+        
+        return expected_maps if expected_maps else None
 
     def read_game_time(self) -> tuple[int, int, int]:
         """Read game time as (hours, minutes, seconds)"""
@@ -2790,8 +3576,8 @@ class RedGymEnv(Env):
         """Get the current screenshot."""
         return Image.fromarray(self.pyboy.screen.ndarray)
     
-    def get_collision_map(self):
-        """Get the current collision map."""
+    def get_collision_map_array(self):
+        """Get the current collision map as numpy array."""
         return self.pyboy.collision_map.ndarray
     
     def _get_direction(self, array):
@@ -2814,7 +3600,22 @@ class RedGymEnv(Env):
                 elif list(grid) == [8, 9, 10, 11]:
                     return "left"
 
-        return "no direction found"
+        # FIXED: Try reading direction from memory as fallback
+        try:
+            # Read player direction from memory (0 = down, 4 = up, 8 = left, 12 = right)
+            direction_byte = self.read_m(0xC109)  # Player direction memory address
+            if direction_byte == 0:
+                return "down"
+            elif direction_byte == 4:
+                return "up"
+            elif direction_byte == 8:
+                return "left"
+            elif direction_byte == 12:
+                return "right"
+        except Exception:
+            pass
+
+        return "unknown"
     
     def get_coordinates(self):
         """
@@ -2828,7 +3629,7 @@ class RedGymEnv(Env):
     
     # get_coordinates returns (col, row)
     # def get_coordinates_xy(self):
-    #     """Return coordinates in the original Game Boy order (x, y)."""
+    #     """Return coordinates in the original GameBoy order (x,y)."""
     #     row, col = self.get_coordinates()
     #     return (col, row)
 
@@ -2850,28 +3651,6 @@ class RedGymEnv(Env):
             str: Location name
         """
         return self.read_location()
-
-    def _get_direction(self, array):
-        """Determine the player's facing direction from the sprite pattern."""
-        # Look through the array for any 2x2 grid containing numbers 0-3
-        rows, cols = array.shape
-
-        for i in range(rows - 1):
-            for j in range(cols - 1):
-                # Extract 2x2 grid
-                grid = array[i : i + 2, j : j + 2].flatten()
-
-                # Check for each direction pattern
-                if list(grid) == [0, 1, 2, 3]:
-                    return "down"
-                elif list(grid) == [4, 5, 6, 7]:
-                    return "up"
-                elif list(grid) == [9, 8, 11, 10]:
-                    return "right"
-                elif list(grid) == [8, 9, 10, 11]:
-                    return "left"
-
-        return "no direction found"
 
     def _get_player_center(self, array):
         """Locate the 2×2 sprite block that represents the player and return
@@ -3239,6 +4018,8 @@ class RedGymEnv(Env):
         full_map = self.pyboy.game_wrapper._get_screen_background_tilemap()
 
         doors: list[tuple[int, int]] = []  # store down‑sampled cell coords
+        
+        # print(f"environment.py: _get_doors_info(): full_map: {full_map}")
 
         # --------------------------------------------------------------
         # Exact 2×2 pattern whitelist (UL, UR, LL, LR).  None = wildcard.
@@ -3294,7 +4075,7 @@ class RedGymEnv(Env):
             for row in full_map
         ]
         # Verbose full‑map dump can flood logs; keep it at DEBUG level.
-        logger.debug("[DoorDetect] full 18x20 background tile IDs:\n" + "\n".join(full_dump))
+        # print(f"[DoorDetect] full 18x20 background tile IDs:\n" + "\n".join(full_dump))
 
         # Down‑sampled coordinate → tile_id for every warp tile we found.
         # Using only the warp tile list already removes door tops, so no extra
@@ -3362,7 +4143,7 @@ class RedGymEnv(Env):
                     tile_id = full_map[ds_r * 2 + 1][ds_c * 2] & 0xFF
                     row_ids.append(hex(tile_id)[2:].upper().zfill(2))
                 ds_rows.append(" ".join(row_ids))
-            logger.info("[DoorDetect] down‑sampled 9x10 tile IDs:\n" + "\n".join(ds_rows))
+            print("[DoorDetect] down‑sampled 9x10 tile IDs:\n" + "\n".join(ds_rows))
         except Exception:
             pass
 
@@ -3373,14 +4154,14 @@ class RedGymEnv(Env):
                 full_map = self.pyboy.game_wrapper._get_screen_background_tilemap()
                 player_r, player_c = self._get_player_center(full_map)
                 sample = [full_map[r][player_c] for r in range(12, 18)]
-                logger.info(
+                print(
                     f"[DoorDetect] sampling column {player_c} rows 12‑17 tile IDs: {sample}"
                 )
 
                 # Dump the entire 18×20 tile id grid once (compact)
                 grid_flat = [hex(t)[2:].upper().zfill(2) for row in full_map for t in row]
                 rows_str = [" ".join(grid_flat[i * 20 : (i + 1) * 20]) for i in range(18)]
-                logger.info("[DoorDetect] full 18x20 background tilemap:\n" + "\n".join(rows_str))
+                print("[DoorDetect] full 18x20 background tilemap:\n" + "\n".join(rows_str))
             except Exception:
                 pass
 
@@ -3390,7 +4171,7 @@ class RedGymEnv(Env):
         # ------------------------------------------------------------------
 
         # We now convert each unique down‑sampled cell to world‑tile
-        # coordinates using the player’s position as the origin.
+        # coordinates using the player's position as the origin.
 
         try:
             player_row, player_col = self.get_coordinates()
@@ -3414,8 +4195,8 @@ class RedGymEnv(Env):
             world_c = player_col + delta_cells_c
 
             # Fine‑grained destination override for staircase tiles inside
-            # the player’s house so the prompt doesn’t claim they lead to
-            # Pallet Town.
+            # the player's house so the prompt doesn't claim they lead to
+            # Pallet Town.
             # If this warp is a staircase (tile 0x34) we cannot reliably infer
             # its destination from the location name heuristic, so omit the
             # label rather than risk a misleading "Pallet Town" message.
@@ -3433,7 +4214,7 @@ class RedGymEnv(Env):
             # Skip detailed 2×2 dump in world‑coord mode – not easily mapped.
             pass
 
-        logger.debug(f"[DoorDetect] visible_doors={visible_doors}")
+        # print(f"[DoorDetect] visible_doors={visible_doors}")
         return visible_doors
 
     # ------------------------------------------------------------------
@@ -3642,10 +4423,33 @@ class RedGymEnv(Env):
         Returns:
             PIL.Image: Screenshot with tile overlay
         """
-        # Not sure why we were importing overlay_on_screenshot every time get_screenshot_with_overlay was called.
-        screenshot = self.get_screenshot()
-        collision_map = self.get_collision_map()
-        return overlay_on_screenshot(screenshot, collision_map, alpha)
+        try:
+            # FIXED: Clear cached warp data to ensure fresh collision detection
+            self.clear_warp_cache()
+            
+            screenshot = self.get_screenshot()
+            collision_map_str = self.get_collision_map()
+            
+            # Ensure we have valid data
+            if not collision_map_str or not isinstance(collision_map_str, str):
+                print(f"Environment: Warning - Invalid collision map data: {type(collision_map_str)}")
+                return screenshot
+            
+            return overlay_on_screenshot(screenshot, collision_map_str, alpha)
+        except Exception as e:
+            print(f"Environment: Error creating collision overlay: {e}")
+            # Return regular screenshot if overlay fails
+            return self.get_screenshot()
+    
+    def read_player_name(self) -> str:
+        """Read the player's name"""
+        name_bytes = self.memory[0xD158:0xD163]
+        return self._convert_text(name_bytes)
+
+    def read_rival_name(self) -> str:
+        """Read rival's name"""
+        name_bytes = self.memory[0xD34A:0xD351]
+        return self._convert_text(name_bytes)
     
     def get_state_from_memory(self) -> str:
         """

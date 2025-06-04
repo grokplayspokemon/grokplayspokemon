@@ -11,6 +11,8 @@ from typing import Optional
 from omegaconf import OmegaConf, DictConfig
 import threading
 import queue
+import tkinter as tk
+from tkinter import ttk
 from environment.environment_helpers.trigger_evaluator import TriggerEvaluator
 from environment.environment_helpers.quest_progression import QuestProgressionEngine
 from queue import SimpleQueue
@@ -22,10 +24,12 @@ from environment.wrappers.configured_env_wrapper import ConfiguredEnvWrapper
 from environment.environment import VALID_ACTIONS, PATH_FOLLOW_ACTION
 from pyboy.utils import WindowEvent
 from environment.data.recorder_data.global_map import local_to_global
-from environment.environment_helpers.navigator import InteractiveNavigator
+from environment.environment_helpers.navigator import InteractiveNavigator, diagnose_environment_coordinate_loading, debug_coordinate_system
 from environment.environment_helpers.saver import save_initial_state, save_loop_state, save_final_state
 from environment.environment_helpers.warp_tracker import record_warp_step, backtrack_warp_sequence
-from environment.environment_helpers.quest_manager import QuestManager
+from environment.environment_helpers.quest_manager import QuestManager, verify_quest_system_integrity, determine_starting_quest
+from ui.quest_ui import start_quest_ui
+from environment.environment_helpers.trigger_evaluator import TriggerEvaluator
 # from web.quest_server import status_queue, start_server
 # from grok_integration import initialize_grok, get_grok_action, shutdown_grok # Removed Grok V1 integration
 
@@ -37,459 +41,9 @@ QUESTS_FILE = Path(__file__).parent / "environment_helpers" / "required_completi
 with open(QUESTS_FILE, 'r') as f:
     QUESTS = json.load(f)
 
-def diagnose_environment_coordinate_loading(env, navigator):
-    """Diagnostic protocol for environment coordinate loading accuracy"""
-    
-    print("\n" + "="*60)
-    print("ENVIRONMENT COORDINATE LOADING DIAGNOSTIC")
-    print("="*60)
-    
-    quest_ids_to_test = [12, 13, 14]
-    
-    for quest_id in quest_ids_to_test:
-        print(f"\n--- QUEST {quest_id:03d} ENVIRONMENT LOADING TEST ---")
-        
-        # STEP 1: Direct file content reading
-        quest_dir_name = f"{quest_id:03d}"
-        quest_file_name = f"{quest_dir_name}_coords.json"
-        file_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / quest_file_name
-        
-        if file_path.exists():
-            with open(file_path, 'r') as f:
-                file_content = json.load(f)
-            
-            # Flatten file coordinates for comparison
-            file_coordinates = []
-            for map_coords in file_content.values():
-                file_coordinates.extend([tuple(coord) for coord in map_coords])
-            
-            print(f"File content: {len(file_coordinates)} coordinates")
-            print(f"  Maps: {list(file_content.keys())}")
-            print(f"  First coordinate: {file_coordinates[0] if file_coordinates else 'None'}")
-            print(f"  Last coordinate: {file_coordinates[-1] if file_coordinates else 'None'}")
-            
-            # STEP 2: Environment loading test
-            print(f"\nTesting environment loading...")
-            
-            # Store current environment state
-            original_path = getattr(env, 'combined_path', []).copy()
-            original_quest_id = getattr(env, 'current_loaded_quest_id', None)
-            original_index = getattr(env, 'current_path_target_index', 0)
-            
-            # Test environment coordinate loading
-            env_load_success = env.load_coordinate_path(quest_id)
-            
-            if env_load_success and hasattr(env, 'combined_path') and env.combined_path:
-                env_coordinates = [tuple(coord) for coord in env.combined_path]
-                
-                print(f"Environment loaded: {len(env_coordinates)} coordinates")
-                print(f"  First coordinate: {env_coordinates[0] if env_coordinates else 'None'}")
-                print(f"  Last coordinate: {env_coordinates[-1] if env_coordinates else 'None'}")
-                
-                # STEP 3: Content comparison
-                if file_coordinates == env_coordinates:
-                    print(f"  ✓ MATCH: Environment loaded coordinates match file content exactly")
-                else:
-                    print(f"  ⚠ MISMATCH: Environment coordinates differ from file content")
-                    print(f"    File coords: {len(file_coordinates)}")
-                    print(f"    Env coords: {len(env_coordinates)}")
-                    
-                    # Show first few differences
-                    for i, (file_coord, env_coord) in enumerate(zip(file_coordinates, env_coordinates)):
-                        if file_coord != env_coord:
-                            print(f"    Diff at index {i}: File={file_coord}, Env={env_coord}")
-                            if i >= 3:  # Limit output
-                                break
-            else:
-                print(f"  ✗ Environment loading failed")
-            
-            # STEP 4: Navigator loading test
-            print(f"\nTesting navigator loading...")
-            
-            # Store current navigator state
-            nav_original_coords = navigator.sequential_coordinates.copy() if navigator.sequential_coordinates else []
-            nav_original_index = navigator.current_coordinate_index
-            nav_original_quest_id = getattr(navigator, 'active_quest_id', None)
-            
-            # Test navigator coordinate loading
-            nav_load_success = navigator.load_coordinate_path(quest_id)
-            
-            if nav_load_success and navigator.sequential_coordinates:
-                nav_coordinates = [tuple(coord) for coord in navigator.sequential_coordinates]
-                
-                print(f"Navigator loaded: {len(nav_coordinates)} coordinates")
-                print(f"  First coordinate: {nav_coordinates[0] if nav_coordinates else 'None'}")
-                print(f"  Last coordinate: {nav_coordinates[-1] if nav_coordinates else 'None'}")
-                
-                # STEP 5: Navigator-Environment comparison
-                if hasattr(env, 'combined_path') and env.combined_path:
-                    if nav_coordinates == env_coordinates:
-                        print(f"  ✓ Navigator-Environment coordination: SYNCHRONIZED")
-                    else:
-                        print(f"  ⚠ Navigator-Environment coordination: DESYNCHRONIZED")
-                
-                # STEP 6: Navigator-File comparison
-                if nav_coordinates == file_coordinates:
-                    print(f"  ✓ Navigator-File accuracy: ACCURATE")
-                else:
-                    print(f"  ⚠ Navigator-File accuracy: INACCURATE")
-            else:
-                print(f"  ✗ Navigator loading failed")
-            
-            # Restore states
-            env.combined_path = original_path
-            env.current_loaded_quest_id = original_quest_id
-            env.current_path_target_index = original_index
-            
-            navigator.sequential_coordinates = nav_original_coords
-            navigator.current_coordinate_index = nav_original_index
-            navigator.active_quest_id = nav_original_quest_id
-            
-        else:
-            print(f"✗ Coordinate file not found: {file_path}")
-    
-    print("\n" + "="*60)
-    print("DIAGNOSTIC COMPLETE")
-    print("="*60)
+# Diagnostic functions moved to navigator.py
 
-def debug_coordinate_system(env, navigator):
-    """Comprehensive debug of the coordinate system with synchronized path checking"""
-    print("\n" + "="*60)
-    print("COORDINATE SYSTEM DEBUG")
-    print("="*60)
-    
-    # Get current player position
-    try:
-        player_x, player_y, map_n = env.get_game_coords()
-        current_gy, current_gx = local_to_global(player_y, player_x, map_n)
-        print(f"Current Player Position: ({current_gy}, {current_gx}) on map {map_n}")
-    except Exception as e:
-        print(f"ERROR getting player position: {e}")
-        return
-    
-    # Check navigator coordinates
-    print(f"\n--- NAVIGATOR STATUS ---")
-    print(f"Navigator coordinates loaded: {len(navigator.sequential_coordinates)}")
-    if navigator.sequential_coordinates:
-        print(f"Navigator first coordinate: {navigator.sequential_coordinates[0]}")
-        print(f"Navigator current index: {navigator.current_coordinate_index}")
-        if navigator.current_coordinate_index < len(navigator.sequential_coordinates):
-            target = navigator.sequential_coordinates[navigator.current_coordinate_index]
-            print(f"Navigator current target: {target}")
-            distance = abs(target[0] - current_gy) + abs(target[1] - current_gx)
-            print(f"Distance to navigator target: {distance}")
-    else:
-        print("Navigator: NO COORDINATES LOADED!")
-    
-    # Check environment coordinates
-    print(f"\n--- ENVIRONMENT STATUS ---")
-    if hasattr(env, 'combined_path') and env.combined_path:
-        print(f"Environment path length: {len(env.combined_path)}")
-        print(f"Environment first coordinate: {env.combined_path[0]}")
-        print(f"Environment current index: {env.current_path_target_index}")
-        if env.current_path_target_index < len(env.combined_path):
-            target = env.combined_path[env.current_path_target_index]
-            print(f"Environment current target: {target}")
-            distance = abs(target[0] - current_gy) + abs(target[1] - current_gx)
-            print(f"Distance to environment target: {distance}")
-    else:
-        print("Environment: NO PATH LOADED!")
-    
-    # CORRECTED: Check coordinate file accessibility using navigator's actual search paths
-    print(f"\n--- COORDINATE FILE VALIDATION ---")
-    quest_ids_to_check = [12, 13, 14]
-    
-    for quest_id in quest_ids_to_check:
-        quest_dir_name = f"{quest_id:03d}"
-        quest_file_name = f"{quest_dir_name}_coords.json"
-        
-        # Use same path logic as navigator
-        primary_quest_path = Path(__file__).parent / "environment_helpers" / "quest_paths" / quest_dir_name / quest_file_name
-        
-        file_status = "EXISTS" if primary_quest_path.exists() else "MISSING"
-        print(f"Quest file {quest_file_name}: {file_status}")
-        
-        # Additional content validation if file exists
-        if primary_quest_path.exists():
-            try:
-                with open(primary_quest_path, 'r') as f:
-                    content = json.load(f)
-                map_keys = list(content.keys())
-                total_coords = sum(len(coords) for coords in content.values())
-                print(f"  → Content: {len(map_keys)} maps, {total_coords} total coordinates")
-                print(f"  → Maps: {map_keys}")
-            except Exception as e:
-                print(f"  → Content Error: {e}")
-
-def verify_quest_system_integrity(env, navigator):
-    """Comprehensive quest system validation protocol with content verification"""
-    
-    # Phase 1: File System Verification with correct paths
-    quest_files = ['012_coords.json', '013_coords.json', '014_coords.json']
-    print("=== COORDINATE FILE ACCESSIBILITY VERIFICATION ===")
-    
-    for quest_id, file_name in zip([12, 13, 14], quest_files):
-        quest_dir_name = f"{quest_id:03d}"
-        file_path = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / quest_dir_name / file_name
-        
-        status = "EXISTS" if file_path.exists() else "MISSING"
-        print(f"Quest file {file_name}: {status}")
-        
-        if file_path.exists():
-            # Validate content structure
-            try:
-                with open(file_path, 'r') as f:
-                    content = json.load(f)
-                print(f"  → Structure: {list(content.keys())} maps")
-                for map_id, coords in content.items():
-                    print(f"    Map {map_id}: {len(coords)} coordinates")
-                    if coords:
-                        print(f"      First: {coords[0]}, Last: {coords[-1]}")
-            except Exception as e:
-                print(f"  → Content validation error: {e}")
-    
-    # Phase 2: Quest Load Sequence Testing with content verification
-    print(f"\n=== QUEST LOADING CONTENT VERIFICATION ===")
-    for quest_id in [12, 13, 14]:
-        print(f"\n--- TESTING QUEST {quest_id:03d} LOAD ---")
-        
-        # Store original navigator state
-        original_coords = navigator.sequential_coordinates.copy() if navigator.sequential_coordinates else []
-        original_index = navigator.current_coordinate_index
-        original_quest_id = getattr(navigator, 'active_quest_id', None)
-        
-        # Test quest loading
-        success = navigator.load_coordinate_path(quest_id)
-        if success:
-            print(f"✓ Quest {quest_id:03d}: {len(navigator.sequential_coordinates)} coordinates loaded")
-            if navigator.sequential_coordinates:
-                print(f"  First: {navigator.sequential_coordinates[0]}")
-                print(f"  Last: {navigator.sequential_coordinates[-1]}")
-                
-                # Content uniqueness verification
-                coord_set = set(navigator.sequential_coordinates)
-                print(f"  Unique coordinates: {len(coord_set)}/{len(navigator.sequential_coordinates)}")
-                
-                # Validate against expected content
-                quest_dir_name = f"{quest_id:03d}"
-                quest_file_name = f"{quest_dir_name}_coords.json"
-                file_path = Path(__file__).parent / "environment_helpers" / "quest_paths" / quest_dir_name / quest_file_name
-                
-                if file_path.exists():
-                    with open(file_path, 'r') as f:
-                        expected_content = json.load(f)
-                    
-                    # Flatten expected coordinates for comparison
-                    expected_coords = []
-                    for map_coords in expected_content.values():
-                        expected_coords.extend([tuple(coord) for coord in map_coords])
-                    
-                    loaded_coords = [tuple(coord) for coord in navigator.sequential_coordinates]
-                    
-                    if loaded_coords == expected_coords:
-                        print(f"  ✓ Content matches file exactly")
-                    else:
-                        print(f"  ⚠ Content mismatch detected")
-                        print(f"    Expected: {len(expected_coords)} coords")
-                        print(f"    Loaded: {len(loaded_coords)} coords")
-        else:
-            print(f"✗ Quest {quest_id:03d}: LOAD FAILED")
-        
-        # Restore original navigator state
-        navigator.sequential_coordinates = original_coords
-        navigator.current_coordinate_index = original_index
-        navigator.active_quest_id = original_quest_id
-    
-    # Phase 3: Position Alignment Verification  
-    current_pos = navigator._get_player_global_coords()
-    print(f"\nCurrent player position: {current_pos}")
-    
-    return True
-
-def determine_starting_quest(player_pos, map_id, completed_quests, quest_ids_all):
-    """Determine the most appropriate starting quest based on player position and game state"""
-    
-    if map_id == 40:  # Oak's Lab
-        # If standing on Quest 12 return path in Lab, prioritize it
-        if player_pos and player_pos in [(356, 110), (355, 110), (354, 110), (353, 110), (352, 110), (351, 110), (350, 110), (349, 110), (348, 110)]:
-            if not completed_quests.get(12, False):
-                return 12
-            elif not completed_quests.get(13, False):
-                return 13
-        # Default Oak's Lab quests: try Quest 11 first, then 12 and 13
-        for quest_id in [11, 12, 13]:
-            if not completed_quests.get(quest_id, False):
-                return quest_id
-    
-    elif map_id == 0:  # Pallet Town
-        # Check if player is on quest 13 or 14 coordinates
-        if not completed_quests.get(13, False):
-            return 13
-        elif not completed_quests.get(14, False):
-            return 14
-    
-    # Fallback: First uncompleted quest
-    for quest_id in quest_ids_all:
-        if not completed_quests.get(quest_id, False):
-            return quest_id
-    
-    return quest_ids_all[0]  # Ultimate fallback
-
-def start_quest_ui():
-    """Start the quest progress UI in a separate thread"""
-    root = tk.Tk()
-    # Make window large and non-resizable
-    root.title("Quest Progress")
-    # Maximize window height to show as many quests as possible
-    try:
-        root.state('zoomed')  # Works on Windows and some Linux window managers
-    except Exception:
-        try:
-            root.attributes('-zoomed', True)  # Fallback for other platforms
-        except Exception:
-            # Could not maximize, fall back to default size
-            root.geometry("1000x700")
-    root.minsize(800, 600)
-    root.resizable(True, True)
-    # Increase default font sizes
-    import tkinter.font as tkfont
-    default_font = tkfont.nametofont("TkDefaultFont")
-    default_font.configure(size=12)
-    header_font = tkfont.nametofont("TkHeadingFont") if "TkHeadingFont" in tkfont.names() else default_font
-    header_font.configure(size=12, weight="bold")
-    # Apply style for Treeview
-    style = ttk.Style(root)
-    style.configure("Treeview", rowheight=24, font=(default_font.actual('family'), 12))
-    style.configure("Treeview.Heading", font=(default_font.actual('family'), 12, 'bold'))
-    tree = ttk.Treeview(root, columns=('status',), show='tree headings')
-    tree.heading('#0', text='Description')
-    tree.heading('status', text='Status')
-    tree.column('status', width=100)
-    # Configure tree columns and tags for better visibility
-    tree.column('#0', width=120)
-    tree.tag_configure('done', foreground='green')
-    tree.tag_configure('pending', foreground='red')
-    # Add scrollbars to handle long quest lists
-    vsb = ttk.Scrollbar(root, orient='vertical', command=tree.yview)
-    vsb.pack(side='right', fill='y')
-    tree.configure(yscrollcommand=vsb.set)
-    hbar = ttk.Scrollbar(root, orient='horizontal', command=tree.xview)
-    hbar.pack(side='bottom', fill='x')
-    tree.configure(xscrollcommand=hbar.set)
-    tree.pack(fill='both', expand=True)
-    # Replace top labels with bottom info_frame and separate labels
-    info_frame = tk.Frame(root)
-    info_frame.pack(side='bottom', fill='x')
-    map_name_label = tk.Label(info_frame, text="Map: N/A")
-    map_name_label.pack(side='left', padx=5)
-    map_id_label = tk.Label(info_frame, text="Map ID: N/A")
-    map_id_label.pack(side='left', padx=5)
-    global_label = tk.Label(info_frame, text="Global: N/A")
-    global_label.pack(side='left', padx=5)
-    local_label = tk.Label(info_frame, text="Local: N/A")
-    local_label.pack(side='left', padx=5)
-    quest_label = tk.Label(info_frame, text="Current Quest: N/A")
-    quest_label.pack(side='left', padx=5)
-
-    # Function to describe trigger criteria
-    def describe_trigger(trg):
-        ttype = trg.get('type')
-        if ttype == 'current_map_id_is':
-            return f"Map ID == {trg['map_id']}"
-        elif ttype == 'previous_map_id_was':
-            return f"Previous Map ID == {trg['map_id']}"
-        elif ttype == 'dialog_contains_text':
-            return f"Dialog contains \"{trg['text']}\""
-        elif ttype == 'party_size_is':
-            return f"Party size == {trg['size']}"
-        elif ttype == 'battle_won':
-            return f"Battle won vs {trg.get('opponent_identifier','')}"
-        elif ttype == 'item_received_dialog':
-            return f"Item received dialog \"{trg['text']}\""
-        elif ttype == 'item_is_in_inventory':
-            return f"Inventory has >= {trg.get('quantity_min',1)} x {trg.get('item_name','')}"
-        elif ttype == 'party_hp_is_full':
-            return "Party HP is full"
-        else:
-            return str(trg)
-
-    # Populate rows with quests, subquests, and their criteria
-    for q in QUESTS:
-        qid = q['quest_id']
-        # Insert quest as parent with description
-        parent_text = f"Quest {qid}: {q.get('begin_quest_text','')}"
-        tree.insert('', 'end', iid=qid, text=parent_text, values=('Pending',))
-        # Insert subquests (step descriptions) as children
-        for sidx, step in enumerate(q.get('subquest_list', [])):
-            sub_id = f"{qid}_step_{sidx}"
-            sub_text = f"Step {sidx+1}: {step}"
-            tree.insert(qid, 'end', iid=sub_id, text=sub_text, values=('Pending',))
-        # Insert criteria as children
-        for idx, trg in enumerate(q.get('event_triggers', [])):
-            trigger_id = f"{qid}_{idx}"
-            crit_text = describe_trigger(trg)
-            tree.insert(qid, 'end', iid=trigger_id, text=crit_text, values=('Pending',))
-    # Auto-expand all quests to show triggers and steps
-    for q in QUESTS:
-        tree.item(q['quest_id'], open=True)
-
-    # Snap to first pending quest helper
-    def snap_to_current():
-        # Snap only among quests still present
-        root_ids = tree.get_children()
-        for q in QUESTS:
-            qid = q['quest_id']
-            if qid not in root_ids:
-                continue
-            print(f"play.py: snap_to_current(): quest_id={qid} (checking)")
-            if tree.set(qid, 'status') == 'Pending':
-                tree.see(qid)
-                print(f"play.py: snap_to_current(): quest_id={qid} (snapped)")
-                status_queue.put(('__current_quest__', qid))
-                break
-    # One-time snap flag for polling
-    snapped = [False]
-
-    # Poll update queue
-    def poll():
-        try:
-            while True:
-                item_id, data = status_queue.get_nowait()
-                if item_id == '__location__':
-                    gx, gy, mid, mname = data
-                    map_name_label.config(text=f"Map: {mname}")
-                    map_id_label.config(text=f"Map ID: {mid}")
-                    global_label.config(text=f"Global: ({gx}, {gy})")
-                elif item_id == '__local_location__':
-                    lx, ly = data
-                    local_label.config(text=f"Local: ({lx}, {ly})")
-                elif item_id == '__current_quest__':
-                    print(f"play.py: poll(): data: Current quest: {data}")
-                    quest_str = str(data).zfill(3) if data is not None else 'N/A'
-                    quest_label.config(text=f"Current Quest: {quest_str}")
-                else:
-                    # Remove fully completed quests from display
-                    if '_' not in item_id and data:
-                        try:
-                            tree.delete(item_id)
-                        except Exception:
-                            pass
-                    else:
-                        status_text = 'Done' if data else 'Pending'
-                        try:
-                            tree.set(item_id, 'status', status_text)
-                            tree.item(item_id, tags=('done',) if data else ('pending',))
-                        except Exception:
-                            pass
-        except queue.Empty:
-            pass
-        # Perform one-time snap after initial statuses are set
-        if not snapped[0]:
-            snap_to_current()
-            snapped[0] = True
-        root.after(200, poll)
-    root.after(200, poll)
-    root.mainloop()
+# Quest functions moved to quest_manager.py
 
 def process_frame_for_pygame(frame_from_env_render):
     if frame_from_env_render.ndim == 2: # Grayscale
@@ -626,8 +180,22 @@ def _setup_configuration(args, project_root_path):
         map_id_scalefactor=args.map_id_scalefactor
     )
 
+    # Patch any None values in default_cli_config with true defaults
+    _true_defaults = get_default_config(rom_path=args.rom_path, initial_state_path=final_initial_state_path)
+    if default_cli_config.exploration_inc is None:
+        default_cli_config.exploration_inc = _true_defaults.exploration_inc
+    if default_cli_config.exploration_max is None:
+        default_cli_config.exploration_max = _true_defaults.exploration_max
+    if default_cli_config.max_steps_scaling is None:
+        default_cli_config.max_steps_scaling = _true_defaults.max_steps_scaling
+    if default_cli_config.map_id_scalefactor is None:
+        default_cli_config.map_id_scalefactor = _true_defaults.map_id_scalefactor
+    
     config_parts = [default_cli_config]
-    if 'env_config' in yaml_config:
+    # Merge YAML environment settings: prefer 'env' section if present, else 'env_config'
+    if 'env' in yaml_config:
+        config_parts.append(yaml_config.env)
+    elif 'env_config' in yaml_config:
         config_parts.append(yaml_config.env_config)
 
     cli_overrides = {}
@@ -635,12 +203,13 @@ def _setup_configuration(args, project_root_path):
         # Only consider args that are explicitly set (not None) and are relevant to env_config
         if arg_value is not None and arg_name not in ["config_path", "required_completions_path", "max_total_steps", "interactive_mode", "run_dir", "grok_api_key"]: # Exclude non-env_config args
             mapped_key = arg_name
-            if arg_name == "rom_path" and arg_value: # Map rom_path to gb_path for config
+            if arg_name == "rom_path": # Map rom_path to gb_path for config
                 mapped_key = "gb_path"
-            elif arg_name == "initial_state_path" and arg_value: # Map initial_state_path to init_state
+            elif arg_name == "initial_state_path": # Map initial_state_path to init_state
                 mapped_key = "init_state"
             
             # Only add to overrides if it's a known key in default_cli_config or the mapped key is
+            # and the arg_value is not None (meaning it was explicitly set by the user via CLI)
             if mapped_key in default_cli_config or arg_name in default_cli_config:
                  cli_overrides[mapped_key if mapped_key in default_cli_config else arg_name] = arg_value
     
@@ -677,7 +246,7 @@ def _setup_configuration(args, project_root_path):
         else: final_config.init_state = None
 
 
-    if isinstance(final_config.get("init_state"), Path): # Should be string by now
+    if isinstance(final_config.get("init_state"), Path): # Should be string by now zz
         final_config.init_state = str(final_config.init_state)
     
     # Ensure session_id is present
@@ -690,8 +259,6 @@ def _setup_configuration(args, project_root_path):
         # This depends on how mapping_file is intended to be specified
         pass
 
-
-    print(f"Final merged config for EnvWrapper: {OmegaConf.to_yaml(final_config)}")
     return final_config
 
 ACTION_MAPPING_PYGAME_TO_INT = {
@@ -707,8 +274,7 @@ ACTION_MAPPING_PYGAME_TO_INT = {
 
 def main():
     parser = argparse.ArgumentParser()
-    # Add 'run_dir' argument for specifying where run-specific files (like quest_status.json) go
-    parser.add_argument("--run_dir", type=str, default=None, help="Directory to store run-specific files. Defaults to runs/<session_id>.")
+    # Removed --run_dir argument - use config only
     parser.add_argument("--config_path", type=str, default=str(project_root_path / "config.yaml"))
     parser.add_argument("--rom_path", type=str, default=None) # Default to None, expect from YAML or error
     parser.add_argument("--initial_state_path", type=str, default="") # Default to empty, logic in _setup_configuration handles it
@@ -723,7 +289,7 @@ def main():
     parser.add_argument("--save_state", type=bool, default=None)
     parser.add_argument("--required_completions_path", type=str, default=str(Path(__file__).parent / "environment_helpers" / "required_completions.json"))
     parser.add_argument("--max_total_steps", type=int, default=1_000_000)
-    parser.add_argument("--interactive_mode", type=bool, default=False) # Explicitly default to False
+    parser.add_argument("--interactive_mode", type=bool, default=True) # Default to True for manual testing
     parser.add_argument("--infinite_money", type=bool, default=None)
     parser.add_argument("--infinite_health", type=bool, default=None)
     parser.add_argument("--emulator_delay", type=int, default=None)
@@ -755,90 +321,491 @@ def main():
 
     config = _setup_configuration(args, project_root_path)
     
-    # Define and create run_dir using the session_id from the final config
-    # This ensures QuestManager and QuestProgressionEngine use the same, correct run_dir
-    if args.run_dir:
-        run_dir = Path(args.run_dir)
-    else:
-        # Use a "runs" subdirectory in the project root, then the session ID
-        run_dir = project_root_path / "runs" / config.session_id 
+    # If disable_ai_actions not set by CLI, use configuration default to disable AI actions
+    if args.disable_ai_actions is None:
+        args.disable_ai_actions = bool(config.get("disable_ai_actions", True))
+    # If interactive_mode not set by CLI, use configuration default for interactive mode
+    if args.interactive_mode is None:
+        args.interactive_mode = bool(config.get("interactive_mode", True))
+
+    # Initialize the environment using ConfiguredEnvWrapper
+    # Pass the fully resolved config and original cli_args
+    env = ConfiguredEnvWrapper(base_conf=config, cli_args=args) 
+
+    # FIXED: Disable environment's automatic run creation since play.py manages it
+    if hasattr(env, 'record_replays'):
+        env.record_replays = False
+    if hasattr(env, 'env') and hasattr(env.env, 'record_replays'):
+        env.env.record_replays = False
+
+    # FIXED: Load persistent step counter
+    step_counter_file = Path("total_steps.json")
+    total_steps = 0
+    try:
+        if step_counter_file.exists():
+            with open(step_counter_file, 'r') as f:
+                step_data = json.load(f)
+                total_steps = step_data.get('total_steps', 0)
+                print(f"Loaded persistent step counter: {total_steps}")
+    except Exception as e:
+        print(f"Could not load step counter: {e}")
+
+    # Create or load run using RunManager - FIXED: Only create/load once
+    from environment.environment_helpers.saver import create_new_run, load_latest_run
     
-    run_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Run directory: {run_dir.resolve()}")
+    # --- CRITICAL SECTION FOR INITIALIZATION ORDER ---
+    
+    # 1. Reset the environment FIRST to load state and get initial info
+    # This call to env.reset() is where 'loaded_quest_statuses' and 
+    # 'loaded_trigger_statuses' are populated in the env object's persisted attributes if a load occurs.
+    obs, info = env.reset() 
 
+    print(f"play.py: main(): Received info dictionary from env.reset(): {info}") # Keep for general debugging
 
-    # Initialize environment with the final merged config
-    # base_env = EnvWrapper(config) # EnvWrapper should handle its own config # This line is redundant as ConfiguredEnvWrapper handles it.
-    # If ConfiguredEnvWrapper is needed, ensure it's imported and used correctly:
-    from environment.wrappers.configured_env_wrapper import ConfiguredEnvWrapper
-    env = ConfiguredEnvWrapper(base_conf=config) # Pass the final merged config here
+    # 2. Use the environment's persisted statuses for initialization.
+    # These are populated by env.reset() if a state (and its quest/trigger data) was loaded.
+    # If no load, they default to {} or what was set in env.__init__.
+    initial_quest_statuses_from_save = env.persisted_loaded_quest_statuses if env.persisted_loaded_quest_statuses is not None else {}
+    initial_trigger_statuses_from_save = env.persisted_loaded_trigger_statuses if env.persisted_loaded_trigger_statuses is not None else {}
 
+    print(f"play.py: Sourced initial_quest_statuses_from_save from env: {initial_quest_statuses_from_save}")
+    print(f"play.py: Sourced initial_trigger_statuses_from_save from env: {initial_trigger_statuses_from_save}")
+
+    # Initialize QuestManager AFTER env reset and AFTER statuses are extracted
+    quest_manager = QuestManager(env, QUESTS) 
+    env.quest_manager = quest_manager # Assign to env if needed by other components via env
+
+    # 3. Initialize other components like Pygame screen, status_queue, all_quest_ids BEFORE QuestProgressionEngine
+    status_queue = SimpleQueue()
+    all_quest_ids = [int(q["quest_id"]) for q in QUESTS] 
+    
+    # 4. Initialize Navigator (i know it's number 4 but we have to init before or navigator is UnboundLocalError    )
     navigator = InteractiveNavigator(env)
+    if hasattr(env, 'set_navigator'):
+        env.set_navigator(navigator) 
+    elif hasattr(env, 'env') and hasattr(env.env, 'set_navigator'):
+        env.env.set_navigator(navigator)
     
-    # QuestManager now needs run_dir
-    quest_manager = QuestManager(env=env, navigator=navigator, run_dir=run_dir, required_completions_path=args.required_completions_path)
+    # 5. Initialize TriggerEvaluator
+    last_map_id_after_reset = env.get_game_coords()[2] # Get potentially updated map_id
+    trigger_evaluator = TriggerEvaluator(env)
+    trigger_evaluator.prev_map_id = last_map_id_after_reset
+    setattr(env, "trigger_evaluator", trigger_evaluator)
+    print(f"[Setup] Created and attached trigger_evaluator to environment, initial prev_map_id={last_map_id_after_reset}")
+    
+    # 6. Get run_info from environment (set by RunManager during env.reset)
+    run_info = getattr(env, 'current_run_info', None)
+    run_dir = getattr(env, 'current_run_dir', None)
+    
+    if run_info:
+        # Use existing run info from environment
+        run_dir = run_info.run_dir
+        print(f"Using existing run: {run_info.run_id}")
+    elif run_dir:
+        # Fallback: use run_dir if available
+        print(f"Using existing run dir: {run_dir.name if hasattr(run_dir, 'name') else run_dir}")
+    else:
+        # Last resort: create a new run if none exists
+        from environment.environment_helpers.saver import create_new_run
+        current_map_id = env.get_game_coords()[2]
+        current_map_name = env.get_map_name_by_id(current_map_id)
+        run_info = create_new_run(env, current_map_name, current_map_id)
+        run_dir = run_info.run_dir
+        print(f"Created new run: {run_info.run_id}")
+    
+    # 7. NOW, instantiate QuestProgressionEngine with the correctly loaded statuses (SINGLE INITIALIZATION)
+    quest_progression_engine = QuestProgressionEngine(
+        env=env,
+        navigator=navigator,
+        quest_manager=quest_manager,
+        quests_definitions=QUESTS,
+        quest_ids_all=all_quest_ids,
+        status_queue=status_queue,
+        run_dir=run_dir, 
+        initial_quest_statuses=initial_quest_statuses_from_save, # This is critical
+        initial_trigger_statuses=initial_trigger_statuses_from_save # This is critical
+    )
+    
+    quest_manager.quest_progression_engine = quest_progression_engine
+    
+    # 8. Refresh QuestManager's current quest based on the now correctly initialized QPE
+    quest_manager.get_current_quest() # This should pick up the correct starting quest
+    status_queue.put(('__current_quest__', quest_manager.current_quest_id))
 
-
-    if not env.headless:
+    screen = None
+    if not config.get("headless", False):
         pygame.init()
-        screen_width, screen_height = 320, 288
+        screen_width, screen_height = 640, 566
         screen = pygame.display.set_mode((screen_width, screen_height))
         pygame.display.set_caption("Pokemon Red")
 
+    # Main game loop
+    current_action = 0
+    total_reward = 0.0
+    
+    # Action recording for replay functionality
+    recorded_playthrough = []
+    
+    # Button repeat functionality
+    last_key_pressed = None
+    key_repeat_timer = 0
+    key_repeat_delay = 0.15  # Initial delay before repeat starts
+    key_repeat_rate = 0.05   # Rate of repeat
+    
+    # FIXED: UI update throttling for real-time NPC movement
+    ui_update_counter = 0
+    ui_update_frequency = 5  # Update UI every N ticks (adjust for performance)
+    last_ui_update_time = time.time()
+    ui_update_min_interval = 0.1  # Minimum seconds between UI updates (10 FPS max)
+    
+    if quest_manager.current_quest_id is not None:
+         if navigator.active_quest_id != quest_manager.current_quest_id:
+            navigator.load_coordinate_path(quest_manager.current_quest_id)
+            print(f"Play.py: Loaded quest {quest_manager.current_quest_id} into navigator post-reset, aligning with QuestManager.")
+    elif info and 'current_quest_id' in info and info['current_quest_id'] is not None:
+        q_id = info['current_quest_id']
+        if navigator.active_quest_id != q_id:
+            navigator.load_coordinate_path(q_id)
+            print(f"Play.py: Loaded quest {q_id} into navigator from env info post-reset.")
+    else:
+        print("Play.py: No initial quest ID available for navigator post-reset.")
+
     print("Starting game loop...")
-    running = True
-    total_steps = 0
-    total_reward = 0
     start_time = time.time()
+    running = True
     
     # Initialize these before the loop if they are used by QuestProgressionEngine or QuestManager init logic
     last_map_id = env.get_game_coords()[2]
     visited_warps = set()
     last_player_pos = env.get_game_coords()[:2]
 
-    status_queue = SimpleQueue()
-    all_quest_ids = [int(q["quest_id"]) for q in QUESTS] # QUESTS is loaded globally
-
-    # Correctly instantiate QuestProgressionEngine
-    quest_progression_engine = QuestProgressionEngine(
-        env=env,
-        navigator=navigator,
-        quest_manager=quest_manager,
-        quests=QUESTS,          # quests_data (List[Dict])
-        quest_ids_all=all_quest_ids, # quest_ids_all (List[int])
-        status_queue=status_queue,   # status_queue (SimpleQueue)
-        run_dir=run_dir             # run_dir (Path) - now correctly defined
-    )
+    # UI thread for quest status - ENABLED for testing
+    ui_thread_started = False
+    if not config.get("headless", False):
+        try:
+            ui_thread = threading.Thread(target=start_quest_ui, args=(QUESTS, status_queue), daemon=True)
+            ui_thread.start()
+            ui_thread_started = True
+            print("Quest UI thread started successfully")
+        except Exception as e:
+            print(f"Failed to start quest UI thread: {e}")
     
-    # UI thread for quest status (if needed, ensure tkinter is imported and start_quest_ui is compatible)
-    # ui_thread_started = False
-    # if not env.headless and False: # Disabled for now, can be re-enabled if UI is fixed/needed
-    #     import tkinter as tk 
-    #     from tkinter import ttk
-    #     ui_thread = threading.Thread(target=start_quest_ui, daemon=True) # Pass status_queue if needed
-    #     ui_thread.start()
-    #     ui_thread_started = True
-    
-    if config.get("save_state", True): # Check config for save_state
-        states_dir = Path(config.state_dir) # Get state_dir from config
-        if not states_dir.is_absolute():
-            states_dir = project_root_path / states_dir
-        save_initial_state(env, states_dir)
+    if config.get("save_state", True) and run_info: # Check config for save_state
+        # Save the initial emulator state using RunManager
+        save_initial_state(env, run_info)
 
+    # Function to update quest UI with environment data
+    def update_quest_ui():
+        try:
+            # Get current coordinates
+            x, y, map_id = env.get_game_coords()
+            map_name = env.get_map_name_by_id(map_id)
+            
+            # Send location data to UI - send LOCAL coordinates for UI to convert
+            status_queue.put(('__location__', (x, y, map_id, map_name)))
+            status_queue.put(('__local_location__', (x, y)))
+            
+            # Send current quest
+            current_quest = quest_manager.current_quest_id
+            status_queue.put(('__current_quest__', current_quest))
+            
+            # Send additional environment data
+            try:
+                dialog = env.read_dialog() or ""
+                status_queue.put(('__dialog__', dialog.strip()))
+            except:
+                status_queue.put(('__dialog__', ""))
+            
+            # Send navigation status
+            nav_status = getattr(navigator, 'navigation_status', 'unknown')
+            status_queue.put(('__nav_status__', nav_status))
+            
+            # FIXED: Send proper run directory name only
+            if run_info:
+                run_dir_display = run_info.run_id
+            elif run_dir:
+                run_dir_display = run_dir.name
+            else:
+                run_dir_display = "None"
+            status_queue.put(('__run_dir__', run_dir_display))
+            
+            # Send total steps
+            status_queue.put(('__total_steps__', total_steps))
+            
+            # Send facing direction
+            try:
+                # Try to get direction from the environment instance directly
+                # This assumes env object (or its wrapper) has a method to get facing direction string
+                if hasattr(env, 'get_facing_direction_str'):
+                    facing_str = env.get_facing_direction_str()
+                else: # Fallback to reading memory if method doesn't exist
+                    direction_byte = env.read_m("wSpritePlayerStateData1FacingDirection")
+                    if direction_byte == 0: facing_str = "Down"
+                    elif direction_byte == 4: facing_str = "Up"
+                    elif direction_byte == 8: facing_str = "Left"
+                    elif direction_byte == 12: facing_str = "Right"
+                    else: facing_str = "Unknown"
+                status_queue.put(('__facing_direction__', facing_str))
+            except Exception as e:
+                # print(f"Error getting facing direction for UI: {e}") # Avoid console spam
+                status_queue.put(('__facing_direction__', "Error"))
+            
+            # Send path info
+            if hasattr(navigator, 'sequential_coordinates') and navigator.sequential_coordinates:
+                status_queue.put(('__path_index__', navigator.current_coordinate_index))
+                status_queue.put(('__path_length__', len(navigator.sequential_coordinates)))
+                # Send full navigator path coordinates
+                status_queue.put(('__nav_path__', list(navigator.sequential_coordinates)))
+                # Send full environment path coordinates if available
+                if hasattr(env, 'combined_path') and env.combined_path:
+                    status_queue.put(('__env_path__', list(env.combined_path)))
+                else:
+                    status_queue.put(('__env_path__', []))
+            else:
+                status_queue.put(('__path_index__', 0))
+                status_queue.put(('__path_length__', 0))
+                status_queue.put(('__nav_path__', []))
+                status_queue.put(('__env_path__', []))
+                
+            # FIXED: Send proper status
+            if dialog and dialog.strip():
+                status = "Dialog Active"
+            elif nav_status == "navigating":
+                status = "Navigating"
+            elif current_quest:
+                status = f"Quest {current_quest:03d}"
+            else:
+                status = "Exploring"
+            status_queue.put(('__status__', status))
+            
+            # FIXED: Send last action information
+            if hasattr(env, 'action_taken') and env.action_taken is not None:
+                try:
+                    action_name = VALID_ACTIONS[env.action_taken].name if env.action_taken < len(VALID_ACTIONS) else f"Action_{env.action_taken}"
+                except:
+                    action_name = f"Action_{env.action_taken}"
+            else:
+                action_name = "None"
+            status_queue.put(('__last_action__', action_name))
+            
+            # FIXED: Send action source
+            if hasattr(update_quest_ui, 'last_action_source'):
+                status_queue.put(('__action_source__', update_quest_ui.last_action_source))
+            else:
+                status_queue.put(('__action_source__', "Unknown"))
+            
+            # Send battle status
+            try:
+                in_battle = env.read_m(0xD057) > 0  # Battle type memory
+                status_queue.put(('__in_battle__', in_battle))
+            except:
+                status_queue.put(('__in_battle__', False))
+
+            # Send warp minimap data and debug info to UI
+            try:
+                obs = env._get_obs()
+                warp_minimap_data = obs.get("minimap_warp_obs")
+                if warp_minimap_data is not None:
+                    # Get detailed debug info
+                    warp_debug_info = env.get_warp_debug_info()
+                    # Send both minimap data and debug info
+                    combined_data = {
+                        "minimap": warp_minimap_data,
+                        "debug_info": warp_debug_info
+                    }
+                    status_queue.put(('__warp_minimap__', combined_data))
+            except Exception as e:
+                print(f"Error getting warp minimap data: {e}")
+
+            # Send emulator screen data to UI
+            try:
+                raw_screen_frame = env.render() # This is a numpy array HxW or HxWx1 (grayscale)
+                if raw_screen_frame is not None:
+                    img_height, img_width = raw_screen_frame.shape[0], raw_screen_frame.shape[1]
+                    # Convert to RGB bytes for Pillow Image.frombytes
+                    if raw_screen_frame.ndim == 2: # Grayscale HxW
+                        rgb_frame = np.stack((raw_screen_frame,)*3, axis=-1) # HxWx3
+                        img_mode = "RGB"
+                    elif raw_screen_frame.ndim == 3 and raw_screen_frame.shape[2] == 1: # Grayscale HxWx1
+                        rgb_frame = np.concatenate([raw_screen_frame]*3, axis=2) # HxWx3
+                        img_mode = "RGB"
+                    elif raw_screen_frame.ndim == 3 and raw_screen_frame.shape[2] == 3: # Already RGB HxWx3
+                        rgb_frame = raw_screen_frame
+                        img_mode = "RGB"
+                    else:
+                        # print(f"Unsupported screen format: {raw_screen_frame.shape}") # Avoid console spam
+                        rgb_frame = None
+
+                    if rgb_frame is not None:
+                        pixel_data_bytes = rgb_frame.tobytes()
+                        status_queue.put(('__emulator_screen__', (pixel_data_bytes, img_width, img_height, img_mode)))
+
+                        # Send collision overlay screen data
+                        collision_overlay_frame = env.get_screenshot_with_overlay(alpha=128)
+                        if collision_overlay_frame is not None:
+                            collision_array = np.array(collision_overlay_frame)
+                            if collision_array.ndim == 3 and collision_array.shape[2] == 3:  # RGB
+                                collision_bytes = collision_array.tobytes()
+                                collision_height, collision_width = collision_array.shape[0], collision_array.shape[1]
+                                status_queue.put(('__collision_overlay_screen__', (collision_bytes, collision_width, collision_height, "RGB")))
+                            elif collision_array.ndim == 3 and collision_array.shape[2] == 4:  # RGBA
+                                # Convert RGBA to RGB
+                                collision_rgb = collision_array[:, :, :3]
+                                collision_bytes = collision_rgb.tobytes()
+                                collision_height, collision_width = collision_rgb.shape[0], collision_rgb.shape[1]
+                                status_queue.put(('__collision_overlay_screen__', (collision_bytes, collision_width, collision_height, "RGB")))
+            except Exception as e:
+                # print(f"Error generating screen data for UI: {e}") # Avoid console spam
+                pass
+
+        except Exception as e:
+            print(f"Error in update_quest_ui: {e}")
+
+    # FIXED: Throttled UI update function for real-time NPC movement
+    def update_ui_if_needed():
+        """Update UI only if enough time has passed or enough ticks have occurred"""
+        nonlocal ui_update_counter, last_ui_update_time
+        
+        current_time = time.time()
+        ui_update_counter += 1
+        
+        # Check if we should update based on time interval or tick count
+        time_elapsed = current_time - last_ui_update_time
+        
+        if (ui_update_counter >= ui_update_frequency or 
+            time_elapsed >= ui_update_min_interval):
+            
+            update_quest_ui()
+            ui_update_counter = 0
+            last_ui_update_time = current_time
+
+    # FIXED: Call update_quest_ui immediately to initialize UI
+    update_quest_ui()
+    last_ui_update_time = time.time()  # Initialize the timer
+
+    # Seed UI with persisted trigger and quest statuses
+    # Use the loaded statuses from the save files
+    for q_ui in QUESTS:
+        qid = q_ui['quest_id']
+        
+        # Send quest completion status from loaded data
+        quest_completed = initial_quest_statuses_from_save.get(qid, False)
+        status_queue.put((qid, quest_completed))
+        
+        # Send trigger completion statuses from loaded data
+        triggers = q_ui.get('event_triggers', [])
+        for idx, trg_ui in enumerate(triggers):
+            tid = f"{qid}_{idx}"
+            trigger_completed = initial_trigger_statuses_from_save.get(tid, False)
+            status_queue.put((tid, trigger_completed))
 
     while running and total_steps < args.max_total_steps:
-        current_action = None # Renamed to avoid conflict with 'action' variable if any
+        current_time = time.time()
+        current_action = None
+
+        # Handle key repeat
+        if last_key_pressed is not None and (current_time - key_repeat_timer) > key_repeat_delay:
+            current_action = last_key_pressed
+            key_repeat_timer = current_time
+            key_repeat_delay = key_repeat_rate  # Switch to repeat rate after initial delay
+
+        # Handle pygame events
         if not env.headless:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                if args.interactive_mode and event.type == pygame.KEYDOWN:
-                    key_action = navigator.handle_pygame_event(event)
-                    if key_action is not None:
-                        current_action = key_action # Store manual action
-                        # No step here, let the main step logic handle it
-                    # else: current_action remains None
-        
+                elif event.type == pygame.KEYDOWN:
+                    # FIXED: Add escape key handling for save and quit
+                    if event.key == pygame.K_ESCAPE:
+                        print("Escape pressed - saving and quitting...")
+                        running = False
+                        break
+                    # FIXED: Add Ctrl+S manual save
+                    elif event.key == pygame.K_s and (pygame.key.get_mods() & pygame.KMOD_CTRL):
+                        print("Ctrl+S pressed - manual save...")
+                        from environment.environment_helpers.saver import save_manual_state
+                        import datetime
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        save_manual_state(env, run_dir, f"manual_{timestamp}")
+                        continue
+                    elif args.interactive_mode:
+                        # Handle special keys first
+                        if event.key == pygame.K_4:
+                            # On '4' key: Snap navigator and environment to the nearest coordinate in the current quest path
+                            raw_dialog = env.read_dialog() or ''
+                            if raw_dialog.strip():
+                                print("play.py: main(): '4' key: Navigation paused: dialog active, cannot snap to path.")
+                            else:
+                                print("play.py: main(): '4' key: Snapping to nearest coordinate on recorded path.")
+                                
+                                # FIXED: Ensure quest IDs are synchronized before snapping
+                                # Get the current quest from quest_manager
+                                current_quest = quest_manager.get_current_quest()
+                                if current_quest is not None:
+                                    # Sync quest ID to all components
+                                    navigator.active_quest_id = current_quest
+                                    env.current_loaded_quest_id = current_quest
+                                    quest_manager.current_quest_id = current_quest
+                                    
+                                    # Load the quest path if not already loaded
+                                    if not navigator.sequential_coordinates or navigator.active_quest_id != current_quest:
+                                        print(f"play.py: Loading quest {current_quest} path for navigator")
+                                        navigator.load_coordinate_path(current_quest)
+                                    
+                                    # Now snap to nearest coordinate
+                                    if navigator.snap_to_nearest_coordinate():
+                                        print(navigator.get_current_status())
+                                    else:
+                                        print("Navigator: Failed to snap to nearest coordinate.")
+                                else:
+                                    print("play.py: No active quest to snap to.")
+                        elif event.key == pygame.K_5:
+                            # On '5' key: Move to next coordinate (quest path)
+                            raw_dialog = env.read_dialog() or ''
+                            if raw_dialog.strip():
+                                print(f"\nplay.py: main(): '5' key: Navigation paused: dialog active, cannot move to next coordinate.")
+                            else:
+                                print(f"\nplay.py: main(): '5' key: Using PATH_FOLLOW_ACTION")
+                                
+                                # Sync navigator with current quest before moving
+                                current_q = quest_manager.get_current_quest()
+                                if current_q is not None:
+                                    setattr(env, 'current_loaded_quest_id', current_q)
+                                    quest_manager.current_quest_id = current_q
+                                
+                                # Apply quest-specific overrides (e.g., force A press for quest 015)
+                                desired = quest_manager.filter_action(PATH_FOLLOW_ACTION)
+                                if desired == PATH_FOLLOW_ACTION:
+                                    # Use PATH_FOLLOW_ACTION directly - let environment handle it
+                                    current_action = PATH_FOLLOW_ACTION
+                                else:
+                                    # Override with quest-specific emulator action (e.g., A press)
+                                    current_obs, current_reward, current_terminated, current_truncated, current_info = env.step(desired)
+                                    # Record the override action
+                                    recorded_playthrough.append(desired)
+                                    # Update observation and info for this frame
+                                    obs, reward, terminated, truncated, info = current_obs, current_reward, current_terminated, current_truncated, current_info
+                        elif event.key == pygame.K_6:
+                            # "6" key: Manual warp trigger
+                            print("Navigator: Manual input - Key 6 -> Manual warp trigger")
+                            if navigator.manual_warp_trigger():
+                                print("Navigator: Manual warp executed successfully")
+                            else:
+                                print("Navigator: Manual warp failed")
+                            last_key_pressed = None  # Don't repeat warp action
+                            continue
+                        else:
+                            # Regular key handling
+                            key_action = navigator.handle_pygame_event(event)
+                            if key_action is not None:
+                                current_action = key_action # Store manual action
+                                last_key_pressed = key_action
+                                key_repeat_timer = current_time
+                                key_repeat_delay = 0.15
+                elif event.type == pygame.KEYUP:
+                    # Stop key repeat when key is released
+                    last_key_pressed = None
+
         # AI Action or Manual Action
         if current_action is None and not args.disable_ai_actions: # AI takes over if no manual input and AI enabled
             # This is where your AI/agent logic would determine the action
@@ -858,68 +825,122 @@ def main():
                 current_action = quest_manager.filter_action(None) # filter_action can decide or pass through
                 if current_action is None: # filter_action decided no specific action, or returned None to indicate default behavior
                      # Fallback to navigator or random if no quest action
-                    if navigator.is_navigation_active():
+                    if navigator.sequential_coordinates and navigator.navigation_status != "idle": # Check if navigator has a path and is not idle
                         current_action = navigator.get_next_action()
                     else:
-                        # print("AI: No specific quest action, no navigation. Defaulting to random.")
-                        current_action = np.random.choice(VALID_ACTIONS) # Example random action
+                        # Random fallback: choose a valid action index
+                        current_action = np.random.choice(len(VALID_ACTIONS))
             else: # No quest active
-                if navigator.is_navigation_active():
+                if navigator.sequential_coordinates and navigator.navigation_status != "idle": # Check if navigator has a path and is not idle
                     current_action = navigator.get_next_action()
                 else:
-                    # print("AI: No active quest, no navigation. Defaulting to random.")
-                    current_action = np.random.choice(VALID_ACTIONS) # Example random action
+                    # Random fallback for non-quest, non-navigation: choose a valid action index
+                    # Sloppy and could cause problems. Also, could be helpful if grok somehow gets stuck.
+                    current_action = np.random.choice(len(VALID_ACTIONS))
 
         elif current_action is None and args.disable_ai_actions and not args.interactive_mode: # Replay/tick mode
-            # Read current joypad state or assume no-op
-            # current_action = env.read_m(0xFFF0) 
-            # if current_action == 0xFF: current_action = 0 # No button pressed = NO_OP
-            current_action = 0 # Default to NO_OP for non-interactive, no-AI mode
-        
+            # No-OP mode: skip stepping environment when AI actions are disabled
+            time.sleep(0.01)
+            continue
+
         if current_action is None: # Still no action (e.g. interactive mode with no key press)
             if not env.headless: # Only tick if we need to render for interactive
                 env.pyboy.tick()
-                frame_rgb = env.render()
-                update_screen(screen, frame_rgb, screen_width, screen_height)
+                raw_frame = env.render()
+                processed_frame_rgb = process_frame_for_pygame(raw_frame) # Process the frame
+                update_screen(screen, processed_frame_rgb, screen_width, screen_height)
                 # pygame.display.flip() # update_screen handles flip
+                
+                # FIXED: Update UI after game tick to show real-time NPC movement
+                update_ui_if_needed()
+                
                 time.sleep(0.01) # Minimal delay
             else: # Headless, no action -> could be an issue or intentional pause
-                pass # Or env.pyboy.tick() if even headless ticks are desired without action
+                # FIXED: Still tick and update UI in headless mode for NPC movement
+                env.pyboy.tick()
+                update_ui_if_needed()
+                time.sleep(0.01)
             continue
 
+        # Apply quest manager filtering to ALL actions (manual, AI, navigator)
+        if current_action is not None:
+            original_action = current_action
+            
+            # PATH_FOLLOW_ACTION is now handled directly in environment.step()
+            # No special handling needed here - let environment handle it
+            
+            current_action = quest_manager.filter_action(current_action)
+            
+            # Determine action source for recording
+            if args.interactive_mode and original_action != current_action:
+                action_source = 'manual_filtered'
+            elif args.interactive_mode:
+                action_source = 'manual'
+            elif navigator.navigation_status == "navigating":
+                action_source = 'navigator'
+            else:
+                action_source = 'ai'
+            
+            # Record action for replay functionality
+            recorded_playthrough.append({
+                'step': total_steps,
+                'action': current_action,
+                'original_action': original_action if original_action != current_action else None,
+                'timestamp': time.time(),
+                'source': action_source
+            })
 
         obs, reward, terminated, truncated, info = env.step(current_action)
         total_reward += reward
         total_steps += 1
+
+        # FIXED: Save persistent step counter every 100 steps
+        if total_steps % 100 == 0:
+            try:
+                with open(step_counter_file, 'w') as f:
+                    json.dump({'total_steps': total_steps}, f)
+            except Exception as e:
+                print(f"Could not save step counter: {e}")
 
         # Warp Tracking Logic (simplified, ensure env methods are correct)
         new_map_id = env.get_game_coords()[2]
         # new_player_pos = env.get_player_coordinates() # Example
         if new_map_id != last_map_id: # Basic warp detection
             # record_warp_step(env, last_map_id, new_map_id, total_steps) # If function exists
+            print(f"[MapTransition] Map ID changed from {last_map_id} to {new_map_id}")
             last_map_id = new_map_id
-        # last_player_pos = new_player_pos
 
+        # FIXED: Update quest progression engine with proper trigger evaluator
         if quest_progression_engine:
-            trigger_evaluator = TriggerEvaluator(env) # Corrected instantiation
-            quest_progression_engine.step(trigger_evaluator) # Pass the correct evaluator
+            # Update the trigger evaluator's previous map ID before checking triggers
+            current_map_id = env.get_game_coords()[2]
+            
+            # Debug map ID tracking
+            print(f"[MapTracking] Before trigger evaluation: current_map_id={current_map_id}, trigger_evaluator.prev_map_id={trigger_evaluator.prev_map_id}")
+            
+            # Pass the persistent evaluator that maintains state
+            quest_progression_engine.step(trigger_evaluator)
+            
+            # Update prev_map_id AFTER trigger evaluation for next step
+            trigger_evaluator.prev_map_id = current_map_id
+            print(f"[MapTracking] After trigger evaluation: current_map_id={current_map_id}, trigger_evaluator.prev_map_id={trigger_evaluator.prev_map_id}\n")
 
-        # quest_manager.update_progress() # This was a stub, get_current_quest now handles status updates
+        # FIXED: Update quest UI after player actions (now throttled for performance)
+        update_quest_ui()  # Always update after player actions for responsiveness
 
         if total_steps % config.get("log_frequency", 1000) == 0:
             elapsed_time = time.time() - start_time
             steps_per_sec = total_steps / elapsed_time if elapsed_time > 0 else 0
             current_quest_display = quest_manager.current_quest_id if quest_manager.current_quest_id is not None else "None"
             print(f"Step: {total_steps}, Reward: {total_reward:.2f}, Steps/sec: {steps_per_sec:.2f}, Current Quest: {current_quest_display}")
-            if config.get("save_state", True):
-                loop_states_dir = Path(config.state_dir).parent / "loop_states" # Example: relative to state_dir parent
-                if not loop_states_dir.is_absolute():
-                    loop_states_dir = project_root_path / loop_states_dir
-                save_loop_state(env, loop_states_dir, total_steps)
+            if config.get("save_state", True) and run_info:
+                # Save loop state (records action sequence) using recorded_playthrough
+                save_loop_state(env, recorded_playthrough)
         
         if not env.headless:
-            frame_rgb = env.render()
-            update_screen(screen, frame_rgb, screen_width, screen_height)
+            raw_frame = env.render()
+            processed_frame_rgb = process_frame_for_pygame(raw_frame) # Process the frame
+            update_screen(screen, processed_frame_rgb, screen_width, screen_height)
             # pygame.display.flip() # update_screen handles this
 
         if terminated or truncated:
@@ -927,11 +948,28 @@ def main():
             running = False
 
     print(f"Finished after {total_steps} steps.")
-    if config.get("save_state", True) and config.get("save_final_state", True):
-        final_states_dir = Path(config.state_dir).parent / "final_states"
-        if not final_states_dir.is_absolute():
-             final_states_dir = project_root_path / final_states_dir
-        save_final_state(env, final_states_dir)
+    
+    # FIXED: Save final persistent step counter
+    try:
+        with open(step_counter_file, 'w') as f:
+            json.dump({'total_steps': total_steps}, f)
+        print(f"Saved final step counter: {total_steps}")
+    except Exception as e:
+        print(f"Could not save final step counter: {e}")
+    
+    # Save recorded playthrough
+    if recorded_playthrough and run_dir:
+        try:
+            playthrough_file = run_dir / "recorded_playthrough.json"
+            with open(playthrough_file, 'w') as f:
+                json.dump(recorded_playthrough, f, indent=2)
+            print(f"Recorded playthrough saved to {playthrough_file}")
+        except Exception as e:
+            print(f"Failed to save recorded playthrough: {e}")
+    
+    if config.get("save_state", True) and run_info:
+        # Save final state using RunManager
+        save_final_state(env, run_info, recorded_playthrough)
     
     env.close()
     if not env.headless:

@@ -13,12 +13,11 @@ MAP_DATA = {int(e["id"]): e for e in MAP_DATA}
 # Handle KeyErrors
 def local_to_global(r: int, c: int, map_n: int):
     try:
-        (
-            map_x,
-            map_y,
-        ) = MAP_DATA[map_n]["coordinates"]
-        gy = r + map_y + MAP_ROW_OFFSET
-        gx = c + map_x + MAP_COL_OFFSET
+        map_coords = MAP_DATA[map_n]["coordinates"]
+        map_x_offset = map_coords[0]
+        map_y_offset = map_coords[1]
+        gx = c + map_x_offset + MAP_COL_OFFSET
+        gy = r + map_y_offset + MAP_ROW_OFFSET
         if 0 <= gy < GLOBAL_MAP_SHAPE[0] and 0 <= gx < GLOBAL_MAP_SHAPE[1]:
             return gy, gx
         print(f"coord out of bounds! global: ({gx}, {gy}) game: ({r}, {c}, {map_n})")

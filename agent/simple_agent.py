@@ -523,77 +523,154 @@ class SimpleAgent:
         # self.env_wrapper.stop()
 
 if __name__ == '__main__':
-    # This __main__ block is for basic testing.
-    # HOOK IT UP TO THE REAL ENVIRONMENT!
+    from pathlib import Path
+    from omegaconf import OmegaConf
+    from datetime import datetime
+    import argparse # Required for ConfiguredEnvWrapper if it expects args
 
-    from environment.environment import RedGymEnv
-    env = RedGymEnv()
+    # Project-specific imports for real components
+    from environment.environment import RedGymEnv # Though RedGymEnv is used via ConfiguredEnvWrapper
+    from environment.wrappers.configured_env_wrapper import ConfiguredEnvWrapper
+    from environment.environment_helpers.navigator import InteractiveNavigator
+    from environment.environment_helpers.quest_manager import QuestManager
+    # AVAILABLE_TOOLS_LIST is imported by SimpleAgent itself from grok_tool_implementations
+
+    logger.info("Starting SimpleAgent __main__ test with REAL components...")
+
+    project_root_path = Path(__file__).resolve().parent.parent
     
-    # Do not mock components!!! We have all the things we need!! Call the right functions!!
-    # MAJOR TODO: USE REAL FUNCTIONS! NO MOCKS!!!
-    class MockEnvWrapper:
-        def get_screenshot(self): return env.get_screenshot()
-        def get_location_name(self): return "Pallet Town - Test"
-        def stop(self): logger.info("MockEnvWrapper stopped.")
+    # 1. Create a minimal configuration
+    #    NOTE: You MUST ensure 'pokemon_red.gb' and 'init.state' exist at these paths
+    #    or update paths to your actual files.
+    default_rom_path = project_root_path / "pokemon_red.gb" # Standard location
+    default_init_state_path = project_root_path / "initial_states" / "init.state" # Standard location
 
-    class MockReader:
-        def get_player_coordinates(self): return (10, 11)
-        def get_current_dialog(self): return "Test dialog!"
-        def get_location_name(self): return "Pallet Town - Test"
-        def read_party_pokemon(self): return []
-        def read_money(self): return 1234
-        def read_badges(self): return ["BOULDERBADGE"]
-        def read_pokedex_seen_count(self): return 5
-        def read_pokedex_caught_count(self): return 2
-        def read_items(self): return [("POTION", 5)]
+    if not default_rom_path.exists():
+        logger.warning(f"ROM file not found at {default_rom_path}. Agent test may fail.")
+    if not default_init_state_path.exists():
+        logger.warning(f"Initial state file not found at {default_init_state_path}. Agent test may fail if RedGymEnv requires it and cannot create a default.")
+
+    # Create a session ID for logging and state
+    session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    # Basic config structure, mirroring parts of play.py's get_default_config
+    # Many of these have defaults in EnvWrapper/RedGymEnv, but setting explicitly for clarity
+    env_config_dict = {
+        "headless": True, # Essential for non-visual testing
+        "save_video": False,
+        "fast_video": False,
+        "action_freq": 24, # Default from play.py
+        "init_state": str(default_init_state_path),
+        "state_dir": str(project_root_path / "states"), # Standard location
+        "video_dir": str(project_root_path / "replays" / "videos"),
+        "gb_path": str(default_rom_path),
+        "debug": False,
+        "sim_frame_dist": 2_000_000.0,
+        "max_steps": 2048 * 10, # Reduced for testing
+        "save_final_state": False, # Don't save state during this test
+        "print_rewards": True,
+        "session_id": session_id,
+        "emulator_delay": 0, # Faster for testing
+        "n_record": 0,
+        "perfect_ivs": False,
+        "reduce_res": False, # Usually False for agent
+        "log_frequency": 100, # Log more frequently for tests
+        "two_bit": False,
+        "auto_flash": False,
+        "required_tolerance": None,
+        "disable_wild_encounters": True, # Helpful for focused testing
+        "disable_ai_actions": False, # Agent should take actions
+        "auto_teach_cut": True,
+        "auto_teach_surf": True,
+        "auto_teach_strength": True,
+        "auto_use_cut": True,
+        "auto_use_strength": True,
+        "auto_use_surf": True,
+        "auto_solve_strength_puzzles": True,
+        "auto_remove_all_nonuseful_items": False,
+        "auto_pokeflute": True,
+        "auto_next_elevator_floor": False,
+        "skip_safari_zone": False,
+        "infinite_safari_steps": False,
+        "insert_saffron_guard_drinks": False,
+        "infinite_money": True, # Helpful for testing without resource constraints
+        "infinite_health": True,
+        "use_global_map": True, # Important for navigator
+        "save_state": False,
+        "animate_scripts": False, # Faster
+        "exploration_inc": 0.01,
+        "exploration_max": 1.0,
+        "max_steps_scaling": 0.0,
+        "map_id_scalefactor": 1.0,
+        "record_replays": False,
+        # Add any other critical keys that ConfiguredEnvWrapper or RedGymEnv might need
+        # from the default config in play.py if errors occur.
+    }
+    env_config = OmegaConf.create(env_config_dict)
+
+    # 2. Setup paths and directories
+    run_dir = project_root_path / "runs" / env_config.session_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Run directory for test: {run_dir.resolve()}")
+
+    required_completions_path = project_root_path / "environment" / "environment_helpers" / "required_completions.json"
+    if not required_completions_path.exists():
+        logger.error(f"Required completions file not found at {required_completions_path}. QuestManager may fail.")
+        # Create a dummy file if it's absolutely necessary for QuestManager to init
+        # required_completions_path.write_text("[]") 
+
+
+    # 3. Instantiate real components
+    # ConfiguredEnvWrapper needs a 'config' attribute on args, or pass 'base_conf' directly
+    # Forcing argparse.Namespace to avoid issues with ConfiguredEnvWrapper's arg parsing.
+    mock_args = argparse.Namespace(config_path=None,headless=True,save_video=False,fast_video=False,action_freq=24,init_state=env_config.init_state,gb_path=env_config.gb_path,debug=False,sim_frame_dist=2000000.0,max_steps=env_config.max_steps,session_id=env_config.session_id,emulator_delay=0)
+
+    configured_env = None
+    navigator_instance = None
+    quest_manager_instance = None
+    agent = None
+
+    try:
+        configured_env = ConfiguredEnvWrapper(base_conf=env_config, args=mock_args)
         
-    class MockQuestManager:
-        def get_current_quest(self): return None
+        # InteractiveNavigator uses the wrapper
+        navigator_instance = InteractiveNavigator(env=configured_env)
+        
+        # QuestManager also uses the wrapper and navigator
+        quest_manager_instance = QuestManager(
+            env=configured_env, 
+            navigator=navigator_instance, 
+            run_dir=run_dir,
+            required_completions_path=str(required_completions_path)
+        )
 
-    class MockNavigator:
-        def get_exploration_log(self, limit=5): return [{"timestamp": "now", "description": "explored mock area"}]
-        def navigate_to_coords(self, y, x, max_steps): return False, "Mock navigation to coords failed."
-        def move_in_direction(self, direction, steps): return False, "Mock directional move failed."
+        xai_api_key_from_env = os.environ.get("XAI_API_KEY")
+        if not xai_api_key_from_env:
+            logger.error("ERROR: XAI_API_KEY environment variable not set. This test requires it.")
+            exit(1) # Or raise an exception
 
-    # Agent Prompts (minimal for testing)
-    SYSTEM_PROMPT = "You are a helpful Pokemon game playing AI. Your goal is to explore and complete objectives."
-    SUMMARY_PROMPT = "Please summarize the game session concisely."
-    INTROSPECTION_PROMPTS = ["What is the most important thing to do right now?"]
-    
-    # Tools (minimal for testing - real tools are in agent.tools)
-    # In a real run, AVAILABLE_TOOLS_LIST would be imported from agent.tools
-    # For this standalone test, if SimpleAgent needs it populated, mock it or ensure agent.tools is importable.
-    # For now, assuming SimpleAgent will load its tools from the imported AVAILABLE_TOOLS_LIST.
-    # If agent.tools is not available in this test scope, this will fail or tools_definition will be empty.
-    try:
-        from agent.tools import AVAILABLE_TOOLS_LIST
-    except ImportError:
-        logger.error("Could not import AVAILABLE_TOOLS_LIST from agent.tools for __main__ test. Tool functionality will be limited.")
-        AVAILABLE_TOOLS_LIST = [] # Fallback to empty list
+        # 4. Instantiate SimpleAgent with real components
+        # reader is the underlying RedGymEnv from the wrapper
+        # env_wrapper is the ConfiguredEnvWrapper instance itself
+        agent = SimpleAgent(
+            reader=configured_env.env, 
+            quest_manager=quest_manager_instance,
+            navigator=navigator_instance,
+            env_wrapper=configured_env, 
+            xai_api_key=xai_api_key_from_env,
+            model_name="grok-3-mini", 
+            reasoning_effort="low", # Use low for faster test responses
+            max_history_len=10 # Shorter history for quicker test iteration
+        )
 
-    xai_api_key_from_env = os.environ.get("XAI_API_KEY")
-    if not xai_api_key_from_env:
-        print("ERROR: XAI_API_KEY environment variable not set. This test requires it.")
-        exit(1)
+        logger.info("SimpleAgent __main__ test running with REAL components...")
+        agent.run(num_steps=2) # Run a few steps
 
-    logger.info("Starting SimpleAgent __main__ test with mocked components...")
-    
-    agent = SimpleAgent(
-        reader=env,
-        quest_manager=MockQuestManager(),
-        navigator=MockNavigator(),
-        env_wrapper=None, # Explicitly None, as reader is RedGymEnv
-        xai_api_key=xai_api_key_from_env,
-        model_name="grok-3-mini", # or your preferred test model
-        reasoning_effort="low" # Use low for faster test responses
-    )
-
-    # Replace placeholder methods with more interactive ones for testing if desired
-    # For now, the placeholder step() will run.
-    try:
-        agent.run(num_steps=3) # Run a few placeholder steps
     except Exception as e:
         logger.error(f"Agent run failed during __main__ test: {e}", exc_info=True)
     finally:
-        agent.stop()
-    logger.info("SimpleAgent __main__ test finished.")
+        if agent:
+            agent.stop()
+        if configured_env:
+            configured_env.close() # Ensure environment resources are released
+        logger.info("SimpleAgent __main__ test finished.")

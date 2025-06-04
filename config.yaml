@@ -4,37 +4,40 @@ wandb:
   group: ~
 
 env:
+  # Directory with pyboy save states to load initial state from.
+  state_dir: environment/states
+  # File within state dir to load from. Overrides init_from_last_ending_state.
+  # Leave blank and set init_from_last_ending_state to True to load from last ending state.
+  override_init_state: 
+  # Set to True to load most-recent ending save state. Overridden by override_init_state if set.
+  init_from_last_ending_state: True
+  # Allow human player input
+  interactive_mode: True
   # If true, record replays.
   record_replays: True
   # If true, run without rendering every step.
-  headless: True
+  headless: False
   # Directory to store video output.
   video_dir: video
   # Hold button down for this many ticks (+1)
   emulator_delay: 11
-  # Directory with pyboy save states to load from.
-  state_dir: environment/states
-  # File within state dir to load from.
-  override_init_state: 
-  # Set to True to load most-recent ending save state
-  init_from_last_ending_state: True
   # How many ticks each environment step should take.
   action_freq: 24
-  # Maximum number of steps per mini-episode.
+  # Maximum number of steps per mini-episode. Not applicable - holdover from RL.
   max_steps: 19816
   # If true, save videos.
   save_video: False
   # If true, save sped up videos.
   fast_video: False
-  # Number of environments to save videos for.
+  # Number of environments to save videos for. Not applicable - holdover from RL.
   n_record: 10
   # If true, give all party members max base stats.
   perfect_ivs: True
   # If true, downsample the screen observation by 2.
-  reduce_res: True
+  reduce_res: False
   # If true, losslessly compress the screen observation.
   two_bit: True
-  # How many steps until the environment returns an info.
+  # How many steps until the environment returns an info. Not applicable - holdover from RL.
   log_frequency: 2000
   # If true, disable the need for Flash.
   auto_flash: False
@@ -61,7 +64,7 @@ env:
   # If true, use Pokeflute when next to a Snorlax if possible.
   auto_pokeflute: True
   # If true, go to the next floor module num floors when entering an elevator.
-  auto_next_elevator_floor: False
+  auto_next_elevator_floor: True
   # If true, automatically give the player the GOLD TEETH and HM03.
   # The player will not be allowed in the Safari Zone.
   skip_safari_zone: False
@@ -77,83 +80,83 @@ env:
   infinite_health: True
   # If true, use the global map observation.
   use_global_map: False
-  # If true, provide the PyBoy save state as a part of infos.
+  # If true, provide the PyBoy save state as a part of infos. (Actually does other things now)
   save_state: True
   # If true, animate scripts. Script animations will not be a part of obs.
   # This flag is good for debugging.
-  animate_scripts: False
-  # The value on the exploration map for visiting a new coordinate.
+  animate_scripts: True
+  # The value on the exploration map for visiting a new coordinate. Not applicable - holdover from RL.
   exploration_inc: 1.0
-  # The max possible value on the exploration map.
+  # The max possible value on the exploration map. Not applicable - holdover from RL.
   exploration_max: 1.0
-  # The amount to scale max steps by. Will be multiplied by the number of required items and events.
+  # The amount to scale max steps by. Will be multiplied by the number of required items and events. Not applicable - holdover from RL.
   max_steps_scaling: 0 # 0.2 # every 10 events or items gained, multiply max_steps by 2
-  # The scaling for visiting important map IDs.
+  # The scaling for visiting important map IDs. Not applicable - holdover from RL.
   map_id_scalefactor: 9.539340019226074 # multiply map ids whose events have not been completed by 10
-  # How many agents must reach a required event before all agents are allowed to continue.
-  # If an agent reaches a milestone and the required tolerance is not met, the episode will reset. 
+  # How many agents must reach a required event before all agents are allowed to continue. Not applicable - holdover from RL.
+  # If an agent reaches a milestone and the required tolerance is not met, the episode will reset. Not applicable - holdover from RL.
   required_tolerance: null
-  # required_tolerance: 0.02
+  # required_tolerance: 0.02 # Not applicable - holdover from RL.
 
 train:
-  # Random seed
+  # Random seed. Not applicable - holdover from RL.
   seed: 1
-  # Use deterministic Torch algorithms
+  # Use deterministic Torch algorithms. Not applicable - holdover from RL.
   torch_deterministic: True
-  # Device to run training on.
+  # Device to run training on. Not applicable - holdover from RL.
   device: cuda
-  # If true, use torch.compile
-  compile: True
-  # The mode for torch compilation
+  # If true, use torch.compile. Not applicable - holdover from RL.
+  compile: False
+  # The mode for torch compilation. Not applicable - holdover from RL.
   compile_mode: "reduce-overhead"
-  # Mostly useless for Pokemon, enables tensor cores on NVIDIA GPUs.
+  # Mostly useless for Pokemon, enables tensor cores on NVIDIA GPUs. Not applicable - holdover from RL.
   float32_matmul_precision: "high"
   # The total time steps to run training for.
-  total_timesteps: 10_000_000_000 # 100_000_000_000 for full games
+  total_timesteps: 10_000_000_000 # 100_000_000_000 for full games. Not applicable - holdover from RL.
   # The number of examples for one epoch of training.
-  batch_size: 65536
+  batch_size: 65536 # Not applicable - holdover from RL.
   # The number of example to train for one batch of training.
-  minibatch_size: 2048
-  # If true, turn on learning rate annealing.
+  minibatch_size: 2048 # Not applicable - holdover from RL.
+  # If true, turn on learning rate annealing. Not applicable - holdover from RL.
   anneal_lr: False
-  # Unused
-  num_minibatches: 4
-  # Number of epochs when training.
+  # Unused. Not applicable - holdover from RL.
+  num_minibatches: 4 # Not applicable - holdover from RL.
+  # Number of epochs when training. Not applicable - holdover from RL.
   update_epochs: 3
-  # If true, use normalized advantage.
+  # If true, use normalized advantage. Not applicable - holdover from RL.
   norm_adv: True
-  # Entropy coefficient. More means more random actions.
+  # Entropy coefficient. More means more random actions. Not applicable - holdover from RL.
   ent_coef: 0.01001337416019442
-  # Generalized advantage estimate
+  # Generalized advantage estimate. Not applicable - holdover from RL.
   gae_lambda: 0.949936199629264
-  # Decay parameter for advantage estimation.
+  # Decay parameter for advantage estimation. Not applicable - holdover from RL.
   gamma: 0.9979900678597386
-  # How strongly to clip gradients.
-  clip_coef: 0.1
-  clip_vloss: True
-  # Learning rate.
+  # How strongly to clip gradients. Not applicable - holdover from RL.
+  clip_coef: 0.1 # Not applicable - holdover from RL.
+  clip_vloss: True # Not applicable - holdover from RL.
+  # Learning rate. Not applicable - holdover from RL.
   learning_rate: 0.00019999482124740103
-  # Max norm of the gradients
-  max_grad_norm: 0.5
-  target_kl: ~
-  vf_clip_coef: 0.1
-  vf_coef: 0.5319333384064214
-  # unused
-  batch_rows: 128
-  # backprop through time horizon.
-  bptt_horizon: 16
+  # Max norm of the gradients. Not applicable - holdover from RL.
+  max_grad_norm: 0.5 # Not applicable - holdover from RL.
+  target_kl: ~ # Not applicable - holdover from RL.
+  vf_clip_coef: 0.1 # Not applicable - holdover from RL.
+  vf_coef: 0.5319333384064214 # Not applicable - holdover from RL.
+  # unused. Not applicable - holdover from RL.
+  batch_rows: 128 # Not applicable - holdover from RL.
+  # backprop through time horizon. Not applicable - holdover from RL.
+  bptt_horizon: 16 # Not applicable - holdover from RL.
 
-  # Number of environments for training.
-  num_envs: 288
-  # Number of workers (processes) for training.
-  # Environments are divided evenly across workers.
-  num_workers: 24
-  # Number of workers to report per step. 
-  env_batch_size: 36
-  # Use PufferLib EnvPool
-  env_pool: True
-  # Use PufferLib's zero copy EnvPool.
-  zero_copy: False
+  # Number of environments for training. Not applicable - holdover from RL.
+  num_envs: 288 # Not applicable - holdover from RL.
+  # Number of workers (processes) for training. Not applicable - holdover from RL.
+  # Environments are divided evenly across workers. Not applicable - holdover from RL.
+  num_workers: 24 # Not applicable - holdover from RL.
+  # Number of workers to report per step. Not applicable - holdover from RL.
+  env_batch_size: 36 # Not applicable - holdover from RL.
+  # Use PufferLib EnvPool. Not applicable - holdover from RL.
+  env_pool: True # Not applicable - holdover from RL.
+  # Use PufferLib's zero copy EnvPool. Not applicable - holdover from RL.
+  zero_copy: False # Not applicable - holdover from RL.
 
   # Verbose terminal reporting.
   verbose: False
@@ -170,15 +173,15 @@ train:
   overlay_interval: 100
   # Use PufferLib's CPU data offloading.
   cpu_offload: False
-  # Use RNN network. False is not supported
+  # Use RNN network. False is not supported. Not applicable - holdover from RL.
   use_rnn: True
   # Use multiprocessing to asynchronously reset the agents
-  # when required new events and items are observed.
+  # when required new events and items are observed. Not applicable - holdover from RL.
   async_wrapper: False
   # Use a shared SQLite DB to reset the agents
-  # when required new events and items are observed.
+  # when required new events and items are observed. Not applicable - holdover from RL.
   sqlite_wrapper: True
-  # Save PyBoy states when new required events and items are observed.
+  # Save PyBoy states when new required events and items are observed. Progress tracking not implemented.
   archive_states: True
   # When a new required events and items are observed, move
   # all environments to the save state for the environment that made 
@@ -549,7 +552,7 @@ agent:
   llm_provider: "grok" 
   
   # Model name for the specified LLM provider
-  model_name: "grok-1" # Replace with the actual Grok model name
+  model_name: "grok-3-mini"
 
   # Maximum tokens for LLM responses
   max_tokens: 2048

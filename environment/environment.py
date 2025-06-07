@@ -11,6 +11,8 @@ from datetime import datetime
 from PIL import Image
 import heapq
 import logging
+import logging.handlers
+import sys
 
 import mediapy as media
 import numpy as np
@@ -112,6 +114,10 @@ SEAFOAM_SURF_SPOTS = {
 
 logger = logging.getLogger(__name__)
 
+# Add logging import at the top
+sys.path.append('/puffertank/grok_plays_pokemon')
+from utils.logging_config import get_pokemon_logger
+
 
 # TODO: Make global map usage a configuration parameter
 class RedGymEnv(Env):
@@ -198,7 +204,10 @@ class RedGymEnv(Env):
         self.save_state = env_config.save_state
         self.animate_scripts = env_config.animate_scripts
         # Track previous map for trigger testing
-        self.prev_map_id: int | None = None
+        # REMOVED: self.prev_map_id: int | None = None
+        # ADDED: Centralized map tracking system using deque with length 3
+        self.map_history = deque(maxlen=3)
+        # Initialize with current map when first available
         self.exploration_inc = env_config.get("exploration_inc", 0.01)
         self.exploration_max = env_config.get("exploration_max", 1.0)
         self.max_steps_scaling = env_config.get("max_steps_scaling", 0.0)
@@ -210,8 +219,8 @@ class RedGymEnv(Env):
         self.action_taken = None
         self.last_dialog = ''
         self.current_dialog = ''
-        self.environment_map_history = deque(maxlen=3)
-        self.environment_map_history.append(-1)
+        # REMOVED: self.environment_map_history = deque(maxlen=3)
+        # REMOVED: self.environment_map_history.append(-1)
 
         # For saving replays - use RunManager for unified run management
         self.current_run_info = None
@@ -364,6 +373,9 @@ class RedGymEnv(Env):
         self.quest_visualization_ids = [1, 2, 3, 4, 5]  # First 5 quests by default
 
         self.init_mem()
+
+        # Initialize logger
+        self.logger = get_pokemon_logger()
 
     def set_navigator(self, navigator):
         self.navigator = navigator
@@ -620,7 +632,11 @@ class RedGymEnv(Env):
         self.reward_explore_map *= 0
         self.cut_explore_map *= 0
         self.reset_mem()
-        self.prev_map_id = self.read_m("wCurMap")
+        # Initialize map_history with current map
+        current_map_id = self.read_m("wCurMap")
+        self.map_history.clear()
+        for i in range(3):
+            self.map_history.append(current_map_id)
 
         self.update_pokedex()
         self.update_tm_hm_obtained_move_ids()
@@ -1252,6 +1268,9 @@ class RedGymEnv(Env):
         """Clear warp-related cache to ensure fresh collision detection"""
         self._is_warping = None
         self._minimap_warp_obs = None
+    # REMOVED: handle_path_follow_action method that had early returns
+    # This logic has been moved to _convert_path_follow_to_movement_action method
+    # which returns a movement action instead of doing early returns
     
     def step(self, action):
         self.step_count += 1
@@ -1259,7 +1278,7 @@ class RedGymEnv(Env):
         # DEBUGGING: Force log every action at the start of step
         print(f"\n=== STEP {self.step_count}: ACTION {action} START ===")
         if action == PATH_FOLLOW_ACTION:
-            print(f"STEP {self.step_count}: PATH_FOLLOW_ACTION detected")
+            print(f"STEP {self.step_count}: PATH_FOLLOW_ACTION detected - will convert to movement action")
         print(f"STEP {self.step_count}: Location: {self.get_game_coords()}")
         
         # COMPLETELY DISABLED: All warp detection and blocking
@@ -1271,21 +1290,6 @@ class RedGymEnv(Env):
         
         dialog = self.read_dialog() or ''
 
-        # COMPLETELY DISABLED: Warp tile checking
-        # self.next_to_warp_tile = self.is_next_to_warp_tile()
-        # if self.next_to_warp_tile and dialog == "" and not self.on_a_warp_tile:
-        #     try:
-        #         self._handling_warp = True
-        #         self.navigator.warp_tile_handler()
-        #     except Exception as e:
-        #         print(f"Error in warp_tile_handler(): {e}")
-        #         obs = self._get_obs()
-        #         reset = False
-        #         info = {"capture_error": str(e)}
-        #         return obs, 0.0, reset, False, info
-        #     finally:
-        #         self._handling_warp = False
-
         reset = False # Initialize reset here
         
         # COMPLETELY DISABLED: Dialog detection blocking
@@ -1294,450 +1298,42 @@ class RedGymEnv(Env):
         #     print("environment.py: step(): Navigation paused: dialog active, cannot move to next coordinate.")
         #     return self._get_obs(), 0.0, reset, False, {}
 
-        # --- BEGIN SIMPLE PATH FOLLOWING LOGIC ---
-        # Use discrete action PATH_FOLLOW_ACTION (key "5") to follow quest path
-        if action == PATH_FOLLOW_ACTION:
-            print(f"\n=== PATH_FOLLOW DEBUG: Key '5' pressed ===")
-            print(f"PATH_FOLLOW: Starting simple path following at {self.get_game_coords()}")
-            print(f"PATH_FOLLOW: Step count: {self.step_count}")
-            
-            # Use environment's own coordinate system for consistency
-            if not hasattr(self, 'combined_path') or not self.combined_path:
-                print("PATH_FOLLOW: No coordinates loaded, loading quest 002...")
-                success = self.load_coordinate_path(2)
-                if not success or not self.combined_path:
-                    print("PATH_FOLLOW: ERROR - Failed to load quest 002")
-                    print("PATH_FOLLOW: RETURNING EARLY - load_failed")
-                    return self._get_obs(), 0.0, False, False, {"path_follow": "load_failed"}
-                print(f"PATH_FOLLOW: Quest 002 loaded - {len(self.combined_path)} coordinates")
-                
-                # SYNC WITH NAVIGATOR: Find closest coordinate to current position
-                if hasattr(self, 'navigator') and self.navigator and hasattr(self.navigator, 'current_coordinate_index'):
-                    print(f"PATH_FOLLOW: Syncing with Navigator index {self.navigator.current_coordinate_index}")
-                    self.current_path_target_index = self.navigator.current_coordinate_index
-                else:
-                    # Find closest coordinate to current position as fallback
-                    player_x, player_y, map_id = self.get_game_coords()
-                    current_global = local_to_global(player_y, player_x, map_id)
-                    
-                    closest_distance = float('inf')
-                    closest_index = 0
-                    
-                    for i, coord in enumerate(self.combined_path):
-                        distance = abs(coord[0] - current_global[0]) + abs(coord[1] - current_global[1])
-                        if distance < closest_distance:
-                            closest_distance = distance
-                            closest_index = i
-                    
-                    print(f"PATH_FOLLOW: No Navigator sync available, snapped to closest coordinate at index {closest_index} (distance {closest_distance})")
-                    self.current_path_target_index = closest_index
-            
-            # Check if path is complete
-            if self.current_path_target_index >= len(self.combined_path):
-                print("PATH_FOLLOW: Quest 002 path complete! All coordinates reached.")
-                print("PATH_FOLLOW: RETURNING EARLY - quest_complete")
-                return self._get_obs(), 0.0, False, False, {"path_follow": "quest_complete"}
-            
-            # Get current position in global coordinates
-            player_x, player_y, map_id = self.get_game_coords()
-            current_global = local_to_global(player_y, player_x, map_id)
-            
-            # Check if player has changed maps unexpectedly (manual warp/movement)
-            expected_map_area = self._get_expected_map_for_current_path_index()
-            if expected_map_area and map_id not in expected_map_area:
-                print(f"PATH_FOLLOW: WARNING - Player on unexpected map {map_id}. Expected one of: {expected_map_area}")
-                print(f"PATH_FOLLOW: Attempting to find path coordinates on current map...")
-                
-                # Look for coordinates on the current map in the ENTIRE quest path
-                map_coordinates = []
-                for i, coord in enumerate(self.combined_path):
-                    # Convert global coord back to local to check map
-                    try:
-                        result = global_to_local(coord[0], coord[1], map_id)
-                        if result is not None:
-                            local_y, local_x = result
-                            # BOUNDS CHECK: Use actual map dimensions from MAP_DATA
-                            if map_id in MAP_DATA:
-                                tile_width, tile_height = MAP_DATA[map_id]["tileSize"]
-                                if local_x >= 0 and local_y >= 0 and local_x < tile_width and local_y < tile_height:
-                                    # This coordinate is actually on the current map
-                                    distance = abs(coord[0] - current_global[0]) + abs(coord[1] - current_global[1])
-                                    map_coordinates.append((i, coord, distance))
-                    except:
-                        continue
-                
-                if map_coordinates:
-                    # Find closest coordinate on current map
-                    best_entry = min(map_coordinates, key=lambda x: x[2])
-                    best_index, best_coord, best_distance = best_entry
-                    print(f"PATH_FOLLOW: Found {len(map_coordinates)} coordinates on map {map_id}. Closest at index {best_index}, distance {best_distance}")
-                    self.current_path_target_index = best_index
-                    print(f"PATH_FOLLOW: Successfully realigned to quest path on current map")
-                else:
-                    print(f"PATH_FOLLOW: ERROR - No path coordinates found on current map {map_id}.")
-                    print(f"PATH_FOLLOW: Quest {self.current_loaded_quest_id} may not include coordinates for this map.")
-                    print(f"PATH_FOLLOW: Try loading a different quest or manually navigate to the correct map.")
-                    return self._get_obs(), 0.0, False, False, {"path_follow": "quest_not_for_current_map"}
-            
-            # Get next target coordinate
-            target_coord = self.combined_path[self.current_path_target_index]  # (gy, gx)
-            
-            print(f"PATH_FOLLOW: Current global: {current_global}, Target: {target_coord}")
-            print(f"PATH_FOLLOW: Path index: {self.current_path_target_index}/{len(self.combined_path)}")
-            
-            # Calculate distance and direction
-            dy = target_coord[0] - current_global[0]  # gy difference
-            dx = target_coord[1] - current_global[1]  # gx difference
-            distance = abs(dy) + abs(dx)
-            
-            print(f"PATH_FOLLOW: Distance = {distance}, dy = {dy}, dx = {dx}")
-            
-            # If we're at the target coordinate, advance to next and continue processing
-            if distance == 0:
-                print("PATH_FOLLOW: Reached target, advancing to next coordinate")
-                self.current_path_target_index += 1
-                
-                # Continue processing to potentially move to the new target in the same step
-                # Check if path is complete after advancing
-                if self.current_path_target_index >= len(self.combined_path):
-                    print("PATH_FOLLOW: Quest 002 path complete after advancing! All coordinates reached.")
-                    print("PATH_FOLLOW: RETURNING EARLY - quest_complete")
-                    return self._get_obs(), 0.0, False, False, {"path_follow": "quest_complete"}
-                
-                # Get the new target coordinate and continue to movement logic
-                target_coord = self.combined_path[self.current_path_target_index]
-                
-                print(f"PATH_FOLLOW: Advanced to new target: {target_coord}")
-                print(f"PATH_FOLLOW: New path index: {self.current_path_target_index}/{len(self.combined_path)}")
-                
-                # Recalculate distance and direction for new target
-                dy = target_coord[0] - current_global[0]
-                dx = target_coord[1] - current_global[1]
-                distance = abs(dy) + abs(dx)
-                
-                print(f"PATH_FOLLOW: New target distance = {distance}, dy = {dy}, dx = {dx}")
-                
-                # If new target is also at distance 0, we're done for this step
-                if distance == 0:
-                    print("PATH_FOLLOW: New target also at distance 0, continuing next step")
-                    print("PATH_FOLLOW: RETURNING EARLY - advanced_to_same_position")
-                    return self._get_obs(), 0.0, False, False, {"path_follow": "advanced_to_same_position"}
-            
-            # If distance is not 1, we need to handle off-path scenarios
-            if distance != 1:
-                print(f"PATH_FOLLOW: WARNING - Distance is {distance}, not 1. Player may be off-path.")
-                
-                # First, check if player is severely off-path (distance > 5)
-                if distance > 5:
-                    print(f"PATH_FOLLOW: Player appears to be far off-path (distance {distance}). Attempting full path re-alignment...")
-                    
-                    # Find the nearest coordinate in the ENTIRE path, not just ahead
-                    best_distance = float('inf')
-                    best_index = self.current_path_target_index
-                    
-                    for i, coord in enumerate(self.combined_path):
-                        coord_distance = abs(coord[0] - current_global[0]) + abs(coord[1] - current_global[1])
-                        if coord_distance < best_distance:
-                            best_distance = coord_distance
-                            best_index = i
-                    
-                    print(f"PATH_FOLLOW: Re-aligned to nearest coordinate at index {best_index}, distance {best_distance}")
-                    self.current_path_target_index = best_index
-                    target_coord = self.combined_path[best_index]
-                    dy = target_coord[0] - current_global[0]
-                    dx = target_coord[1] - current_global[1]
-                    distance = best_distance
-                    
-                    # If still too far after re-alignment, there might be a problem
-                    if distance > 10:
-                        print(f"PATH_FOLLOW: ERROR - Even after re-alignment, distance is {distance}. Path may be invalid for current map.")
-                        print("PATH_FOLLOW: RETURNING EARLY - path_alignment_failed")
-                        return self._get_obs(), 0.0, False, False, {"path_follow": "path_alignment_failed"}
-                
-                else:
-                    # Player is slightly off-path, look ahead for a nearby coordinate
-                    print(f"PATH_FOLLOW: Player slightly off-path (distance {distance}). Looking for closer coordinate...")
-                    
-                    # Look ahead in the path for a coordinate with distance 1 ON THE CURRENT MAP
-                    closest_distance = distance
-                    closest_index = self.current_path_target_index
-                    
-                    for check_index in range(self.current_path_target_index, 
-                                           min(self.current_path_target_index + 20, len(self.combined_path))):
-                        check_coord = self.combined_path[check_index]
-                        
-                        # Verify this coordinate is on the current map
-                        try:
-                            result = global_to_local(check_coord[0], check_coord[1], map_id)
-                            if result is None:
-                                print(f"  Skipping index {check_index}: {check_coord} (coordinate not on map {map_id})")
-                                continue
-                            coord_local_y, coord_local_x = result
-                            
-                            # BOUNDS CHECK: Use actual map dimensions from MAP_DATA
-                            if map_id in MAP_DATA:
-                                tile_width, tile_height = MAP_DATA[map_id]["tileSize"]
-                                if coord_local_x < 0 or coord_local_y < 0 or coord_local_x >= tile_width or coord_local_y >= tile_height:
-                                    print(f"  Skipping index {check_index}: {check_coord} -> local ({coord_local_x}, {coord_local_y}) (out of bounds for map {map_id}, size {tile_width}x{tile_height})")
-                                    continue
-                            else:
-                                print(f"  Skipping index {check_index}: {check_coord} (map {map_id} not found in MAP_DATA)")
-                                continue
-                                
-                            print(f"  Valid coordinate on map {map_id}: {check_coord} -> local ({coord_local_x}, {coord_local_y})")
-                        except Exception as e:
-                            print(f"  Skipping index {check_index}: {check_coord} (conversion error: {e})")
-                            continue
-                        
-                        check_distance = abs(check_coord[0] - current_global[0]) + abs(check_coord[1] - current_global[1])
-                        print(f"  Checking index {check_index}: {check_coord}, distance = {check_distance} (on map {map_id})")
-                        
-                        if check_distance == 1:
-                            print(f"PATH_FOLLOW: Found coordinate with distance 1 at index {check_index} on current map")
-                            self.current_path_target_index = check_index
-                            target_coord = check_coord
-                            dy = target_coord[0] - current_global[0]
-                            dx = target_coord[1] - current_global[1]
-                            distance = 1
-                            break
-                        elif check_distance < closest_distance:
-                            closest_distance = check_distance
-                            closest_index = check_index
-                    
-                    # If we didn't find distance 1, use closest (if it was on current map)
-                    if distance != 1:
-                        if closest_index != self.current_path_target_index:
-                            print(f"PATH_FOLLOW: No distance-1 coordinate found, using closest at index {closest_index} on current map")
-                            self.current_path_target_index = closest_index
-                            target_coord = self.combined_path[closest_index]
-                            dy = target_coord[0] - current_global[0]
-                            dx = target_coord[1] - current_global[1]
-                        else:
-                            # Current target is valid but no closer ones found
-                            # Check if there are any other reachable coordinates with better movement options
-                            print(f"PATH_FOLLOW: No closer coordinates found. Checking if current target direction is viable...")
-                            
-                            # If the primary movement direction would be horizontal but we're far away,
-                            # look for coordinates that allow vertical movement instead
-                            if abs(dx) >= abs(dy) and abs(dx) > 2:
-                                print(f"PATH_FOLLOW: Target requires long horizontal movement (dx={dx}). Looking for alternative coordinates...")
-                                # Look for coordinates that are mainly vertical from current position
-                                for alt_check_index in range(self.current_path_target_index, min(self.current_path_target_index + 20, len(self.combined_path))):
-                                    alt_coord = self.combined_path[alt_check_index]
-                                    result = global_to_local(alt_coord[0], alt_coord[1], map_id)
-                                    if result is not None:
-                                        alt_local_y, alt_local_x = result
-                                        if map_id in MAP_DATA:
-                                            tile_width, tile_height = MAP_DATA[map_id]["tileSize"]
-                                            if alt_local_x >= 0 and alt_local_y >= 0 and alt_local_x < tile_width and alt_local_y < tile_height:
-                                                alt_dy = alt_coord[0] - current_global[0]
-                                                alt_dx = alt_coord[1] - current_global[1]
-                                                # Prefer coordinates where vertical movement is dominant and distance is reasonable
-                                                if abs(alt_dy) > abs(alt_dx) and abs(alt_dy) <= 8:
-                                                    print(f"PATH_FOLLOW: Found alternative coordinate at index {alt_check_index}: {alt_coord} (dy={alt_dy}, dx={alt_dx})")
-                                                    self.current_path_target_index = alt_check_index
-                                                    target_coord = alt_coord
-                                                    dy = alt_dy
-                                                    dx = alt_dx
-                                                    break
-                            
-                            print(f"PATH_FOLLOW: Moving toward target {target_coord} (distance {abs(dy) + abs(dx)}, dy={dy}, dx={dx})")
-                            # Keep the current dy, dx values (either original or alternative)
-            
-            # Determine movement direction (prioritize larger delta)
-            # VALID_ACTIONS = [DOWN(0), LEFT(1), RIGHT(2), UP(3), A(4), B(5), PATH(6), START(7)]
-            if abs(dy) > abs(dx):
-                if dy > 0:
-                    movement_action = 0  # DOWN
-                    direction_name = "DOWN"
-                else:
-                    movement_action = 3  # UP
-                    direction_name = "UP"
-            elif dx != 0:
-                if dx > 0:
-                    movement_action = 2  # RIGHT
-                    direction_name = "RIGHT"
-                else:
-                    movement_action = 1  # LEFT
-                    direction_name = "LEFT"
-            else:
-                print("PATH_FOLLOW: ERROR - No movement direction determined")
-                print("PATH_FOLLOW: RETURNING EARLY - no_direction")
-                return self._get_obs(), 0.0, False, False, {"path_follow": "no_direction"}
-            
-            print(f"PATH_FOLLOW: Moving {direction_name} (action {movement_action})")
-            print(f"PATH_FOLLOW: About to call run_action_on_emulator({movement_action})")
-            
-            # COLLISION CHECK: Use the same get_collision_map() as UI before movement
-            print(f"PATH_FOLLOW_COLLISION: Checking collision for direction {direction_name}")
-            collision_map_str = self.get_collision_map()
-            if collision_map_str:
-                print(f"PATH_FOLLOW_COLLISION: Got collision map, parsing...")
-                lines = collision_map_str.strip().split('\n')
-                grid = []
-                
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith('Legend:') or not line or not all(c in '0123456789 ' for c in line):
-                        continue
-                    row = [int(x) for x in line.split()]
-                    if len(row) == 10:  # Valid grid row
-                        grid.append(row)
-                
-                if len(grid) == 9:  # Valid 9x10 grid
-                    print(f"PATH_FOLLOW_COLLISION: Parsed {len(grid)}x{len(grid[0])} collision grid")
-                    
-                    # Player is at center (4,4), check target direction
-                    player_row, player_col = 4, 4
-                    target_row, target_col = player_row, player_col
-                    
-                    if direction_name == "UP":
-                        target_row = player_row - 1
-                    elif direction_name == "DOWN":
-                        target_row = player_row + 1
-                    elif direction_name == "LEFT":
-                        target_col = player_col - 1
-                    elif direction_name == "RIGHT":
-                        target_col = player_col + 1
-                    
-                    # Check bounds
-                    if 0 <= target_row < 9 and 0 <= target_col < 10:
-                        target_tile = grid[target_row][target_col]
-                        print(f"PATH_FOLLOW_COLLISION: Player at ({player_row},{player_col}), target ({target_row},{target_col}) = {target_tile}")
-                        
-                        # Check if movement is blocked (1=wall, 2=sprite)
-                        if target_tile == 1:
-                            print(f"PATH_FOLLOW_COLLISION: *** COLLISION DETECTED - Wall at target position! ***")
-                            print(f"PATH_FOLLOW_COLLISION: Blocking movement {direction_name}, trying alternative...")
-                            
-                            # Look for alternative walkable directions
-                            walkable_directions = []
-                            directions_to_check = ["UP", "DOWN", "LEFT", "RIGHT"]
-                            for check_dir in directions_to_check:
-                                check_row, check_col = player_row, player_col
-                                if check_dir == "UP":
-                                    check_row = player_row - 1
-                                elif check_dir == "DOWN":
-                                    check_row = player_row + 1
-                                elif check_dir == "LEFT":
-                                    check_col = player_col - 1
-                                elif check_dir == "RIGHT":
-                                    check_col = player_col + 1
-                                
-                                if 0 <= check_row < 9 and 0 <= check_col < 10:
-                                    check_tile = grid[check_row][check_col]
-                                    if check_tile == 0:  # Walkable
-                                        walkable_directions.append(check_dir)
-                                        print(f"PATH_FOLLOW_COLLISION: Direction {check_dir} is walkable (tile={check_tile})")
-                                    else:
-                                        print(f"PATH_FOLLOW_COLLISION: Direction {check_dir} blocked (tile={check_tile})")
-                            
-                            if walkable_directions:
-                                # Prefer directions that bring us closer to target
-                                best_direction = None
-                                best_score = float('inf')
-                                
-                                for alt_dir in walkable_directions:
-                                    # Calculate how this direction affects our distance to target
-                                    score = 0
-                                    if alt_dir == "UP" and dy < 0:
-                                        score = abs(dy) - 1  # Moving toward target
-                                    elif alt_dir == "DOWN" and dy > 0:
-                                        score = abs(dy) - 1
-                                    elif alt_dir == "LEFT" and dx < 0:
-                                        score = abs(dx) - 1
-                                    elif alt_dir == "RIGHT" and dx > 0:
-                                        score = abs(dx) - 1
-                                    else:
-                                        score = abs(dy) + abs(dx) + 1  # Moving away from target
-                                    
-                                    if score < best_score:
-                                        best_score = score
-                                        best_direction = alt_dir
-                                
-                                if best_direction:
-                                    print(f"PATH_FOLLOW_COLLISION: Using alternative direction: {best_direction}")
-                                    direction_name = best_direction
-                                    if best_direction == "UP":
-                                        movement_action = 3
-                                    elif best_direction == "DOWN":
-                                        movement_action = 0
-                                    elif best_direction == "LEFT":
-                                        movement_action = 1
-                                    elif best_direction == "RIGHT":
-                                        movement_action = 2
-                                else:
-                                    print(f"PATH_FOLLOW_COLLISION: No walkable alternatives found! Skipping movement.")
-                                    print("PATH_FOLLOW: RETURNING EARLY - collision_blocked")
-                                    return self._get_obs(), 0.0, False, False, {"path_follow": "collision_blocked"}
-                            else:
-                                print(f"PATH_FOLLOW_COLLISION: No walkable directions available! Player may be stuck.")
-                                print("PATH_FOLLOW: RETURNING EARLY - no_walkable_directions") 
-                                return self._get_obs(), 0.0, False, False, {"path_follow": "no_walkable_directions"}
-                        elif target_tile == 2:
-                            print(f"PATH_FOLLOW_COLLISION: *** SPRITE COLLISION DETECTED - NPC at target position! ***")
-                            print(f"PATH_FOLLOW_COLLISION: Movement may be blocked by NPC, but attempting...")
-                        else:
-                            print(f"PATH_FOLLOW_COLLISION: Target tile is walkable (tile={target_tile})")
-                    else:
-                        print(f"PATH_FOLLOW_COLLISION: Target position out of bounds: ({target_row},{target_col})")
-                else:
-                    print(f"PATH_FOLLOW_COLLISION: Invalid grid size: {len(grid)} rows")
-            else:
-                print(f"PATH_FOLLOW_COLLISION: No collision map available, proceeding with movement")
-            
-            # Execute the movement
-            self.run_action_on_emulator(movement_action)
-            
-            print(f"PATH_FOLLOW: Movement completed, run_action_on_emulator returned")
-            print(f"PATH_FOLLOW: RETURNING EARLY - moved with direction {direction_name}")
-            print("=== PATH_FOLLOW DEBUG: Returning from PATH_FOLLOW_ACTION block ===\n")
-            
-            return self._get_obs(), 0.0, False, False, {"path_follow": "moved", "direction": direction_name}
-
-        # --- END SIMPLE PATH FOLLOWING LOGIC ---
-
-        # FIXED: Update previous map ID for trigger evaluation
+        # MAP TRACKING UPDATE:
+        # update the map tracking system with the current map state
+        # This ensures coordinate-dependent logic runs with stable map state
         cur_map_id = self.read_m("wCurMap")
-        print(f"environment.py: step(): cur_map_id: {cur_map_id}")
-        print(f"environment.py: step(): self.prev_map_id: {self.prev_map_id}")
-        
-        # only append to map_history if the map id is different from the previous one
-        if -1 in self.environment_map_history: # if the map history is empty, replace -1 with the current map id
-            self.environment_map_history.remove(-1)
+        if self.map_history[-2] != cur_map_id:
+            breakpoint()
+            print(f"MAP_TRACKING: Map changed to {cur_map_id} (from {self.map_history[-2] if self.map_history else 'None'})")
+            self.map_history.append(cur_map_id)
+            print(f"MAP_TRACKING: Updated map_history: {list(self.map_history)}")
+            
+            # Log the map change for debugging
+            if self.logger:
+                previous_map_ids = list(self.map_history)[:-1]  # All except the current (last) one
+                self.logger.log_environment_event("MAP_CHANGE", {
+                    'message': f'Map change detected: previous_map_ids={previous_map_ids}, current_map_id={cur_map_id}',
+                    'previous_map_ids': previous_map_ids,
+                    'current_map_id': cur_map_id,
+                    'step_count': self.step_count
+                })
+        else:
+            print(f"MAP_TRACKING: No map change detected, staying on map {cur_map_id}")
 
-        # Use map_history[-2] for previous map
+        # Get previous map from history (always use map_history[-2])
         player_x, player_y, _ = self.get_game_coords()
-        prev_map = self.environment_map_history[-2] if len(self.environment_map_history) >= 2 else self.get_game_coords()[2]
-        cur_map_id = self.environment_map_history[-1] if len(self.environment_map_history) >= 1 else self.get_game_coords()[2]
-        
-        # try:
-        #     prev_map_name = MapIds(prev_map).name
-        #     cur_map_name = MapIds(cur_map_id).name
+        prev_map_id = self.map_history[-2] if len(self.map_history) >= 2 else cur_map_id
 
-        #     if prev_map_name in WARP_DICT:
-        #         # Find warp entry matching this map transition
-        #         for warp in WARP_DICT[prev_map_name]:
-        #             if warp.get('target_map_id') == cur_map_id:
-        #                 warp_entry_x = warp.get('x')
-        #                 warp_entry_y = warp.get('y')
-        #                 print(f"Warp entry x: {warp_entry_x}")
-        #                 print(f"Warp entry y: {warp_entry_y}")
-        #                 # If player is on warp entry tile, press B multiple times
-        #                 if (player_x, player_y) == (warp_entry_x, warp_entry_y):
-        #                     for _ in range(3):
-        #                         debug_print(f"[TriggerTest] PRESSING B at warp entry ({player_x}, {player_y}) on map {cur_map_id}")
-        #                         self.run_action_on_emulator(5)
-        #                     print("Pressed B sequence")
-        #                     break
-        # except Exception as e:
-        #     print(f"Error getting map names: {e}")
-        #     prev_map_name = "None"
-        #     cur_map_id = "None"
-
-
-        # if self.step_count >= self.get_max_steps():
-        #     self.step_count = 0
+        # Log internal map change event when we have enough history
+        if len(self.map_history) >= 2 and self.map_history[-2] != cur_map_id:
+            if self.logger:
+                self.logger.log_environment_event("INTERNAL_MAP_CHANGE", {
+                    'message': f'Internal map change detected from {prev_map_id} to {cur_map_id}',
+                    'from_map': prev_map_id,
+                    'to_map': cur_map_id,
+                    'coordinates': [player_x, player_y],
+                    'step_count': self.step_count
+                })
 
         if self.save_video and self.step_count == 0:
             self.start_video()
@@ -1765,10 +1361,26 @@ class RedGymEnv(Env):
 
         self.check_num_bag_items()
 
-        # update the a press before we use it so we dont trigger the font loaded early return
-        if VALID_ACTIONS[action] == WindowEvent.PRESS_BUTTON_A:
-            self.update_a_press()
-        self.run_action_on_emulator(action)
+        # UNIFIED ARCHITECTURE: Convert PATH_FOLLOW_ACTION to movement action BEFORE calling run_action_on_emulator
+        # This ensures everything goes through the same action execution path
+        final_action = action
+        
+        if action == PATH_FOLLOW_ACTION:
+            print(f"STEP {self.step_count}: Converting PATH_FOLLOW_ACTION to movement action")
+            
+            # Get movement action from path following logic
+            converted_action = self._convert_path_follow_to_movement_action()
+            if converted_action is not None:
+                final_action = converted_action
+                print(f"STEP {self.step_count}: PATH_FOLLOW_ACTION converted to movement action {final_action}")
+            else:
+                print(f"STEP {self.step_count}: PATH_FOLLOW_ACTION conversion failed, using fallback UP action")
+                final_action = 3  # UP action as fallback
+        
+        # UNIFIED ARCHITECTURE: This is the ONLY place run_action_on_emulator should be called in step()
+        self.run_action_on_emulator(final_action)
+        
+        # Continue with all the normal game state updates that must happen after every action
         self.events = EventFlags(self.pyboy)
         self.missables = MissableFlags(self.pyboy)
         self.flags = Flags(self.pyboy)
@@ -1809,19 +1421,18 @@ class RedGymEnv(Env):
             }
             info["required_count"] = len(required_events) + len(required_items)
             info["env_id"] = self.env_id
-            info = info | self.agent_stats(action)
+            info = info | self.agent_stats(final_action)
         elif (
             self.step_count != 0
             and self.log_frequency
             and self.step_count % self.log_frequency == 0
         ):
-            info = info | self.agent_stats(action)
+            info = info | self.agent_stats(final_action)
 
         self.required_events = required_events
         self.required_items = required_items
 
-        # FIXED: Update previous map ID after processing
-        self.prev_map_id = cur_map_id
+        # REMOVED: Old prev_map_id tracking - now using centralized self.map_history
 
         # FIXED: Add step count to info for external tracking
         info["step_count"] = self.step_count
@@ -1830,6 +1441,39 @@ class RedGymEnv(Env):
         info["path_index"] = getattr(self, 'current_path_target_index', 0)
 
         obs = self._get_obs()
+        reward = 0
+
+        # Log important game state changes
+        if self.logger:
+            try:
+                # Log significant events
+                if reward > 0:
+                    self.logger.log_environment_event("REWARD_GAINED", {
+                        'message': f'Reward gained: {reward}',
+                        'reward': reward,
+                        'total_reward': getattr(self, 'total_reward', 0) + reward,
+                        'step_count': self.step_count
+                    })
+                
+                # Log battle events
+                if self.read_m("wIsInBattle") != 0:
+                    self.logger.log_environment_event("BATTLE_STATE", {
+                        'message': 'In battle',
+                        'battle_active': True,
+                        'step_count': self.step_count
+                    })
+                
+                # Log dialog events
+                dialog = self.read_dialog() or ''
+                if dialog.strip():
+                    self.logger.log_environment_event("DIALOG_ACTIVE", {
+                        'message': f'Dialog detected: {dialog[:50]}...' if len(dialog) > 50 else f'Dialog: {dialog}',
+                        'dialog_text': dialog,
+                        'step_count': self.step_count
+                    })
+                    
+            except Exception:
+                pass  # Don't let logging errors break the game
 
         # Note: step_count was already incremented at the beginning of step method
         # print(f"environment.py: step(): self.step_count=={self.step_count}\n")
@@ -1843,13 +1487,12 @@ class RedGymEnv(Env):
         # Show completed and pending events in order
         completed_events = [evt for evt in REQUIRED_EVENTS if self.events.get_event(evt)]
         pending_events = [evt for evt in REQUIRED_EVENTS if not self.events.get_event(evt)]
-        debug_print(f"[TriggerTest] completed_events: {completed_events}")
-        debug_print(f"[TriggerTest] pending_events  : {pending_events}")
-
-        # Update prev_map_id for next step
-        self.prev_map_id = cur_map_id
+        debug_print(f"[TriggerTest] Events - Completed: {len(completed_events)}, Pending: {len(pending_events)}")
+        # REMOVED: Old map tracking system replaced with centralized self.map_history
+        # prev_map_id is now always calculated from self.map_history[-2] where needed
         
-        print(f"STEP {self.step_count}: About to call run_action_on_emulator({action}) at end of step")
+        # REMOVED DUPLICATE: run_action_on_emulator() was already called at line 1825
+        # The duplicate call was causing warp activation failures
         
         # Dynamic STAB selection, infinite PP, and buff stats
         # Map Pokemon type codes to strongest STAB move IDs
@@ -1889,32 +1532,107 @@ class RedGymEnv(Env):
 
 
         self.current_dialog_lines = self.get_active_dialog()
-
-        print(f"environment.py: step(): dialog at end of step using get_active_dialog()=={self.get_active_dialog()}")
-        # state_from_memory_string = self.get_state_from_memory()
-        # print(f"environment.py: step(): get_state_from_memory()=={state_from_memory_string}")
-        
-        # This isn't RL so it doesn't matter if we always set done to False and reward to 0.0
         done = False
-        reward = 0.0
-        truncated = self.step_count >= self.max_steps
-        
-        print(f"=== STEP {self.step_count}: ACTION {action} COMPLETE ===\n")
-        
+        truncated = False
+        print(f"=== STEP {self.step_count}: ACTION {action} (final: {final_action}) COMPLETE ===\n")
+
         return obs, reward, done, truncated, info
 
+    def _convert_path_follow_to_movement_action(self) -> int | None:
+        """
+        Convert PATH_FOLLOW_ACTION to a movement action (0-3) without any early returns.
+        Returns None if conversion fails.
+        """
+        try:
+            print(f"PATH_FOLLOW: Converting PATH_FOLLOW_ACTION to movement")
+            
+            # Ensure we have path data loaded
+            if not hasattr(self, 'combined_path') or not self.combined_path:
+                current_quest = getattr(self, 'current_loaded_quest_id', None)
+                if current_quest is None and hasattr(self, 'navigator') and self.navigator and hasattr(self.navigator, 'active_quest_id'):
+                    current_quest = self.navigator.active_quest_id
+                if current_quest is None:
+                    current_quest = 1
+                
+                print(f"PATH_FOLLOW: Loading quest {current_quest}")
+                success = self.load_coordinate_path(current_quest)
+                if not success or not self.combined_path:
+                    print(f"PATH_FOLLOW: Failed to load quest {current_quest}")
+                    return None
+            
+            # Check if path is complete
+            if not hasattr(self, 'current_path_target_index'):
+                self.current_path_target_index = 0
+                
+            if self.current_path_target_index >= len(self.combined_path):
+                print(f"PATH_FOLLOW: Quest complete - all coordinates reached")
+                return None
+            
+            # Get current position and target
+            player_x, player_y, map_id = self.get_game_coords()
+            current_global = local_to_global(player_y, player_x, map_id)
+            target_coord = self.combined_path[self.current_path_target_index]
+            
+            print(f"PATH_FOLLOW: Current: {current_global}, Target: {target_coord}, Index: {self.current_path_target_index}/{len(self.combined_path)}")
+            
+            # Calculate distance and direction
+            dy = target_coord[0] - current_global[0]
+            dx = target_coord[1] - current_global[1]
+            distance = abs(dy) + abs(dx)
+            
+            print(f"PATH_FOLLOW: Distance = {distance}, dy = {dy}, dx = {dx}")
+            
+            # If at target, advance to next coordinate
+            if distance == 0:
+                print("PATH_FOLLOW: At target, advancing to next coordinate")
+                self.current_path_target_index += 1
+                
+                # Check if we've completed the path
+                if self.current_path_target_index >= len(self.combined_path):
+                    print(f"PATH_FOLLOW: Quest complete after advancing")
+                    return None
+                
+                # Get new target
+                target_coord = self.combined_path[self.current_path_target_index]
+                dy = target_coord[0] - current_global[0]
+                dx = target_coord[1] - current_global[1]
+                distance = abs(dy) + abs(dx)
+                
+                print(f"PATH_FOLLOW: New target: {target_coord}, distance = {distance}")
+                
+                # If new target is also at distance 0, no movement needed this step
+                if distance == 0:
+                    print("PATH_FOLLOW: New target also at distance 0")
+                    return None
+            
+            # Determine movement direction (prioritize larger delta)
+            # VALID_ACTIONS = [DOWN(0), LEFT(1), RIGHT(2), UP(3), A(4), B(5), PATH(6), START(7)]
+            if abs(dy) > abs(dx):
+                if dy > 0:
+                    movement_action = 0  # DOWN
+                    direction_name = "DOWN"
+                else:
+                    movement_action = 3  # UP
+                    direction_name = "UP"
+            elif dx != 0:
+                if dx > 0:
+                    movement_action = 2  # RIGHT
+                    direction_name = "RIGHT"
+                else:
+                    movement_action = 1  # LEFT
+                    direction_name = "LEFT"
+            else:
+                print("PATH_FOLLOW: No movement direction determined")
+                return None
+            
+            print(f"PATH_FOLLOW: Converted to {direction_name} (action {movement_action})")
+            return movement_action
+            
+        except Exception as e:
+            print(f"PATH_FOLLOW: Error during conversion: {e}")
+            return None
+
     def run_action_on_emulator(self, action):
-        # DEBUGGING: Force log every action call with call stack info
-        import traceback
-        print(f"\n*** run_action_on_emulator(): Called with action = {action} ***")
-        print(f"  Action type: {type(action)}")
-        print(f"  Valid actions length: {len(VALID_ACTIONS)}")
-        print(f"  Location before action: {self.get_game_coords()}")
-        print(f"  Step count: {self.step_count}")
-        print("  Call stack (last 3 frames):")
-        for line in traceback.format_stack()[-4:-1]:  # Skip the current frame
-            print(f"    {line.strip()}")
-        
         # PATH_FOLLOW_ACTION should never reach here directly - it's handled in step()
         # When navigator calls this with directional actions (0-3), those should execute normally
         if action == PATH_FOLLOW_ACTION:
@@ -1926,21 +1644,14 @@ class RedGymEnv(Env):
             print(f"ERROR: Invalid action {action} passed to run_action_on_emulator")
             return
         
-        print(f"  Valid action confirmed: {VALID_ACTIONS[action]}")
-        
         self.action_hist[action] += 1
         # press button then release after some steps
         # TODO: Add video saving logic
 
-        # if not self.disable_ai_actions:
-        print(f"  Sending input: {VALID_ACTIONS[action]}")
+        # Send input to emulator
         self.pyboy.send_input(VALID_ACTIONS[action])
-        print(f"  Sending release: {VALID_RELEASE_ACTIONS[action]}")
         self.pyboy.send_input(VALID_RELEASE_ACTIONS[action], delay=self.emulator_delay)
-        print(f"  Ticking {self.action_freq - 1} frames...")
         self.pyboy.tick(self.action_freq - 1, render=False)
-        
-        print(f"  Location after action: {self.get_game_coords()}")
 
         # TODO: Split this function up. update_seen_coords should not be here!
         self.update_seen_coords()
@@ -1950,7 +1661,6 @@ class RedGymEnv(Env):
             if not self.read_m("wJoyIgnore"):
                 break
             self.pyboy.button("a", 8)
-            print(f"environment.py: step(): Pressed button A, wJoyIgnore after button press: {self.read_m('wJoyIgnore')}")
             self.pyboy.tick(self.action_freq, render=True)
 
         if self.events.get_event("EVENT_GOT_HM01"):
@@ -3508,7 +3218,14 @@ class RedGymEnv(Env):
             
             # ENVIRONMENT STATE SYNCHRONIZATION
             self.combined_path = flattened_coordinates
-            self.current_path_target_index = 0
+            
+            # Only reset index if loading a different quest
+            if not hasattr(self, 'current_loaded_quest_id') or self.current_loaded_quest_id != quest_id:
+                self.current_path_target_index = 0
+                print(f"ENV_QUEST_LOAD: Reset path index to 0 for new quest {quest_id}")
+            else:
+                print(f"ENV_QUEST_LOAD: Preserving path index {self.current_path_target_index} for same quest {quest_id}")
+                
             self.current_loaded_quest_id = quest_id
             
             print(f"ENV_QUEST_LOAD: Quest {quest_id:03d} loaded - {len(flattened_coordinates)} coordinates from continuous file")
@@ -4522,3 +4239,37 @@ class RedGymEnv(Env):
 
     def stop(self):
         self.pyboy.stop()
+        
+    def handle_filtered_action(self, movement_action: int, filtered_action: int):
+        """
+        Handle filtered actions without early returns - unified architecture
+        This method no longer returns early, everything flows through step() 
+        """
+        # Update the a press before we use it so we dont trigger the font loaded early return
+        if VALID_ACTIONS[filtered_action] == WindowEvent.PRESS_BUTTON_A:
+            self.update_a_press()
+        
+        # REMOVED: Early return for PATH_FOLLOW_ACTION - now handled in step() conversion logic
+        # All actions now flow through the unified step() architecture
+        print(f"HANDLE_FILTERED_ACTION: Processing action {filtered_action} (movement: {movement_action})")
+        
+        # Continue with any other non-early-return logic here if needed
+        # (Currently this method just updates A press state)
+
+    def process_action(self, action: int, source: str = "unknown") -> tuple:
+        """
+        Single entry point for ALL actions - no exceptions!
+        
+        Args:
+            action: Action ID (0-7)
+            source: String identifier of action source for debugging
+            
+        Returns:
+            tuple: (obs, reward, done, truncated, info)
+        """
+        
+        # Log source for debugging
+        print(f"UNIFIED_ACTION: Source={source}, Action={action}, Step={self.step_count}")
+        
+        # Always call step() - no shortcuts, no exceptions
+        return self.step(action)

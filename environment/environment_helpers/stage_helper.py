@@ -320,6 +320,20 @@ class StageManager:
         except Exception as e:
             print(f"StageManager: Error checking dialog in scripted_stage_movement: {e}")
             
+        # Handle PATH_FOLLOW_ACTION first, regardless of scripted movements
+        from environment.environment import PATH_FOLLOW_ACTION
+        if action == PATH_FOLLOW_ACTION:
+            print(f"StageManager: Converting PATH_FOLLOW_ACTION to quest-appropriate movement")
+            
+            # Debug: Check if quest manager is available
+            if hasattr(self.env, 'quest_manager') and self.env.quest_manager:
+                current_quest = getattr(self.env.quest_manager, 'current_quest_id', None)
+                print(f"StageManager: Current quest ID from quest manager: {current_quest}")
+            else:
+                print(f"StageManager: No quest manager available on environment")
+                
+            return self._convert_path_follow_to_movement(action)
+            
         if not self.scripted_movements:
             return action
             
@@ -448,6 +462,285 @@ class StageManager:
                 return original_action
         except Exception as e:
             print(f"StageManager: Error in path following: {e}")
+            return original_action
+    
+    def _convert_path_follow_to_movement(self, original_action: int) -> int:
+        """Convert PATH_FOLLOW_ACTION to appropriate directional movement using quest path coordinates"""
+        try:
+            from environment.data.recorder_data.global_map import local_to_global, global_to_local
+            
+            print(f"StageManager: PATH_FOLLOW validation starting...")
+            
+            # Get current player position
+            x, y, map_id = self.env.get_game_coords()
+            current_global = local_to_global(y, x, map_id)
+            print(f"StageManager: Player position: local=({x}, {y}), global={current_global}, map={map_id}")
+            
+            # === VALIDATION 1: Active Quest ID ===
+            if not hasattr(self.env, 'quest_manager') or not self.env.quest_manager:
+                raise RuntimeError("CRITICAL: No quest manager available")
+            
+            quest_manager = self.env.quest_manager
+            current_quest_id = quest_manager.current_quest_id
+            
+            if current_quest_id is None:
+                raise RuntimeError("CRITICAL: No active quest ID found")
+            
+            print(f"✓ VALIDATION 1 PASSED: Active quest ID = {current_quest_id}")
+            
+            # === VALIDATION 2: Quest coordinate path exists ===
+            if not hasattr(self.env, 'navigator') or not self.env.navigator:
+                raise RuntimeError("CRITICAL: No navigator available")
+            
+            navigator = self.env.navigator
+            
+            # Force load the quest path if not already loaded
+            if (not hasattr(navigator, 'sequential_coordinates') or 
+                not navigator.sequential_coordinates or 
+                navigator.active_quest_id != current_quest_id):
+                
+                print(f"StageManager: Loading quest {current_quest_id} coordinates...")
+                if not hasattr(self.env, 'load_coordinate_path'):
+                    raise RuntimeError("CRITICAL: Environment has no load_coordinate_path method")
+                
+                success = self.env.load_coordinate_path(current_quest_id)
+                if not success:
+                    raise RuntimeError(f"CRITICAL: Failed to load coordinate path for quest {current_quest_id}")
+                
+                # CRITICAL FIX: Synchronize Navigator with Environment coordinates
+                if hasattr(self.env, 'combined_path') and self.env.combined_path:
+                    navigator.sequential_coordinates = self.env.combined_path.copy()
+                    navigator.active_quest_id = current_quest_id
+                    navigator.current_coordinate_index = getattr(self.env, 'current_path_target_index', 0)
+                    print(f"✓ Navigator synchronized with Environment: {len(navigator.sequential_coordinates)} coordinates")
+                
+                print(f"✓ Quest {current_quest_id} coordinate path loaded successfully")
+            
+            # Verify coordinates are now available (check both systems)
+            env_has_coords = hasattr(self.env, 'combined_path') and self.env.combined_path
+            nav_has_coords = hasattr(navigator, 'sequential_coordinates') and navigator.sequential_coordinates
+            
+            if not env_has_coords and not nav_has_coords:
+                raise RuntimeError(f"CRITICAL: Neither Environment nor Navigator has coordinates after loading quest {current_quest_id}")
+            elif not nav_has_coords:
+                print(f"WARNING: Navigator has no coordinates, but Environment does - synchronizing now")
+                if env_has_coords:
+                    navigator.sequential_coordinates = self.env.combined_path.copy()
+                    navigator.active_quest_id = current_quest_id
+                    navigator.current_coordinate_index = getattr(self.env, 'current_path_target_index', 0)
+                    print(f"✓ Navigator synchronized with Environment coordinates")
+                else:
+                    raise RuntimeError(f"CRITICAL: Navigator has no coordinates after loading quest {current_quest_id}")
+            elif not env_has_coords:
+                print(f"WARNING: Environment has no coordinates, but Navigator does - this is unusual but acceptable")
+            
+            quest_coordinates = navigator.sequential_coordinates
+            total_nodes = len(quest_coordinates)
+            
+            if total_nodes == 0:
+                raise RuntimeError(f"CRITICAL: Quest {current_quest_id} has 0 coordinate nodes")
+            
+            print(f"✓ VALIDATION 2 PASSED: Quest {current_quest_id} has {total_nodes} coordinate nodes")
+            print(f"  First node: {quest_coordinates[0]}")
+            print(f"  Last node: {quest_coordinates[-1]}")
+            
+            # Print all nodes for debugging (limit to first 10 to avoid spam)
+            print(f"  All nodes (showing first 10):")
+            for i, coord in enumerate(quest_coordinates[:10]):
+                print(f"    [{i}]: {coord}")
+            if total_nodes > 10:
+                print(f"    ... and {total_nodes - 10} more nodes")
+            
+            # === VALIDATION 3: Navigator has path nodes loaded ===
+            if navigator.active_quest_id != current_quest_id:
+                raise RuntimeError(f"CRITICAL: Navigator active quest {navigator.active_quest_id} != current quest {current_quest_id}")
+            
+            current_index = navigator.current_coordinate_index
+            if current_index < 0 or current_index >= total_nodes:
+                print(f"WARNING: Navigator index {current_index} out of bounds, resetting to 0")
+                navigator.current_coordinate_index = 0
+                current_index = 0
+            
+            print(f"✓ VALIDATION 3 PASSED: Navigator loaded with quest {current_quest_id}, index {current_index}/{total_nodes}")
+            
+            # === VALIDATION 4: Current and next node path ===
+            current_target = quest_coordinates[current_index]
+            next_target = quest_coordinates[current_index + 1] if current_index + 1 < total_nodes else None
+            
+            print(f"✓ VALIDATION 4 PASSED: Current target = {current_target}")
+            if next_target:
+                print(f"  Next target = {next_target}")
+            else:
+                print(f"  Next target = None (end of path)")
+            
+            # === VALIDATION 5: Check if player is on path or find nearest node ===
+            player_on_path = current_global in quest_coordinates
+            
+            if player_on_path:
+                player_path_index = quest_coordinates.index(current_global)
+                print(f"✓ VALIDATION 5 PASSED: Player is ON PATH at index {player_path_index}")
+                
+                # If player is ahead of navigator index, update navigator
+                if player_path_index > current_index:
+                    print(f"  Advancing navigator from index {current_index} to {player_path_index}")
+                    navigator.current_coordinate_index = player_path_index
+                    current_index = player_path_index
+                    current_target = quest_coordinates[current_index]
+                    next_target = quest_coordinates[current_index + 1] if current_index + 1 < total_nodes else None
+                    
+                # If player is at current target, advance to next
+                if current_global == current_target:
+                    if next_target:
+                        print(f"  Player reached target {current_target}, advancing to {next_target}")
+                        navigator.current_coordinate_index += 1
+                        current_index += 1
+                        current_target = next_target
+                        next_target = quest_coordinates[current_index + 1] if current_index + 1 < total_nodes else None
+                    else:
+                        print(f"  Player reached final target {current_target}, quest path complete!")
+                        return original_action
+            else:
+                # Find nearest node on current map
+                print(f"  Player NOT on path at {current_global}")
+                
+                # Filter coordinates to current map only
+                current_map_coords = []
+                for i, coord in enumerate(quest_coordinates):
+                    coord_local = global_to_local(coord[0], coord[1], map_id)
+                    if coord_local is not None:
+                        distance = abs(coord[0] - current_global[0]) + abs(coord[1] - current_global[1])
+                        current_map_coords.append((i, coord, distance))
+                
+                if not current_map_coords:
+                    raise RuntimeError(f"CRITICAL: No quest coordinates found on current map {map_id}")
+                
+                # Find nearest coordinate
+                current_map_coords.sort(key=lambda x: x[2])  # Sort by distance
+                nearest_index, nearest_coord, nearest_distance = current_map_coords[0]
+                
+                print(f"✓ VALIDATION 5 PASSED: Nearest node on map {map_id}:")
+                print(f"  Index {nearest_index}: {nearest_coord} (distance: {nearest_distance})")
+                
+                # Update navigator to target nearest coordinate
+                navigator.current_coordinate_index = nearest_index
+                current_index = nearest_index
+                current_target = nearest_coord
+                next_target = quest_coordinates[current_index + 1] if current_index + 1 < total_nodes else None
+            
+            # === ALL VALIDATIONS PASSED - Calculate movement ===
+            print(f"✓ ALL VALIDATIONS PASSED")
+            print(f"  Current target: {current_target}")
+            print(f"  Current position: {current_global}")
+            
+            # Check if Navigator can handle warps first
+            if hasattr(self.env, 'navigator') and self.env.navigator:
+                try:
+                    print(f"StageManager: Checking if Navigator can handle warp...")
+                    warp_handled = self.env.navigator.warp_tile_handler()
+                    if warp_handled:
+                        print(f"StageManager: Navigator handled warp successfully, returning NOOP")
+                        return self._get_noop_action()
+                    else:
+                        print(f"StageManager: Navigator did not handle warp, proceeding with movement calculation")
+                except Exception as e:
+                    print(f"StageManager: Error in Navigator warp handler: {e}")
+            
+            # Calculate movement direction to current target
+            dy = current_target[0] - current_global[0]  # global_y difference
+            dx = current_target[1] - current_global[1]  # global_x difference
+            
+            print(f"  Movement delta: dy={dy}, dx={dx}")
+            
+            if dy == 0 and dx == 0:
+                print(f"  Already at target, this should not happen after validation!")
+                return original_action
+            
+            # Check if target is on different map (need warp)
+            target_local = global_to_local(current_target[0], current_target[1], map_id)
+            if target_local is None:
+                print(f"  Target {current_target} is on different map, need warp")
+                
+                # Use environment's door detection system
+                try:
+                    doors_info = self.env._get_doors_info()
+                    print(f"  Found {len(doors_info)} potential warps on current map")
+                    
+                    if doors_info:
+                        # Find closest warp
+                        closest_warp = None
+                        closest_distance = float('inf')
+                        
+                        for door_dest, door_pos in doors_info:
+                            door_x, door_y = door_pos
+                            distance = abs(door_x - x) + abs(door_y - y)
+                            
+                            if distance < closest_distance:
+                                closest_distance = distance
+                                closest_warp = (door_dest, door_pos)
+                        
+                        if closest_warp:
+                            door_dest, (door_x, door_y) = closest_warp
+                            print(f"  Moving toward closest warp at ({door_x}, {door_y})")
+                            
+                            # Move toward the warp
+                            warp_dx = door_x - x
+                            warp_dy = door_y - y
+                            
+                            print(f"  Warp movement delta: dy={warp_dy}, dx={warp_dx}")
+                            
+                            # Prioritize larger delta
+                            if abs(warp_dy) > abs(warp_dx):
+                                if warp_dy > 0:
+                                    print(f"  → Moving DOWN toward warp")
+                                    return 0  # DOWN
+                                else:
+                                    print(f"  → Moving UP toward warp")
+                                    return 3  # UP
+                            elif warp_dx != 0:
+                                if warp_dx > 0:
+                                    print(f"  → Moving RIGHT toward warp")
+                                    return 2  # RIGHT
+                                else:
+                                    print(f"  → Moving LEFT toward warp")
+                                    return 1  # LEFT
+                            else:
+                                print(f"  → At warp position, moving DOWN to trigger")
+                                return 0  # DOWN
+                    
+                    print(f"  No warps found, falling back to direct movement")
+                    
+                except Exception as e:
+                    print(f"  Error detecting warps: {e}")
+            
+            # Direct movement to target on same map
+            # Prioritize larger delta
+            if abs(dy) > abs(dx):
+                if dy > 0:
+                    print(f"  → Moving DOWN")
+                    return 0  # DOWN
+                else:
+                    print(f"  → Moving UP")
+                    return 3  # UP
+            elif dx != 0:
+                if dx > 0:
+                    print(f"  → Moving RIGHT")
+                    return 2  # RIGHT
+                else:
+                    print(f"  → Moving LEFT")
+                    return 1  # LEFT
+            else:
+                print(f"  → No movement needed")
+                return original_action
+                
+        except RuntimeError as e:
+            print(f"StageManager PATH_FOLLOW CRITICAL FAILURE: {e}")
+            print(f"StageManager: Cannot proceed with PATH_FOLLOW - returning original action")
+            return original_action
+            
+        except Exception as e:
+            print(f"StageManager: Unexpected error in PATH_FOLLOW: {e}")
+            import traceback
+            traceback.print_exc()
             return original_action
     
     def _get_noop_action(self) -> int:

@@ -48,20 +48,71 @@ class QuestManager:
 
         try:
             rc_file_path = Path(required_completions_path) if required_completions_path else Path(__file__).parent / "required_completions.json"
+            
+            # Validate file exists before loading
+            if not rc_file_path.exists():
+                print(f"QuestManager __init__: Quest definitions file not found: {rc_file_path}")
+                self.quest_definitions = []
+                self.quests_by_location = {}
+                return
+                
             with rc_file_path.open('r') as f:
-                self.quest_definitions: List[Dict[str, Any]] = json.load(f)
+                loaded_data = json.load(f)
+            
+            # Validate the loaded data is a list
+            if not isinstance(loaded_data, list):
+                print(f"QuestManager __init__: Quest definitions file contains invalid format (not a list): {type(loaded_data)}")
+                self.quest_definitions = []
+                self.quests_by_location = {}
+                return
+                
+            self.quest_definitions: List[Dict[str, Any]] = loaded_data
+            
+            # Validate quest definitions and log loading status
+            valid_quests = []
+            for i, q_def in enumerate(self.quest_definitions):
+                if not isinstance(q_def, dict):
+                    print(f"QuestManager __init__: Skipping invalid quest definition at index {i} (not a dict): {type(q_def)}")
+                    continue
+                    
+                quest_id = q_def.get("quest_id")
+                if quest_id is None:
+                    print(f"QuestManager __init__: Skipping quest definition missing quest_id at index {i}: {q_def}")
+                    continue
+                    
+                try:
+                    # Ensure quest_id can be converted to int
+                    quest_id_int = int(quest_id)
+                    valid_quests.append(q_def)
+                    print(f"QuestManager __init__: Successfully loaded quest {quest_id_int:03d}: {q_def.get('begin_quest_text', 'No description')[:50]}...")
+                except (ValueError, TypeError) as e:
+                    print(f"QuestManager __init__: Skipping quest with invalid quest_id '{quest_id}': {e}")
+                    continue
+            
+            self.quest_definitions = valid_quests
+            print(f"QuestManager __init__: Successfully loaded {len(self.quest_definitions)} valid quest definitions")
             
             # Build mapping from location to sorted list of quest IDs (as integers)
             quests_by_location: Dict[int, List[int]] = defaultdict(list)
             for q_def in self.quest_definitions:
-                loc = int(q_def["location_id"])
-                quests_by_location[loc].append(int(q_def["quest_id"]))
+                try:
+                    loc = int(q_def["location_id"])
+                    quest_id_int = int(q_def["quest_id"])
+                    quests_by_location[loc].append(quest_id_int)
+                except (ValueError, TypeError, KeyError) as e:
+                    print(f"QuestManager __init__: Error processing quest for location mapping: {q_def.get('quest_id', 'UNKNOWN')}, error: {e}")
+                    continue
+                    
             for loc, qlist in quests_by_location.items():
                 qlist.sort()
             self.quests_by_location = dict(quests_by_location)
+            
+            print(f"QuestManager __init__: Quest location mapping: {dict(self.quests_by_location)}")
 
         except Exception as e:
             print(f"QuestManager __init__: Failed to load quest definitions: {e}")
+            import traceback
+            traceback.print_exc()
             self.quest_definitions = []
             self.quests_by_location = {}
 
@@ -118,15 +169,31 @@ class QuestManager:
         Sets self.current_quest_id and updates env and navigator.
         Returns the current quest ID (int) or None if no quest is currently actionable.
         """
-        # FIXED: Use QuestProgressionEngine's status if available
-        if hasattr(self, 'quest_progression_engine') and self.quest_progression_engine is not None:
-            # Get status from QuestProgressionEngine
-            quest_status = self.quest_progression_engine.get_quest_status()
-            self.quest_completed_status = {str(qid).zfill(3): completed for qid, completed in quest_status.items()}
-        else:
-            # Fallback to loading from file
-            self._load_quest_completion_status() # Ensure we have the latest status
-
+        # PERFORMANCE FIX: Cache quest status and only refresh when actually needed
+        # This prevents expensive QuestProgressionEngine calls on every filter_action()
+        
+        if not hasattr(self, '_cached_quest_status') or not hasattr(self, '_last_status_check'):
+            self._cached_quest_status = {}
+            self._last_status_check = 0
+        
+        # Only refresh quest status every 100ms to reduce overhead
+        import time
+        current_time = time.time()
+        if current_time - self._last_status_check > 0.1:  # Refresh every 100ms maximum
+            if hasattr(self, 'quest_progression_engine') and self.quest_progression_engine is not None:
+                # Get status from QuestProgressionEngine
+                quest_status = self.quest_progression_engine.get_quest_status()
+                self._cached_quest_status = {str(qid).zfill(3): completed for qid, completed in quest_status.items()}
+            else:
+                # Fallback to loading from file
+                self._load_quest_completion_status() # Ensure we have the latest status
+                self._cached_quest_status = self.quest_completed_status.copy()
+            
+            self._last_status_check = current_time
+        
+        # Use cached status for quest determination
+        self.quest_completed_status = self._cached_quest_status
+        
         for quest_def in self.quest_definitions: # Iterate in defined order
             quest_id_str = str(quest_def["quest_id"]).zfill(3)
             quest_id_int = int(quest_def["quest_id"])
@@ -135,39 +202,45 @@ class QuestManager:
                 continue # This quest is already completed
 
             prerequisites_met = True
-            if "required_completions" in quest_def:
-                for req_q_id_any_type in quest_def["required_completions"]:
+            required_completions = quest_def.get("required_completions", [])
+            
+            if required_completions:
+                for req_q_id_any_type in required_completions:
                     req_q_id_str = str(req_q_id_any_type).zfill(3)
-                    if not self.quest_completed_status.get(req_q_id_str, False):
+                    req_status = self.quest_completed_status.get(req_q_id_str, False)
+                    if not req_status:
                         prerequisites_met = False
                         break
             
             if prerequisites_met:
                 # This is the first uncompleted quest whose prerequisites are met
-                if self.current_quest_id != quest_id_int:
-                    print(f"QuestManager: Current quest updated to {quest_id_int} ({quest_def.get('begin_quest_text', '')[:50]}...)")
+                if self.current_quest_id != quest_id_int:                    
+                    # FIXED: Only do expensive setup work when quest actually changes
+                    old_quest_id = self.current_quest_id
+                    self.current_quest_id = quest_id_int
+                    
+                    # Update warp blocker with new quest - only when quest changes
+                    self.warp_blocker.update_quest_blocks(self.current_quest_id)
+                    
+                    # Update stage manager stage to match quest (simple 1:1 mapping for now)
+                    if hasattr(self.env, 'stage_manager'):
+                        self.env.stage_manager.stage = quest_id_int
+                        # Call update to load the stage configuration from STAGE_DICT
+                        self.env.stage_manager.update({})
+                    
+                    if hasattr(self.env, 'current_loaded_quest_id'):
+                        self.env.current_loaded_quest_id = self.current_quest_id
+                    if self.nav and hasattr(self.nav, 'active_quest_id'):
+                        self.nav.active_quest_id = self.current_quest_id
+                else:
+                    # Quest hasn't changed, no need to do expensive setup work
+                    pass
                 
-                self.current_quest_id = quest_id_int
-                # Update warp blocker with new quest
-                self.warp_blocker.update_quest_blocks(self.current_quest_id)
-                
-                # Update stage manager stage to match quest (simple 1:1 mapping for now)
-                if hasattr(self.env, 'stage_manager'):
-                    self.env.stage_manager.stage = quest_id_int
-                    # Call update to load the stage configuration from STAGE_DICT
-                    self.env.stage_manager.update({})
-                    print(f"QuestManager: Updated stage_manager.stage to {quest_id_int}, blockings: {len(self.env.stage_manager.blockings)}")
-                
-                if hasattr(self.env, 'current_loaded_quest_id'):
-                    self.env.current_loaded_quest_id = self.current_quest_id
-                if self.nav and hasattr(self.nav, 'active_quest_id'):
-                    self.nav.active_quest_id = self.current_quest_id
                 return self.current_quest_id
 
         # If loop completes, no actionable quest found (e.g., all done)
         if self.current_quest_id is not None:
-             print(f"QuestManager: No new actionable quest found. Last active was {self.current_quest_id}. All quests might be complete.")
-        self.current_quest_id = None # Explicitly set to None
+             self.current_quest_id = None # Explicitly set to None
         if hasattr(self.env, 'current_loaded_quest_id'):
             self.env.current_loaded_quest_id = None
         if self.nav and hasattr(self.nav, 'active_quest_id'):
@@ -200,27 +273,17 @@ class QuestManager:
         """
         Inspect or modify the given action based on quest logic and warp blocking.
         """
-        print(f"QuestManager.filter_action called with action {action}")  # DEBUG
-        
         # CRITICAL: Do not override actions when dialog is active - player needs to interact
         try:
             dialog = self.env.read_dialog()
             if dialog and dialog.strip():
-                print(f"QuestManager: Dialog active, allowing player action {action} for interaction")
                 return action
         except Exception as e:
-            print(f"QuestManager: Error checking dialog in filter_action: {e}")
-        
-        # FIXED: Don't reload quest system for PATH_FOLLOW_ACTION - let environment handle it directly
-        from environment.environment import PATH_FOLLOW_ACTION
-        if action == PATH_FOLLOW_ACTION:
-            print(f"QuestManager: PATH_FOLLOW_ACTION detected, passing through without quest reload")
-            return action
+            pass
         
         self.get_current_quest() # Ensure current_quest_id is up-to-date
 
         active_quest_id = self.current_quest_id # Use the ID set by get_current_quest
-        print(f"QuestManager: Active quest ID = {active_quest_id}")  # DEBUG
         
         # If no quest is active, or no specific logic, return original action
         if active_quest_id is None:
@@ -228,19 +291,25 @@ class QuestManager:
 
         x, y, map_id = self.env.get_game_coords()
         
+        # Store original action to detect if stage manager converted it
+        original_action = action
+        
         # Apply warp blocking via stage_manager.scripted_stage_blocking()
         # The warp_blocker automatically updates stage_manager.blockings when quest changes
         if hasattr(self.env, 'stage_manager') and hasattr(self.env.stage_manager, 'scripted_stage_blocking'):
-            print(f"QuestManager: Calling stage_manager.scripted_stage_blocking with action {action}")  # DEBUG
             action = self.env.stage_manager.scripted_stage_blocking(action)
-            print(f"QuestManager: stage_manager returned action {action}")  # DEBUG
         
         # Apply scripted movement via stage_manager.scripted_stage_movement()
         if hasattr(self.env, 'stage_manager') and hasattr(self.env.stage_manager, 'scripted_stage_movement'):
-            print(f"QuestManager: Calling stage_manager.scripted_stage_movement with action {action}")  # DEBUG
             action = self.env.stage_manager.scripted_stage_movement(action)
-            print(f"QuestManager: stage_manager scripted movement returned action {action}")  # DEBUG
 
+        # CRITICAL FIX: If stage manager converted PATH_FOLLOW_ACTION to a movement action,
+        # do NOT apply hardcoded quest overrides that could break path following
+        from environment.environment import PATH_FOLLOW_ACTION
+        if original_action == PATH_FOLLOW_ACTION and action != PATH_FOLLOW_ACTION:
+            if action in [0, 1, 2, 3]:  # Valid movement actions (UP, DOWN, LEFT, RIGHT)
+                return action  # Return stage manager's conversion immediately
+            
         # Continue with existing hard-coded logic as fallback
         # TODO: Gradually replace this with more warp blocker rules
 
@@ -307,9 +376,15 @@ class QuestManager:
             # For now, keeping the original structure:
             return self._apply_quest_015_rules(action, active_quest_id)
 
-
-        if active_quest_id == 5 and gy == 338 and gx == 94:
-            return self.up_action_index
+        # DEPRECATED HARDCODED OVERRIDES - These are now handled by stage manager
+        # Keeping commented for reference but preventing execution to avoid overriding stage manager
+        
+        # REMOVED: Quest 5 hardcoded override that was breaking PATH_FOLLOW_ACTION conversion
+        # Original problematic code:
+        # if active_quest_id == 5 and gy == 338 and gx == 94:
+        #     return self.up_action_index
+        # This hardcoded logic was overriding stage manager's proper PATH_FOLLOW_ACTION conversion
+        # and causing movement failures. Now handled by stage manager's scripted_movements in STAGE_DICT[5]
         
         # if active_quest_id == 2 or active_quest_id == 3:
         #     if active_quest_id == 3:
@@ -367,6 +442,37 @@ class QuestManager:
         if self.current_quest_id is not None:
             return self.get_quest_definition(self.current_quest_id)
         return None
+
+    def action_to_index(self, action_str: str) -> int:
+        """
+        Convert action string to action index.
+        
+        Args:
+            action_str: Action string like "A", "B", "UP", "DOWN", "LEFT", "RIGHT", "START"
+            
+        Returns:
+            int: Action index for the environment
+        """
+        action_mapping = {
+            "DOWN": self.down_action_index,
+            "LEFT": self.left_action_index, 
+            "RIGHT": self.right_action_index,
+            "UP": self.up_action_index,
+            "A": self.a_action_index,
+            "B": self.b_action_index,
+            "START": self.start_action_index,
+            "PATH": PATH_FOLLOW_ACTION  # For path following
+        }
+        
+        # Handle case insensitive input
+        action_upper = action_str.upper()
+        
+        if action_upper in action_mapping:
+            return action_mapping[action_upper]
+        else:
+            # Fallback to A button if unknown action
+            print(f"QuestManager: Unknown action '{action_str}', defaulting to A button")
+            return self.a_action_index
 
 # End of QuestManager enforcement module 
 
@@ -514,5 +620,56 @@ def describe_trigger(trg):
         return f"Inventory has >= {trg.get('quantity_min',1)} x {trg.get('item_name','')}"
     elif ttype == 'party_hp_is_full':
         return "Party HP is full"
+    elif ttype == 'current_map_is_previous_map_was':
+        current_map_id = trg.get('current_map_id')
+        previous_map_id = trg.get('previous_map_id')
+        return f"Map transition: {previous_map_id} → {current_map_id}"
+    elif ttype == 'party_pokemon_species_is':
+        return f"Party contains {trg.get('species_name', '')}"
+    elif ttype == 'battle_type_is':
+        return f"Battle type is {trg.get('battle_type_name', '')}"
     else:
-        return str(trg) 
+        return str(trg)
+
+def describe_trigger_logic(trg):
+    """Function to describe the actual code/logic being executed for a trigger"""
+    ttype = trg.get('type')
+    if ttype == 'current_map_id_is':
+        target_map = trg['map_id']
+        return f"current_map_id == {target_map}"
+    elif ttype == 'previous_map_id_was':
+        target_map = trg['map_id']
+        return f"prev_map_id == {target_map}"
+    elif ttype == 'dialog_contains_text':
+        text = trg['text']
+        return f"'{text}' in normalized_dialog"
+    elif ttype == 'party_size_is':
+        size = trg['size']
+        return f"party_size == {size}"
+    elif ttype == 'event_completed':
+        event_name = trg.get('event_name', '')
+        return f"env.events.get_event('{event_name}') == True"
+    elif ttype == 'battle_won':
+        # Legacy support
+        return f"legacy_battle_won_check()"
+    elif ttype == 'item_received_dialog':
+        text = trg['text']
+        return f"'{text}' in item_dialog"
+    elif ttype == 'item_is_in_inventory':
+        item_name = trg.get('item_name', '')
+        quantity_min = trg.get('quantity_min', 1)
+        return f"inventory_count('{item_name}') >= {quantity_min}"
+    elif ttype == 'party_hp_is_full':
+        return "all(pokemon.hp == pokemon.max_hp for pokemon in party)"
+    elif ttype == 'current_map_is_previous_map_was':
+        current_map_id = trg.get('current_map_id')
+        previous_map_id = trg.get('previous_map_id')
+        return f"(prev_map == {previous_map_id}) and (curr_map == {current_map_id})"
+    elif ttype == 'party_pokemon_species_is':
+        species_name = trg.get('species_name', '')
+        return f"any(pokemon.species == '{species_name}' for pokemon in party)"
+    elif ttype == 'battle_type_is':
+        battle_type = trg.get('battle_type_name', '')
+        return f"battle_type == '{battle_type}'"
+    else:
+        return f"unknown_trigger_type('{ttype}')" 

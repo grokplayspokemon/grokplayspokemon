@@ -13,7 +13,7 @@ import logging
 from environment.environment import RedGymEnv # Changed
 from environment.data.environment_data.items import Items # For type hinting from RedGymEnv
 from environment.data.environment_data.types import PokemonType as EnvPokemonType # For type hinting
-from environment.data.environment_data.party import PartyMon # For type hinting
+from environment.data.environment_data.party import PartyMons # For type hinting
 from environment.data.environment_data.moves import Moves as Move # For TM/HM names if needed
 from environment.data.environment_data.species import Species as PokemonSpecies # Added for species names
 
@@ -76,7 +76,7 @@ def extract_structured_game_state(env_wrapper: EnvWrapper, reader: RedGymEnv, qu
         party_data = []
         num_party_pokemon = reader.read_m("wPartyCount")
         for i in range(num_party_pokemon):
-            pokemon: PartyMon = reader.party[i]
+            pokemon: PartyMons = reader.party[i]
             
             move_names = []
             if hasattr(pokemon, 'Moves'):

@@ -1,0 +1,78 @@
+graph TD
+    A["🎮 User Presses '5' Key<br/>(PATH_FOLLOW_ACTION)"] --> B["🎯 QuestManager.filter_action()"]
+    
+    B --> B1{{"🔍 Dialog Active?"}}
+    B1 -->|Yes| B2["✋ Return Original Action<br/>(Player controls dialog)"]
+    B1 -->|No| B3["🔄 Call get_current_quest()"]
+    
+    B3 --> B4["📋 QuestProgressionEngine<br/>determines active quest"]
+    B4 --> B5["🏗️ StageManager.scripted_stage_blocking()"]
+    
+    B5 --> C1{{"🚫 Warp Blocked?"}}
+    C1 -->|Yes| C2["🔄 Return alternate action<br/>(e.g., NOOP)"]
+    C1 -->|No| C3["🎬 StageManager.scripted_stage_movement()"]
+    
+    C3 --> D1{{"📍 Match scripted conditions?"}}
+    D1 -->|Yes| D2["🎯 Return scripted action<br/>(overrides PATH_FOLLOW)"]
+    D1 -->|No| D3["🗺️ _convert_path_follow_to_movement()"]
+    
+    D3 --> E1["📍 Get current player position<br/>local_to_global(y, x, map_id)"]
+    E1 --> E2["🧭 Check Navigator state<br/>navigator.current_coordinate_index"]
+    
+    E2 --> F1{{"📊 Navigator has coordinates?"}}
+    F1 -->|No| F2["🔍 _ensure_quest_loaded()<br/>Load quest coordinate path"]
+    F2 --> F3{{"✅ Quest loaded successfully?"}}
+    F3 -->|No| F4["⚠️ Return original action<br/>(fallback)"]
+    F3 -->|Yes| F1
+    
+    F1 -->|Yes| G1["🎯 Get target coordinate<br/>navigator.sequential_coordinates[index]"]
+    
+    G1 --> H1{{"📍 Already at target?"}}
+    H1 -->|Yes| H2["⬆️ Advance Navigator index<br/>navigator.current_coordinate_index += 1"]
+    H2 --> H3{{"🏁 End of path?"}}
+    H3 -->|Yes| H4["✅ Return original action<br/>(quest complete)"]
+    H3 -->|No| G1
+    
+    H1 -->|No| I1{{"🗺️ Target on current map?"}}
+    I1 -->|No| I2["🚪 WARP LOGIC<br/>Find nearest warp door"]
+    I2 --> I3["📍 Calculate movement to warp<br/>prioritize larger delta"]
+    I3 --> I4["↩️ Return warp movement<br/>(UP/DOWN/LEFT/RIGHT)"]
+    
+    I1 -->|Yes| J1["📐 Calculate movement vector<br/>dy = target_y - current_y<br/>dx = target_x - current_x"]
+    J1 --> J2["🎯 Select movement direction<br/>prioritize larger absolute delta"]
+    J2 --> J3["↩️ Return movement action<br/>(0=DOWN, 1=LEFT, 2=RIGHT, 3=UP)"]
+    
+    C2 --> K1["🎮 Environment.step(action)"]
+    D2 --> K1
+    F4 --> K1
+    H4 --> K1
+    I4 --> K1
+    J3 --> K1
+    
+    K1 --> L1["🎲 Environment.run_action_on_emulator()"]
+    L1 --> L2["📱 PyBoy executes button press"]
+    L2 --> L3["🎮 Game state updates"]
+    
+    L3 --> M1{{"🚪 Warp occurred?"}}
+    M1 -->|Yes| M2["🗺️ Navigator.warp_tile_handler()"]
+    M2 --> M3["📍 Update coordinate index<br/>for destination map"]
+    M3 --> M4["🎯 Snap to nearest coordinate<br/>on new map"]
+    
+    M1 -->|No| N1{{"✅ Movement successful?"}}
+    N1 -->|Yes| N2["📍 Position updated<br/>continue path following"]
+    N1 -->|No| N3["⚠️ Movement failed<br/>collision or blocked"]
+    
+    N2 --> O1["🔄 Next step() call"]
+    N3 --> O1
+    M4 --> O1
+    
+    O1 --> A
+    
+    style A fill:#e1f5fe
+    style B fill:#f3e5f5
+    style D3 fill:#fff3e0
+    style G1 fill:#e8f5e8
+    style I2 fill:#ffebee
+    style J2 fill:#f1f8e9
+    style K1 fill:#fce4ec
+    style L2 fill:#e3f2fd

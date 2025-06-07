@@ -37,9 +37,9 @@ class WarpTracker:
             print(f"\nWarp detected into map {map_id}. pre_facing={self.pre_facing}, post_facing={self.post_facing}. Starting tracking.")
             # Prevent nested warp detection while pressing B
             self.prev_map_id = map_id
-            # Press B to advance through pause/dialog after warp
+            # FIXED: Use environment's action execution instead of direct step
             for _ in range(3):
-                env.step(5)
+                env.process_action(5, source="WarpTracker-Dialog")  # Press B to advance through pause/dialog
             
             # Record the warp entry coordinate, but skip recording until movement
             gy, gx = navigator._get_player_global_coords()
@@ -108,7 +108,7 @@ class WarpTracker:
             action_map = {"down": 0, "left": 1, "right": 2, "up": 3}
             action = action_map.get(dir_name)
             if action is not None:
-                env.step(action)
+                env.process_action(action, source="WarpTracker-Backtrack")  # FIXED: Use environment's action execution
             else:
                 print(f"[WarpTracker] ERROR: No action for direction {dir_name}")
         # Apply inverse facings
@@ -125,13 +125,13 @@ class WarpTracker:
             action_map = {"down": 0, "left": 1, "right": 2, "up": 3}
             if opp:
                 action = action_map.get(opp)
-                env.step(action)
+                env.process_action(action, source="WarpTracker-Facing")  # FIXED: Use environment's action execution
                     
         self.backtracking = False
         print("[WarpTracker] Backtracking complete.")
-        # Press B to advance through pause/dialog after backtracking
+        # FIXED: Use environment's action execution instead of direct step
         for _ in range(3):
-            env.step(5)
+            env.process_action(5, source="WarpTracker-Complete")  # Press B to advance through pause/dialog
 
 # Singleton instance of WarpTracker
 warp_tracker = WarpTracker()

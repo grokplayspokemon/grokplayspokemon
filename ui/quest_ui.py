@@ -18,6 +18,9 @@ from ui.render_to_global import (
     draw_warp_minimap, update_screen_canvas, save_full_map_with_overlays
 )
 
+# Import speech bubble system
+from ui.speech_bubble_system import get_speech_bubble_manager, initialize_speech_bubbles
+
 def start_quest_ui(quests: List[Dict[str, Any]], status_queue):
     """Start the modernized quest progress UI"""
     # Initialize map data
@@ -160,6 +163,16 @@ def start_quest_ui(quests: List[Dict[str, Any]], status_queue):
                                         (345, 86, 2), (343, 89, 2), (349, 82, 2), (350, 82, 2), 
                                         (351, 82, 2), (352, 82, 2), (352, 81, 2), (353, 81, 2), 
                                         (354, 81, 2), (355, 81, 2), (355, 80, 2), (355, 79, 2)]
+    
+    # Initialize speech bubble system
+    speech_canvases = {
+        'emulator': emulator_canvas,
+        'collision': collision_canvas,
+        'map': map_canvas,
+        'warp': warp_minimap_canvas
+    }
+    speech_manager = initialize_speech_bubbles(speech_canvases)
+    print("Speech bubble system initialized for quest UI")
     
     # Set up polling
     setup_polling(root, status_queue, emulator_canvas, collision_canvas, map_canvas, 
@@ -383,6 +396,20 @@ def handle_quest_update(quest_id, env_labels, map_canvas, tree):
     
     if old_quest != quest_id:
         map_canvas.quest_paths_drawn = False
+        
+        # Speech bubble integration - show quest start text for new quest
+        try:
+            speech_manager = get_speech_bubble_manager()
+            if quest_id and old_quest is not None:
+                # This is a quest transition, show start text for new quest
+                print(f"Quest changed from {old_quest} to {quest_id}, showing start text")
+                speech_manager.show_quest_start(quest_id, ['emulator', 'map'])
+            elif quest_id and old_quest is None:
+                # First quest initialization, show start text
+                print(f"Initial quest {quest_id}, showing start text")
+                speech_manager.show_quest_start(quest_id, ['emulator', 'map'])
+        except Exception as e:
+            print(f"Error showing speech bubble for quest start: {e}")
     
     # Update tree highlighting
     for item in tree.get_children():
@@ -403,6 +430,11 @@ def update_tree_item(tree, status_data):
     progress_str = status_data.get('debug_str', '')
     
     if tree.exists(item_id):
+        # Check if this is a quest completion (item is a quest header and just became complete)
+        current_tags = list(tree.item(item_id, 'tags'))
+        was_pending = 'pending' in current_tags
+        is_quest_header = 'quest_header' in current_tags
+        
         status = '✅ Complete' if is_complete else '⏳ Pending'
         values = (status, criteria_str, progress_str)
         
@@ -415,6 +447,15 @@ def update_tree_item(tree, status_data):
         tags.append('complete' if is_complete else 'pending')
         
         tree.item(item_id, values=values, tags=tags)
+        
+        # Speech bubble integration - show quest completion text
+        if is_complete and was_pending and is_quest_header:
+            try:
+                speech_manager = get_speech_bubble_manager()
+                print(f"Quest {item_id} completed, showing completion text")
+                speech_manager.show_quest_complete(item_id, ['emulator', 'map'])
+            except Exception as e:
+                print(f"Error showing speech bubble for quest completion: {e}")
         
         if is_complete and tree.parent(item_id) == "":
             tree.item(item_id, open=False)

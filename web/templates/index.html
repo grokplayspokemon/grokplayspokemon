@@ -713,7 +713,7 @@
 <body>
     <div class="stream-container">
         <header class="header">
-            <h1 class="title"><strong>Grok</strong> Plays Pokémon Red</h1>
+                            <h1 class="title"><strong>GROK</strong> Plays Pokémon Red</h1>
             <div class="flex items-center gap-24">
                 <div class="flex gap-16 text-sm">
                     <div>
@@ -725,9 +725,16 @@
                         <span class="ml-2 mono">02:45:33</span>
                     </div>
                 </div>
-                <div class="live-badge">
-                    <div class="live-dot"></div>
-                    LIVE
+                <div class="flex items-center gap-4">
+                    <div class="agent-controls">
+                        <button id="start-btn" class="btn btn-success" onclick="startAgent()">Start</button>
+                        <button id="pause-btn" class="btn btn-secondary" onclick="pauseAgent()" disabled>Pause</button>
+                        <button id="stop-btn" class="btn btn-danger" onclick="stopAgent()" disabled>Stop</button>
+                    </div>
+                    <div class="live-badge{% if not grok_on %} test-mode{% endif %}">
+                        <div class="live-dot"></div>
+                        {% if grok_on %}LIVE{% else %}TEST MODE{% endif %}
+                    </div>
                 </div>
             </div>
         </header>
@@ -761,10 +768,13 @@
             </div>
             <!-- Grok status section occupies remaining space -->
             <div class="sidebar-section" id="grok-status-section">
-                <h2 class="section-title">Grok Status</h2>
+                <h2 class="section-title">{% if grok_on %}Grok Status{% else %}Agent Status{% endif %}</h2>
                 <div id="grok-status">
                     <div id="grok-thinking"></div>
                     <div id="grok-response"></div>
+                    {% if not grok_on %}
+                    <div class="text-gray-600">Running in test mode - LLM reasoning disabled</div>
+                    {% endif %}
                 </div>
             </div>
         </aside>
@@ -1049,6 +1059,101 @@
                 teamContainer.appendChild(createEmptySlot());
             }
         });
+        // Agent control functions
+        async function startAgent() {
+            try {
+                document.getElementById('start-btn').disabled = true;
+                document.getElementById('start-btn').textContent = 'Starting...';
+                
+                const response = await fetch('/start', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    document.getElementById('start-btn').style.display = 'none';
+                    document.getElementById('pause-btn').disabled = false;
+                    document.getElementById('stop-btn').disabled = false;
+                    console.log('Agent started successfully');
+                } else {
+                    alert('Failed to start agent: ' + result.message);
+                    document.getElementById('start-btn').disabled = false;
+                    document.getElementById('start-btn').textContent = 'Start';
+                }
+            } catch (error) {
+                console.error('Error starting agent:', error);
+                alert('Error starting agent: ' + error.message);
+                document.getElementById('start-btn').disabled = false;
+                document.getElementById('start-btn').textContent = 'Start';
+            }
+        }
+
+        async function pauseAgent() {
+            try {
+                const response = await fetch('/pause', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    const pauseBtn = document.getElementById('pause-btn');
+                    if (pauseBtn.textContent === 'Pause') {
+                        pauseBtn.textContent = 'Resume';
+                    } else {
+                        pauseBtn.textContent = 'Pause';
+                    }
+                    console.log('Agent pause state toggled');
+                } else {
+                    alert('Failed to pause/resume agent: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error pausing agent:', error);
+                alert('Error pausing agent: ' + error.message);
+            }
+        }
+
+        async function stopAgent() {
+            try {
+                const response = await fetch('/stop', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    document.getElementById('start-btn').style.display = 'inline-flex';
+                    document.getElementById('start-btn').disabled = false;
+                    document.getElementById('start-btn').textContent = 'Start';
+                    document.getElementById('pause-btn').disabled = true;
+                    document.getElementById('pause-btn').textContent = 'Pause';
+                    document.getElementById('stop-btn').disabled = true;
+                    console.log('Agent stopped successfully');
+                } else {
+                    alert('Failed to stop agent: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error stopping agent:', error);
+                alert('Error stopping agent: ' + error.message);
+            }
+        }
+
+        // Check initial agent status on page load
+        async function checkAgentStatus() {
+            try {
+                const response = await fetch('/status');
+                const result = await response.json();
+                
+                if (result.status === 'running') {
+                    document.getElementById('start-btn').style.display = 'none';
+                    document.getElementById('pause-btn').disabled = false;
+                    document.getElementById('stop-btn').disabled = false;
+                } else if (result.status === 'paused') {
+                    document.getElementById('start-btn').style.display = 'none';
+                    document.getElementById('pause-btn').disabled = false;
+                    document.getElementById('pause-btn').textContent = 'Resume';
+                    document.getElementById('stop-btn').disabled = false;
+                }
+            } catch (error) {
+                console.error('Error checking agent status:', error);
+            }
+        }
+
+        // Check status when page loads
+        checkAgentStatus();
+
     </script>
 </body>
 

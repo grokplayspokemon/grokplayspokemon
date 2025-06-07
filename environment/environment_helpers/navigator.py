@@ -10,20 +10,28 @@ from pathlib import Path
 from typing import List, Optional, Tuple, TYPE_CHECKING, Dict, Any
 
 from pyboy.utils import WindowEvent
-
+            
+from environment.data.environment_data.constants import WARP_DICT
 from environment.data.environment_data.map import MapIds
-from environment.data.environment_data.warps import WARP_DICT
 
 if TYPE_CHECKING:
     from environment import RedGymEnv
 
 from environment.data.recorder_data.global_map import local_to_global, global_to_local
 
+# Import logging system
+import sys
+import os
+sys.path.append('/puffertank/grok_plays_pokemon')
+from utils.logging_config import get_pokemon_logger
 
 class InteractiveNavigator:
     def __init__(self, env_instance: RedGymEnv):
         self.env: RedGymEnv = env_instance
         self.pyboy = self.env.pyboy
+        
+        # Initialize logger
+        self.logger = get_pokemon_logger()
 
         # Full flattened quest path coords and their map IDs
         self.sequential_coordinates: List[Tuple[int, int]] = []
@@ -108,6 +116,16 @@ class InteractiveNavigator:
                 return None
                 
             if self.last_position != pos3:
+                # Log navigation position changes
+                if self.logger:
+                    self.logger.log_navigation_event("POSITION_UPDATE", {
+                        'message': f'Player position updated',
+                        'global_coordinates': [gy, gx],
+                        'local_coordinates': [lx, ly],
+                        'map_id': map_id,
+                        'quest_id': self.active_quest_id
+                    })
+                
                 print(
                     f"navigator.py: _get_player_global_coords(): "
                     f"global_coords=({gy},{gx}), map_id={map_id}, "
@@ -126,27 +144,38 @@ class InteractiveNavigator:
     # FIXED: Add method to ensure quest is loaded
     def _ensure_quest_loaded(self) -> bool:
         """Ensure a quest is loaded by using the current quest ID from quest manager"""
-        if self.active_quest_id is not None and self.sequential_coordinates:
-            return True
-            
-        # Check if environment has a quest ID set
-        env_qid = getattr(self.env, "current_loaded_quest_id", None)
-        if env_qid is not None:
-            print(f"Navigator: Loading quest {env_qid} from environment")
-            return self.load_coordinate_path(env_qid)
-        
-        # Get current quest from quest manager if available
+        # PRIORITY 1: Get current quest from quest manager if available (most reliable)
         quest_manager = getattr(self.env, "quest_manager", None)
         if quest_manager is not None:
             current_quest = quest_manager.get_current_quest()
             if current_quest is not None:
-                print(f"Navigator: Loading current quest {current_quest} from quest manager")
-                if self.load_coordinate_path(current_quest):
-                    setattr(self.env, "current_loaded_quest_id", current_quest)
+                print(f"Navigator: Loading quest {current_quest} from quest manager (priority 1)")
+                
+                # Force reload if different quest or no coordinates
+                if self.active_quest_id != current_quest or not self.sequential_coordinates:
+                    if self.load_coordinate_path(current_quest):
+                        setattr(self.env, "current_loaded_quest_id", current_quest)
+                        return True
+                    else:
+                        print(f"Navigator: Failed to load quest {current_quest} from quest manager")
+                else:
+                    print(f"Navigator: Quest {current_quest} already loaded with {len(self.sequential_coordinates)} coordinates")
                     return True
         
-        # Find nearest quest path as last resort
-        print("Navigator: No current quest available, finding nearest available quest path")
+        # PRIORITY 2: Check if environment has a quest ID set
+        env_qid = getattr(self.env, "current_loaded_quest_id", None)
+        if env_qid is not None:
+            print(f"Navigator: Loading quest {env_qid} from environment (priority 2)")
+            if self.load_coordinate_path(env_qid):
+                return True
+        
+        # PRIORITY 3: Check if we already have a valid quest loaded
+        if self.active_quest_id is not None and self.sequential_coordinates:
+            print(f"Navigator: Using already loaded quest {self.active_quest_id} (priority 3)")
+            return True
+        
+        # LAST RESORT: Find nearest quest path (this should rarely be needed now)
+        print("Navigator: No current quest available, finding nearest available quest path (last resort)")
         cur_map = self.env.get_game_coords()[2]
         if self._fallback_to_nearest_path(cur_map):
             print(f"Navigator: Successfully loaded nearest quest path (quest {self.active_quest_id})")
@@ -161,11 +190,15 @@ class InteractiveNavigator:
     # ...............................................................
     def snap_to_nearest_coordinate(self) -> bool:
         """FIXED: Enhanced coordinate snapping with map bounds filtering"""
+        print(f"[SNAP_DEBUG] snap_to_nearest_coordinate() called")
+        print(f"[SNAP_DEBUG] Current coordinates loaded: {len(self.sequential_coordinates)}")
+        print(f"[SNAP_DEBUG] Current quest ID: {self.active_quest_id}")
+        
         if not self.sequential_coordinates:
-            try:
-                self.load_segment_for_current_map()
-            except RuntimeError as e:
-                print(f"Navigator: snap_to_nearest_coordinate: {e}")
+            print("Navigator: snap_to_nearest_coordinate: No coordinates loaded, attempting to load quest...")
+            # FIXED: Use proper quest loading instead of old segmented files
+            if not self._ensure_quest_loaded():
+                print(f"Navigator: snap_to_nearest_coordinate: Failed to load any quest")
                 return False
 
         try:
@@ -176,7 +209,9 @@ class InteractiveNavigator:
                 print("Navigator: snap_to_nearest_coordinate: Cannot get player position")
                 return False
 
-            print(f"Navigator: snap_to_nearest_coordinate: Player at {cur_pos} on map {cur_map}")
+            print(f"[SNAP_DEBUG] Player at {cur_pos} on map {cur_map} (local {local_x}, {local_y})")
+            print(f"[SNAP_DEBUG] First 5 coordinates in path: {self.sequential_coordinates[:5]}")
+            print(f"[SNAP_DEBUG] Using placeholder map IDs: {self.using_placeholder_map_ids}")
 
             # FIXED: Filter coordinates by current map bounds using MAP_DATA
             valid_indices = []
@@ -195,7 +230,7 @@ class InteractiveNavigator:
                     top_left_global = local_to_global(0, 0, cur_map)  # Returns (gy, gx)
                     bottom_right_global = local_to_global(tile_height-1, tile_width-1, cur_map)
                     
-                    print(f"Navigator: Map {cur_map} bounds: top_left={top_left_global}, bottom_right={bottom_right_global}")
+                    print(f"[SNAP_DEBUG] Map {cur_map} bounds: top_left={top_left_global}, bottom_right={bottom_right_global}")
                     
                     # Filter coordinates that fall within this map's bounds
                     for i, coord in enumerate(self.sequential_coordinates):
@@ -204,14 +239,18 @@ class InteractiveNavigator:
                             top_left_global[1] <= coord_gx <= bottom_right_global[1]):
                             valid_indices.append(i)
                     
-                    print(f"Navigator: Found {len(valid_indices)} coordinates on current map {cur_map}")
+                    print(f"[SNAP_DEBUG] Found {len(valid_indices)} coordinates on current map {cur_map}")
+                    if valid_indices:
+                        print(f"[SNAP_DEBUG] Valid coordinates on map {cur_map}: {[self.sequential_coordinates[i] for i in valid_indices[:5]]}...")
                 else:
-                    print(f"Navigator: Map {cur_map} not found in MAP_DATA, using all coordinates")
+                    print(f"[SNAP_DEBUG] Map {cur_map} not found in MAP_DATA, using all coordinates")
                     valid_indices = list(range(len(self.sequential_coordinates)))
             else:
                 # Use map IDs from coordinate data (non-placeholder case)
                 valid_indices = [i for i, map_id in enumerate(self.coord_map_ids) if map_id == cur_map]
-                print(f"Navigator: Found {len(valid_indices)} coordinates with matching map ID {cur_map}")
+                print(f"[SNAP_DEBUG] Found {len(valid_indices)} coordinates with matching map ID {cur_map}")
+                if valid_indices:
+                    print(f"[SNAP_DEBUG] Coordinates with map ID {cur_map}: {[(i, self.sequential_coordinates[i]) for i in valid_indices[:5]]}...")
 
             if valid_indices:
                 # Find nearest coordinate from valid indices only
@@ -220,34 +259,35 @@ class InteractiveNavigator:
                 nearest_i = valid_indices[nearest_local_i]
                 dist = distances[nearest_local_i]
                 
-                print(f"Navigator: Valid coordinates on map {cur_map}: {[self.sequential_coordinates[i] for i in valid_indices[:5]]}...")  # Show first 5
+                print(f"[SNAP_DEBUG] Nearest coordinate: index {nearest_i}, coord {self.sequential_coordinates[nearest_i]}, distance {dist}")
             else:
                 # Fallback to all coordinates if no map-specific coordinates found
-                print(f"Navigator: No coordinates found on map {cur_map}, using nearest overall")
+                print(f"[SNAP_DEBUG] No coordinates found on map {cur_map}, using nearest overall")
                 distances = [self._manhattan(cur_pos, coord) for coord in self.sequential_coordinates]
                 nearest_i = distances.index(min(distances))
                 dist = distances[nearest_i]
+                print(f"[SNAP_DEBUG] Nearest overall coordinate: index {nearest_i}, coord {self.sequential_coordinates[nearest_i]}, distance {dist}")
                 
             # Only snap if distance is reasonable
             if dist <= 13:
                 old_index = self.current_coordinate_index
                 self.current_coordinate_index = nearest_i
-                print(f"Navigator: Snapped from index {old_index} to {nearest_i}, coord {self.sequential_coordinates[nearest_i]}, distance {dist}")
+                print(f"[SNAP_DEBUG] ✅ Snapped from index {old_index} to {nearest_i}, coord {self.sequential_coordinates[nearest_i]}, distance {dist}")
                 
                 # FIXED: Enhanced state reset after snapping
                 self.movement_failure_count = 0
                 if self.current_coordinate_index >= len(self.sequential_coordinates):
                     self.current_coordinate_index = max(0, len(self.sequential_coordinates) - 1)
-                    print("Navigator: Adjusted coordinate index to stay within bounds")
+                    print("[SNAP_DEBUG] Adjusted coordinate index to stay within bounds")
 
-                print("Navigator: snap_to_nearest_coordinate: SNAP COMPLETE")
+                print("[SNAP_DEBUG] snap_to_nearest_coordinate: SNAP COMPLETE")
                 return True
             else:
-                print(f"Navigator: Distance too large ({dist}), not snapping")
+                print(f"[SNAP_DEBUG] ❌ Distance too large ({dist}), not snapping")
                 return False
                 
         except Exception as e:
-            print(f"Navigator: Error in snap_to_nearest_coordinate: {e}")
+            print(f"[SNAP_DEBUG] ❌ Error in snap_to_nearest_coordinate: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -397,8 +437,11 @@ class InteractiveNavigator:
         # FIXED: Handle LAST_MAP special case (target_map_id = 255)
         original_target_map_id = target_map_id
         if target_map_id == 255 and target_map_name == "LAST_MAP":
-            # Resolve to the previous map ID
-            prev_map_id = getattr(self.env, "prev_map_id", None)
+            # Resolve to the previous map ID using environment's centralized map tracking
+            prev_map_id = None
+            if hasattr(self.env, 'map_history') and len(self.env.map_history) >= 2:
+                prev_map_id = self.env.map_history[-2]
+            
             if prev_map_id is not None and prev_map_id != cur_map:
                 target_map_id = prev_map_id
                 print(f"warp_tile_handler: DIAGNOSTIC - Resolved LAST_MAP warp from {cur_map} to {target_map_id}")
@@ -414,9 +457,240 @@ class InteractiveNavigator:
         print(f"warp_tile_handler: DIAGNOSTIC - Final target map ID: {target_map_id}")
         print(f"warp_tile_handler: DIAGNOSTIC - Player at {local_pos} (global {cur_global_pos}) on map {cur_map}, warp distance {warp_distance} to warp {nearest_warp_tile_local}, targeting map {target_map_id}")
         
-        # Rest of existing warp logic...
+        # CRITICAL: Check if this warp is aligned with the current quest path
+        if self.sequential_coordinates and self.coord_map_ids:
+            warp_info = {
+                "target_map_id": target_map_id,
+                "local_coords": nearest_warp_tile_local
+            }
+            
+            is_path_aligned = self.is_warp_aligned_with_path(warp_info)
+            print(f"warp_tile_handler: DIAGNOSTIC - Warp is {'ALIGNED' if is_path_aligned else 'NOT ALIGNED'} with quest path")
+            
+            # Only execute warps that are aligned with the quest path or if we're at the end of the path
+            at_end_of_path = (self.current_coordinate_index >= len(self.sequential_coordinates) - 1)
+            should_execute_warp = is_path_aligned or at_end_of_path
+            
+            if not should_execute_warp:
+                print(f"warp_tile_handler: DIAGNOSTIC - Skipping warp - not aligned with path and not at end of quest")
+                return False
+        else:
+            print(f"warp_tile_handler: DIAGNOSTIC - No path loaded, allowing warp execution")
+        
+        # EXECUTE THE WARP: Move toward the warp tile to trigger it
+        print(f"warp_tile_handler: EXECUTION - About to execute warp to map {target_map_id}")
+        
+        # Calculate direction to move toward warp tile
+        dx = nearest_warp_tile_local[0] - local_pos[0]  # x difference
+        dy = nearest_warp_tile_local[1] - local_pos[1]  # y difference
+        
+        print(f"warp_tile_handler: EXECUTION - Delta to warp tile: dx={dx}, dy={dy}")
+        
+        # FIXED: Determine movement action with special handling for door warps
+        movement_action = None
+        
+        if warp_distance == 0:
+            # Already on warp tile - for door warps, always try DOWN to activate
+            print(f"warp_tile_handler: EXECUTION - Player on warp tile, using DOWN to activate door warp")
+            movement_action = 0  # DOWN
+            direction_name = "DOWN"
+        else:
+            # Player adjacent to warp tile - prioritize getting TO the warp tile first
+            # But for Oak's Lab door warps, we need to approach from a specific direction
+            
+            # SPECIAL CASE: Oak's Lab door warps (map 40) work best with DOWN movement
+            if cur_map == 40:  # Oak's Lab
+                print(f"warp_tile_handler: EXECUTION - Oak's Lab detected, prioritizing DOWN movement for door warp")
+                # Try to get to the warp tile first, then activate with DOWN
+                if dy > 0:
+                    movement_action = 0  # DOWN
+                    direction_name = "DOWN"
+                elif dy < 0:
+                    movement_action = 3  # UP  
+                    direction_name = "UP"
+                elif dx > 0:
+                    movement_action = 2  # RIGHT
+                    direction_name = "RIGHT"
+                elif dx < 0:
+                    movement_action = 1  # LEFT
+                    direction_name = "LEFT"
+                else:
+                    # Default to DOWN for door activation
+                    movement_action = 0  # DOWN
+                    direction_name = "DOWN"
+            else:
+                # General case for other maps
+                if abs(dy) > abs(dx):
+                    if dy > 0:
+                        movement_action = 0  # DOWN
+                        direction_name = "DOWN"
+                    else:
+                        movement_action = 3  # UP
+                        direction_name = "UP"
+                elif dx != 0:
+                    if dx > 0:
+                        movement_action = 2  # RIGHT
+                        direction_name = "RIGHT"
+                    else:
+                        movement_action = 1  # LEFT
+                        direction_name = "LEFT"
+                else:
+                    # Should not happen, but fallback
+                    movement_action = 0  # DOWN
+                    direction_name = "DOWN"
+        
+        print(f"warp_tile_handler: EXECUTION - Executing movement {direction_name} (action {movement_action}) to trigger warp")
+        
+        # Store pre-warp state for tracking
+        pre_warp_map = cur_map
+        pre_warp_pos = cur_global_pos
+        
+        # Execute the movement to trigger the warp (bypass collision for warp activation)
+        moved = self._execute_movement(movement_action, bypass_collision=True)
+        
+        if not moved:
+            print(f"warp_tile_handler: EXECUTION - Movement failed, cannot trigger warp")
+            return False
+        
+        print(f"warp_tile_handler: EXECUTION - Movement executed, checking for warp completion...")
+        
+        # Allow some time for warp to complete
+        time.sleep(0.1)  # Small delay to allow warp transition
+        
+        # Check if warp actually occurred by comparing map IDs
+        try:
+            new_local_x, new_local_y, new_map = self.env.get_game_coords()
+            new_global_pos = self._get_player_global_coords()
+            
+            print(f"warp_tile_handler: EXECUTION - Post-movement: map {new_map}, pos {new_global_pos}")
+            
+            warp_occurred = (new_map != pre_warp_map)
+            
+            # ENHANCED: If warp didn't trigger and we're on a warp tile, try DOWN movement for door activation
+            if not warp_occurred and new_map == pre_warp_map:
+                new_local_pos = (new_local_x, new_local_y)
+                # Check if we're now ON a warp tile
+                on_warp_tile = any(
+                    self._manhattan(new_local_pos, (entry.get("x"), entry.get("y"))) == 0
+                    for entry in warp_entries_for_cur_map
+                    if entry.get("x") is not None and entry.get("y") is not None
+                )
+                
+                if on_warp_tile and cur_map == 40:  # Oak's Lab special handling
+                    print(f"warp_tile_handler: RETRY - Player on warp tile but warp didn't trigger, trying multiple activation methods")
+                    
+                    # Try multiple directions to activate the warp, bypassing collision detection for warp activation
+                    activation_directions = [3, 0, 1, 2]  # UP, DOWN, LEFT, RIGHT
+                    direction_names = ["UP", "DOWN", "LEFT", "RIGHT"]
+                    
+                    for i, direction in enumerate(activation_directions):
+                        direction_name = direction_names[i]
+                        print(f"warp_tile_handler: RETRY - Trying {direction_name} activation (bypassing collision)")
+                        
+                        # Bypass collision detection for warp activation by calling environment directly
+                        try:
+                            print(f"warp_tile_handler: RETRY - Executing {direction_name} movement directly on emulator")
+                            obs, reward, done, truncated, info = self.env.process_action(direction, source="Navigator-WarpRetry")
+                            time.sleep(0.1)
+                            
+                            # Check if warp triggered
+                            retry_local_x, retry_local_y, retry_map = self.env.get_game_coords()
+                            retry_global_pos = self._get_player_global_coords()
+                            
+                            print(f"warp_tile_handler: RETRY - After {direction_name}: map {retry_map}, pos {retry_global_pos}")
+                            warp_occurred = (retry_map != pre_warp_map)
+                            
+                            if warp_occurred:
+                                # Update the "new" values for the success path below
+                                new_local_x, new_local_y, new_map = retry_local_x, retry_local_y, retry_map
+                                new_global_pos = retry_global_pos
+                                print(f"warp_tile_handler: RETRY - SUCCESS! Warp activated with {direction_name} movement")
+                                break
+                            else:
+                                print(f"warp_tile_handler: RETRY - {direction_name} movement didn't trigger warp, trying next direction")
+                                
+                        except Exception as e:
+                            print(f"warp_tile_handler: RETRY - {direction_name} movement failed with error: {e}")
+                            continue
+                    
+                    if not warp_occurred:
+                        print(f"warp_tile_handler: RETRY - All activation directions failed")
+            
+            if warp_occurred:
+                print(f"warp_tile_handler: SUCCESS - Warp completed! Moved from map {pre_warp_map} to map {new_map}")
+                
+                # Update warp tracking state
+                self.last_warp_time = time.time()
+                self._last_warp_origin = pre_warp_map
+                self._last_warp_target = new_map
+                self._warp_delay_timer = time.time() + self._post_warp_delay
+                
+                # Environment state is automatically updated through map_history in environment
+                
+                # CRITICAL: Advance navigator coordinate index to continue path on destination map
+                if self.sequential_coordinates and self.coord_map_ids:
+                    print(f"warp_tile_handler: PATH_ADVANCE - Looking for coordinates on destination map {new_map}")
+                    
+                    # Find the next coordinate that's on the destination map
+                    old_index = self.current_coordinate_index
+                    found_destination_coord = False
+                    
+                    # Look ahead in the path for coordinates on the destination map
+                    search_limit = min(len(self.sequential_coordinates), self.current_coordinate_index + 50)
+                    for next_idx in range(self.current_coordinate_index, search_limit):
+                        if next_idx < len(self.coord_map_ids):
+                            if self.using_placeholder_map_ids:
+                                # Use MAP_DATA to check if coordinate is on destination map
+                                coord = self.sequential_coordinates[next_idx]
+                                coord_map = self._determine_map_id_for_coordinate(coord[0], coord[1])
+                                if coord_map == new_map:
+                                    self.current_coordinate_index = next_idx
+                                    found_destination_coord = True
+                                    print(f"warp_tile_handler: PATH_ADVANCE - Advanced from index {old_index} to {next_idx} for destination map {new_map}")
+                                    break
+                            else:
+                                # Use actual map IDs
+                                if self.coord_map_ids[next_idx] == new_map:
+                                    self.current_coordinate_index = next_idx
+                                    found_destination_coord = True
+                                    print(f"warp_tile_handler: PATH_ADVANCE - Advanced from index {old_index} to {next_idx} for destination map {new_map}")
+                                    break
+                    
+                    if not found_destination_coord:
+                        print(f"warp_tile_handler: PATH_ADVANCE - No coordinates found on destination map {new_map}, using snap-to-nearest")
+                        # Try to snap to the nearest coordinate on the new map
+                        if self.snap_to_nearest_coordinate():
+                            print(f"warp_tile_handler: PATH_ADVANCE - Successfully snapped to coordinate index {self.current_coordinate_index}")
+                        else:
+                            print(f"warp_tile_handler: PATH_ADVANCE - Snap failed, advancing index by 1")
+                            self.current_coordinate_index += self._direction
+                    
+                    # Ensure index stays within bounds
+                    if self.current_coordinate_index >= len(self.sequential_coordinates):
+                        self.current_coordinate_index = len(self.sequential_coordinates) - 1
+                        print(f"warp_tile_handler: PATH_ADVANCE - Adjusted index to stay within bounds: {self.current_coordinate_index}")
+                    elif self.current_coordinate_index < 0:
+                        self.current_coordinate_index = 0
+                        print(f"warp_tile_handler: PATH_ADVANCE - Adjusted index to stay within bounds: {self.current_coordinate_index}")
+                
+                print(f"warp_tile_handler: SUCCESS - Warp execution and path advancement complete")
+                print(f"=== WARP_TILE_HANDLER END (SUCCESS) ===\n")
+                return True
+                
+            else:
+                print(f"warp_tile_handler: EXECUTION - Movement completed but no warp detected (still on map {new_map})")
+                # This could happen if the movement didn't actually reach the warp tile
+                # or if the warp requires additional steps
+                return False
+                
+        except Exception as e:
+            print(f"warp_tile_handler: ERROR - Exception while checking warp completion: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        
         print(f"=== WARP_TILE_HANDLER END ===\n")
-        return False  # Temporary return to see diagnostic output
+        return False
 
     def manual_warp_trigger(self) -> bool:
         """Manually trigger a warp when standing next to a warp tile (for testing)"""
@@ -480,36 +754,13 @@ class InteractiveNavigator:
     #  M O V E   T O   N E X T   C O O R D I N A T E
     # ...............................................................
     def move_to_next_coordinate(self) -> bool:
-        """INTELLIGENT: Robust path following with intelligent direction determination and comprehensive validation"""
-        print(f"\n=== MOVE_TO_NEXT_COORDINATE START ===")
-        
-        # ENHANCED: Check for warp instability first to prevent hard-stuck situations
-        if hasattr(self.env, 'is_warping') and self.env.is_warping:
-            print("Navigator: DIAGNOSTIC - Warp transition detected - proceeding with caution")
-            print(f"Navigator: DIAGNOSTIC - env.is_warping = {self.env.is_warping}")
-            # DIAGNOSTIC: Let's see what's causing this
-            if hasattr(self.env, '_warp_debug_info'):
-                print(f"Navigator: DIAGNOSTIC - Warp debug info: {self.env._warp_debug_info}")
-            # ENHANCED: Check what's setting is_warping to True
-            print(f"Navigator: DIAGNOSTIC - Checking environment warp state details...")
-            self._diagnose_warp_instability()
-            # FIXED: Don't return early - continue with movement attempt
-            # return True  # Return success but don't attempt movement during warp
-            
-        # Validate navigator state first
-        state = self.validate_navigator_state()
-        if not state["valid"]:
-            print(f"Navigator: DIAGNOSTIC - Invalid state detected: {state['errors']}")
-            if not self._ensure_quest_loaded():
-                print("Navigator: DIAGNOSTIC - Failed to recover from invalid state")
-                return False
-        
-        if state["warnings"]:
-            print(f"Navigator: DIAGNOSTIC - State warnings: {state['warnings']}")
-        
-        # FIXED: Ensure quest is loaded first
+        """Enhanced coordinate navigation with intelligent direction and comprehensive logging"""
         if not self._ensure_quest_loaded():
-            print("Navigator: DIAGNOSTIC - No quest loaded and failed to load default quest")
+            if self.logger:
+                self.logger.log_error("NAVIGATION", "No quest loaded for coordinate navigation", {
+                    'active_quest_id': self.active_quest_id,
+                    'coordinates_count': len(self.sequential_coordinates)
+                })
             return False
             
         # INTELLIGENT: Ensure direction is set intelligently before any movement
@@ -549,189 +800,122 @@ class InteractiveNavigator:
             except Exception:
                 pass
 
-        # Debug: start of move_to_next_coordinate
-        cur_map_for_debug = self.env.get_game_coords()[2]
-        path_len_for_debug = len(self.sequential_coordinates)
-        coord_map_ids_len_for_debug = len(self.coord_map_ids)
-        
-        print(f"Navigator: DIAGNOSTIC - QID={self.active_quest_id}, Idx={self.current_coordinate_index}, CurMap={cur_map_for_debug}, PathLen={path_len_for_debug}, MapIDsLen={coord_map_ids_len_for_debug}")
-        if self.sequential_coordinates and self.current_coordinate_index < path_len_for_debug:
-            target_coord_for_debug = self.sequential_coordinates[self.current_coordinate_index]
-            target_map_id_for_debug = self.coord_map_ids[self.current_coordinate_index] if self.current_coordinate_index < coord_map_ids_len_for_debug else "N/A"
-            print(f"Navigator: DIAGNOSTIC - Current Target: {target_coord_for_debug} on Map {target_map_id_for_debug}")
-        else:
-            print(f"Navigator: DIAGNOSTIC - No valid target coord at current index or path empty.")
+        self.navigation_status = "navigating"
 
-        # Pause on dialog/battle
-        try:
-            if (self.env.read_dialog() or "").strip():
-                print("Navigator: DIAGNOSTIC - Dialog detected, pausing navigation")
-                return False
-        except Exception:
-            pass
-
-        # ENHANCED: Early warp handling with improved loop prevention and direction tracking
-        current_time = time.time()
-        
-        # If we just warped, enforce a delay period before checking for warps again
-        if self._warp_delay_timer > current_time:
-            print(f"Navigator: DIAGNOSTIC - Enforcing post-warp delay. {self._warp_delay_timer - current_time:.1f}s remaining")
-            return True  # Return early but successful to prevent other movement attempts
-        
-        # ENHANCED: Improved warp loop detection with direction awareness
-        if hasattr(self, '_last_warp_target') and hasattr(self, '_last_warp_origin'):
-            cur_map = self.env.get_game_coords()[2]
-            potential_warps = self._get_adjacent_warp_targets()
-            
-            if self._last_warp_origin in potential_warps and cur_map == self._last_warp_target:
-                print(f"Navigator: DIAGNOSTIC - Detected potential warp loop! Just warped from {self._last_warp_origin} to {cur_map}")
-                
-                # Check if current direction matches path direction before allowing movement
-                if self._validate_path_direction_for_current_position():
-                    print(f"Navigator: DIAGNOSTIC - Path direction validated, continuing with path following")
-                    # Clear warp loop detection to allow normal path following
-                    self._last_warp_origin = None
-                    self._last_warp_target = None
-                else:
-                    print(f"Navigator: DIAGNOSTIC - Path direction not validated, trying to find correct path")
-                    if self._try_continue_on_current_map():
-                        print(f"Navigator: DIAGNOSTIC - Successfully found path to follow on current map {cur_map}")
-                        return True
-
-        # ENHANCED: Allow warping when at end of quest and need to exit, but with instability check
-        print(f"Navigator: DIAGNOSTIC - About to check warp_tile_handler...")
-        print(f"Navigator: DIAGNOSTIC - Pre-warp check: env.is_warping = {getattr(self.env, 'is_warping', 'MISSING')}")
-        try:
-            if not (hasattr(self.env, 'is_warping') and self.env.is_warping):
-                print(f"Navigator: DIAGNOSTIC - Calling warp_tile_handler...")
-                warp_result = self.warp_tile_handler()
-                print(f"Navigator: DIAGNOSTIC - warp_tile_handler returned: {warp_result}")
-                print(f"Navigator: DIAGNOSTIC - Post-warp check: env.is_warping = {getattr(self.env, 'is_warping', 'MISSING')}")
-                if warp_result:
-                    print(f"Navigator: DIAGNOSTIC - warp handled, new idx={self.current_coordinate_index}")
-                    return True
-            else:
-                print(f"Navigator: DIAGNOSTIC - Skipping warp_tile_handler due to env.is_warping = {self.env.is_warping}")
-                print(f"Navigator: DIAGNOSTIC - This is why movement is blocked!")
-        except Exception as e:
-            print(f"Navigator: DIAGNOSTIC - Error in warp_tile_handler: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # Ensure path loaded (should already be loaded by _ensure_quest_loaded above)
-        if not self.sequential_coordinates:
-            print("Navigator: DIAGNOSTIC - No coordinates loaded after quest loading - this should not happen")
-            return False
-
-        # Special halt for Quest 12 at Oak
-        if self.active_quest_id == 12:
-            pos = self._get_player_global_coords()
-            if pos == (348, 110):
-                print("Navigator: DIAGNOSTIC - Quest 12 special halt at Oak position")
-                return False
-        
-        # ENHANCED: Special handling for Quest 3 completion in Oak's Lab with direction awareness
-        if self.active_quest_id == 3 and cur_map_for_debug == 40:  # Oak's Lab
-            pos = self._get_player_global_coords()
-            target = self.sequential_coordinates[self.current_coordinate_index] if (
-                self.sequential_coordinates and self.current_coordinate_index < len(self.sequential_coordinates)
-            ) else None
-            
-            if pos and target:
-                distance_to_target = self._manhattan(pos, target)
-                # ENHANCED: Consider direction when determining quest completion
-                print(f"Navigator: DIAGNOSTIC - Quest 3 Oak's Lab: pos={pos}, target={target}, distance={distance_to_target}, direction={self._direction}")
-                if distance_to_target <= 8 or self._direction == -1:  # Allow backward movement to exit
-                    print(f"Navigator: DIAGNOSTIC - Quest 3 - Close to target {target} in Oak's Lab (distance: {distance_to_target}, direction: {self._direction})")
-                    print(f"Navigator: DIAGNOSTIC - Quest 3 - Allowing quest completion and exit from Oak's Lab")
-                    self.current_coordinate_index = len(self.sequential_coordinates)  # Mark as complete
-                    return True  # This will trigger the end-of-path handling which includes warp exit
-
-        # ENHANCED: Handle case where player is close to target but can't reach it exactly
-        if (self.sequential_coordinates and 
-            0 <= self.current_coordinate_index < len(self.sequential_coordinates)):
-            
-            target = self.sequential_coordinates[self.current_coordinate_index]
-            cur_pos = self._get_player_global_coords()
-            
-            if cur_pos and target:
-                distance_to_target = self._manhattan(cur_pos, target)
-                
-                # ENHANCED: Consider direction when determining if target is "reached"
-                print(f"Navigator: DIAGNOSTIC - Target check: pos={cur_pos}, target={target}, distance={distance_to_target}, direction={self._direction}")
-                if distance_to_target <= 3:
-                    print(f"Navigator: DIAGNOSTIC - Close enough to target {target} (distance: {distance_to_target}), advancing to next coordinate")
-                    self.current_coordinate_index += self._direction
-                    if self.current_coordinate_index >= len(self.sequential_coordinates) or self.current_coordinate_index < 0:
-                        # ENHANCED: Handle both forward and backward completion
-                        if self._direction == 1:
-                            print(f"Navigator: DIAGNOSTIC - Reached end of quest {self.active_quest_id} after getting close to final target")
-                        else:
-                            print(f"Navigator: DIAGNOSTIC - Reached beginning of quest {self.active_quest_id} while moving backward")
-                            self.current_coordinate_index = 0  # Clamp to beginning
-                        # Continue to end-of-path handling below
-                    else:
-                        print(f"Navigator: DIAGNOSTIC - Advanced to next coordinate, new index: {self.current_coordinate_index}")
-                        return True
-
-        # ENHANCED: End-of-path handling with direction awareness
-        if self.current_coordinate_index >= len(self.sequential_coordinates) or self.current_coordinate_index < 0:
-            print(f"Navigator: DIAGNOSTIC - End-of-path handling: index={self.current_coordinate_index}, path_length={len(self.sequential_coordinates)}, direction={self._direction}")
-            
-            # Quest 23 roaming
-            if self.active_quest_id == 23:
-                print(f"Navigator: DIAGNOSTIC - Quest 23 roaming mode")
-                return self.roam_in_grass()
-            
-            # ENHANCED: Special handling for quest completion scenarios
-            cur_map = self.env.get_game_coords()[2]
-            
-            # If in Oak's Lab (map 40) and quest 3 is complete, try to exit
-            if cur_map == 40 and self.active_quest_id == 3:
-                print(f"Navigator: DIAGNOSTIC - Quest 3 complete in Oak's Lab, attempting to exit via warp")
-                available_warps = self.get_available_warps_on_current_map()
-                if available_warps:
-                    # Find a warp that leads out of Oak's Lab
-                    exit_warp = next((w for w in available_warps if w["is_adjacent"]), None)
-                    if exit_warp:
-                        print(f"Navigator: DIAGNOSTIC - Found exit warp to map {exit_warp['target_map_id']}, allowing warp")
-                        # Allow the warp to trigger by returning True and letting the warp handler take over
-                        return True
-            
-            # ENHANCED: Handle backward movement at beginning of path
-            if self.current_coordinate_index < 0:
-                print(f"Navigator: DIAGNOSTIC - Reached beginning of quest {self.active_quest_id} while moving backward")
-                if self._direction == -1:
-                    # Try to find a previous quest or exit strategy
-                    if self._fallback_to_nearest_path(cur_map):
-                        print(f"Navigator: DIAGNOSTIC - Successfully fell back to nearest path")
-                        return True
-                self.current_coordinate_index = 0  # Clamp to beginning
-                return True
-            
-            # Continue with existing quest transition logic...
-            print(f"Navigator: DIAGNOSTIC - Standard end-of-path quest transition logic")
-
-        # Rest of the existing logic...
-        print(f"Navigator: DIAGNOSTIC - Proceeding to step_towards logic")
-        
-        # Move towards current target
-        target = self.sequential_coordinates[self.current_coordinate_index]
+        # Get current position for navigation
         cur_pos = self._get_player_global_coords()
-        if cur_pos is None:
-            print(f"Navigator: DIAGNOSTIC - Cannot get current position for step_towards")
+        if not cur_pos:
+            print("Navigator: Cannot get current position for navigation")
+            self.navigation_status = "error"
             return False
-        if cur_pos == target:
-            print(f"Navigator: DIAGNOSTIC - Already at target, incrementing index")
+
+        # Check if we've reached the end of the path
+        if self.current_coordinate_index >= len(self.sequential_coordinates):
+            print("Navigator: Reached end of coordinate path")
+            self.navigation_status = "completed"
+            if self.logger:
+                self.logger.log_navigation_event("PATH_COMPLETED", {
+                    'message': 'Reached end of coordinate path',
+                    'quest_id': self.active_quest_id,
+                    'final_index': self.current_coordinate_index,
+                    'total_coordinates': len(self.sequential_coordinates),
+                    'current_position': cur_pos
+                })
+            return False
+
+        target_coord = self.sequential_coordinates[self.current_coordinate_index]
+        target_map = self._safe_coord_map_id(self.current_coordinate_index)
+
+        # Log navigation attempt
+        if self.logger:
+            self.logger.log_navigation_event("COORDINATE_NAVIGATION", {
+                'message': f'Navigating to coordinate {target_coord}',
+                'current_position': cur_pos,
+                'target_coordinate': target_coord,
+                'target_map_id': target_map,
+                'coordinate_index': self.current_coordinate_index,
+                'total_coordinates': len(self.sequential_coordinates),
+                'quest_id': self.active_quest_id,
+                'direction': self._direction
+            })
+
+        # Check if we're already at the target
+        if cur_pos == target_coord:
+            print(f"Navigator: Already at target coordinate {target_coord}, advancing to next")
             self.current_coordinate_index += self._direction
+            if self.logger:
+                self.logger.log_navigation_event("COORDINATE_REACHED", {
+                    'message': f'Reached target coordinate {target_coord}',
+                    'coordinate': target_coord,
+                    'quest_id': self.active_quest_id,
+                    'new_index': self.current_coordinate_index
+                })
             return True
 
-        print(f"Navigator: DIAGNOSTIC - About to call _step_towards with target {target}")
-        step_result = self._step_towards(target)
-        print(f"Navigator: DIAGNOSTIC - _step_towards returned: {step_result}")
-        print(f"=== MOVE_TO_NEXT_COORDINATE END ===\n")
-        
-        return step_result
+        # Calculate movement direction
+        dy = target_coord[0] - cur_pos[0]
+        dx = target_coord[1] - cur_pos[1]
+        distance = abs(dy) + abs(dx)
+
+        print(f"Navigator: Current: {cur_pos}, Target: {target_coord}, Distance: {distance}")
+
+        # Determine action
+        if abs(dy) > abs(dx):
+            action = 0 if dy > 0 else 3  # down or up
+            direction_name = "down" if dy > 0 else "up"
+        else:
+            action = 2 if dx > 0 else 1  # right or left
+            direction_name = "right" if dx > 0 else "left"
+
+        print(f"Navigator: Moving {direction_name} (action {action}) toward {target_coord}")
+
+        # FIXED: Use environment's action execution instead of direct step
+        try:
+            obs, reward, done, truncated, info = self.env.process_action(action, source="Navigator-Coordinate")
+            
+            # Log movement execution
+            if self.logger:
+                self.logger.log_navigation_event("MOVEMENT_EXECUTED", {
+                    'message': f'Executed movement {direction_name}',
+                    'action': action,
+                    'direction': direction_name,
+                    'target_coordinate': target_coord,
+                    'quest_id': self.active_quest_id,
+                    'step_info': info
+                })
+            
+            # Check if we reached the target after movement
+            new_pos = self._get_player_global_coords()
+            if new_pos == target_coord:
+                print(f"Navigator: Successfully reached target coordinate {target_coord}")
+                self.current_coordinate_index += self._direction
+                self.movement_failure_count = 0
+                
+                if self.logger:
+                    self.logger.log_navigation_event("COORDINATE_REACHED", {
+                        'message': f'Successfully reached target coordinate {target_coord}',
+                        'coordinate': target_coord,
+                        'quest_id': self.active_quest_id,
+                        'new_index': self.current_coordinate_index,
+                        'movements_taken': 1
+                    })
+                return True
+            else:
+                print(f"Navigator: Movement executed but not at target. New position: {new_pos}")
+                self.movement_failure_count += 1
+                return True
+
+        except Exception as e:
+            print(f"Navigator: Error during movement: {e}")
+            if self.logger:
+                self.logger.log_error("NAVIGATION", f"Error during movement execution: {e}", {
+                    'action': action,
+                    'direction': direction_name,
+                    'target_coordinate': target_coord,
+                    'quest_id': self.active_quest_id
+                })
+            self.movement_failure_count += 1
+            return False
 
     def _diagnose_warp_instability(self) -> None:
         """DIAGNOSTIC: Analyze why env.is_warping is constantly True"""
@@ -795,9 +979,7 @@ class InteractiveNavigator:
         try:
             local_x, local_y, cur_map = self.env.get_game_coords()
             print(f"WARP DIAG: Current position: local=({local_x},{local_y}), map={cur_map}")
-            
-            # Check if standing on a warp tile
-            from environment.data.environment_helpers.warp_dict import WARP_DICT, MapIds
+
             warp_entries = WARP_DICT.get(MapIds(cur_map).name, [])
             print(f"WARP DIAG: WARP_DICT entries for map {cur_map} ({MapIds(cur_map).name}): {len(warp_entries)}")
             for i, entry in enumerate(warp_entries[:3]):  # Show first 3
@@ -911,10 +1093,15 @@ class InteractiveNavigator:
     # ...............................................................
     #  E X E C U T E  M O V E M E N T
     # ...............................................................
-    def _execute_movement(self, action: int) -> bool:
-        """Execute a movement action in the environment with enhanced collision detection"""
+    def _execute_movement(self, action: int, bypass_collision: bool = False) -> bool:
+        """Execute a movement action in the environment with enhanced collision detection
         
-        print(f"Navigator: _execute_movement called with action = {action}")
+        Args:
+            action: Movement action (0=down, 1=left, 2=right, 3=up)
+            bypass_collision: If True, skip collision checks (used for warp activation)
+        """
+        
+        print(f"Navigator: _execute_movement called with action = {action}, bypass_collision = {bypass_collision}")
         print(f"Navigator: Current location: {self.env.get_game_coords()}")
         
         # BASIC SAFETY: Only block if actually in battle or dialog is active
@@ -927,13 +1114,18 @@ class InteractiveNavigator:
             print(f"Navigator: Movement blocked - dialog active: {dialog[:50]}...")
             return False
         
-        # NEW: Pre-movement collision check
-        direction_map = {0: "down", 1: "left", 2: "right", 3: "up"}
-        direction = direction_map.get(action)
-        
-        if direction and not self._is_direction_walkable(direction):
-            print(f"Navigator: Movement blocked - direction {direction} not walkable")
-            return False
+        # COLLISION CHECK: Skip collision detection if bypassing for warp activation
+        if not bypass_collision:
+            direction_map = {0: "down", 1: "left", 2: "right", 3: "up"}
+            direction = direction_map.get(action)
+            
+            if direction and not self._is_direction_walkable(direction):
+                print(f"Navigator: Movement blocked - direction {direction} not walkable")
+                return False
+        else:
+            direction_map = {0: "down", 1: "left", 2: "right", 3: "up"}
+            direction = direction_map.get(action)
+            print(f"Navigator: BYPASSING collision check for {direction} (warp activation)")
         
         print(f"Navigator: Executing movement action {action} ({direction})")
         
@@ -941,7 +1133,7 @@ class InteractiveNavigator:
         pos_before = self.env.get_game_coords()
         
         # Execute the movement
-        self.env.run_action_on_emulator(action)
+        obs, reward, done, truncated, info = self.env.process_action(action, source="Navigator-Movement")
         
         # Check if position changed
         pos_after = self.env.get_game_coords()
@@ -962,201 +1154,126 @@ class InteractiveNavigator:
     #  L O A D   Q U E S T   P A T H
     # ...............................................................
     def load_coordinate_path(self, quest_id: int) -> bool:
-        print(f"Navigator: DEBUG: Attempting to load coordinate path for quest_id: {quest_id}")
-        if self.quest_locked and self.current_coordinate_index < len(self.sequential_coordinates):
-            # Prevent reloading if already on a locked quest path, unless at the very end.
-            # This helps avoid issues if called rapidly, but ensure end-of-path can still transition.
-            if self.current_coordinate_index < len(self.sequential_coordinates) -1: # Allow reload if at the last point
-                 print(f"Navigator: DEBUG: Quest {self.active_quest_id} is locked and not at end, preventing reload with quest {quest_id}.")
-                 return False # Potentially return True if current quest_id matches requested?
-        
-        self.using_placeholder_map_ids = False # Initialize the flag
+        """Load coordinate path for a given quest ID"""
+        if quest_id is None:
+            print(f"Navigator: Cannot load path for None quest_id")
+            return False
 
-        # Reset some state variables for new quest loading
-        self.map_segment_count = {}
-        self._fallback_mode = False
-        self._direction = 1
-        self._original_quest_id = None # Should be reset if loading a new primary quest
-
-        # Use the corrected continuous coordinates file
-        continuous_coords_path = Path(__file__).parent.parent.parent / "environment" / "environment_helpers" / "quest_paths" / "combined_quest_coordinates_continuous.json"
-        print(f"Navigator: DEBUG: Using continuous_coords_path: {continuous_coords_path}")
+        print(f"Navigator: Loading coordinate path for quest {quest_id:03d}")
         
-        if not continuous_coords_path.exists():
-            print(f"Navigator: CRITICAL - Continuous coordinate file MISSING: {continuous_coords_path}")
+        # Log quest path loading attempt
+        if self.logger:
+            self.logger.log_navigation_event("QUEST_PATH_LOADING", {
+                'message': f'Attempting to load coordinate path for quest {quest_id}',
+                'quest_id': quest_id,
+                'previous_quest_id': self.active_quest_id
+            })
+
+        quest_dir_name = f"{quest_id:03d}"
+        quest_file_name = f"{quest_dir_name}_coords.json"
+        file_path = Path(__file__).parent / "quest_paths" / quest_dir_name / quest_file_name
+
+        if not file_path.exists():
+            print(f"Navigator: Quest file does not exist: {file_path}")
+            if self.logger:
+                self.logger.log_error("NAVIGATION", f"Quest coordinate file not found: {file_path}", {
+                    'quest_id': quest_id,
+                    'file_path': str(file_path)
+                })
             return False
 
         try:
-            with open(continuous_coords_path, 'r') as f:
-                data = json.load(f)
+            with open(file_path, 'r') as f:
+                quest_data = json.load(f)
         except Exception as e:
-            print(f"Navigator: CRITICAL - Failed to read or parse continuous coordinate file: {e}")
+            print(f"Navigator: Failed to parse JSON file {file_path}: {e}")
+            if self.logger:
+                self.logger.log_error("NAVIGATION", f"Failed to parse quest coordinate file: {e}", {
+                    'quest_id': quest_id,
+                    'file_path': str(file_path)
+                })
             return False
 
-        quest_start_indices = data.get("quest_start_indices", {})
-        all_coordinates_from_file = data.get("coordinates", []) # Renamed to avoid conflict
+        # Flatten all coordinates across all map segments
+        all_coordinates = []
+        map_ids = []
         
-        if str(quest_id) not in quest_start_indices:
-            print(f"Navigator: DEBUG: Quest ID {quest_id} not found in continuous file's quest_start_indices.")
-            return False
-        
-        start_idx = quest_start_indices[str(quest_id)]
-        end_idx = len(all_coordinates_from_file)
-        # Determine end_idx by finding the start of the next quest
-        sorted_quest_ids = sorted([int(k) for k in quest_start_indices.keys()])
-        current_quest_numeric = int(quest_id)
-        next_quest_in_sorted_list = -1
-        
-        for i, q_id_numeric in enumerate(sorted_quest_ids):
-            if q_id_numeric == current_quest_numeric:
-                if i + 1 < len(sorted_quest_ids):
-                    next_quest_in_sorted_list = sorted_quest_ids[i+1]
-                    break
-        
-        if next_quest_in_sorted_list != -1:
-            end_idx = quest_start_indices[str(next_quest_in_sorted_list)]
-        
-        print(f"Navigator: DEBUG: For quest {quest_id}, calculated start_idx: {start_idx}, end_idx: {end_idx}")
-
-        quest_data_from_file = all_coordinates_from_file[start_idx:end_idx]
-        # print(f"Navigator: Loading quest {quest_id}. Raw data slice from continuous file (first 5 of {len(quest_data_from_file)} entries): {quest_data_from_file[:5]}")
-        print(f"Navigator: DEBUG: Quest {quest_id} - Raw data slice (first 5 of {len(quest_data_from_file)}): {quest_data_from_file[:5]}")
-        if len(quest_data_from_file) > 5:
-            print(f"Navigator: DEBUG: Quest {quest_id} - Raw data slice (last 5 of {len(quest_data_from_file)}): {quest_data_from_file[-5:]}")
-
-
-        parsed_coords = []
-        parsed_map_ids = []
-        
-        attempt_3_element_parsing = True
-        if not quest_data_from_file:
-            print(f"Navigator: No coordinate data found for quest {quest_id} (indices {start_idx}-{end_idx}) in continuous file.")
-            attempt_3_element_parsing = False
-        else:
-            first_entry = quest_data_from_file[0]
-            if not (isinstance(first_entry, (list, tuple)) and len(first_entry) == 3):
-                attempt_3_element_parsing = False
-                print(f"Navigator: WARNING - Quest {quest_id} data in continuous file does not appear to be [gy, gx, map_id] format (first entry: {first_entry}).")
-                print(f"Navigator: Will attempt to parse as [gy, gx] and use placeholder map IDs (0).")
-                print(f"Navigator: IMPORTANT: This will impair advanced warp logic that relies on accurate map IDs for path coordinates.")
+        # FIXED: Start with current map, then follow quest logical order
+        def parse_segment_key(key):
+            if '_' in key:
+                # Format: "map_id_segment" like "38_0", "38_1"
+                parts = key.split('_')
+                return (int(parts[0]), int(parts[1]))
             else:
-                # Looks like 3-element, proceed with 3-element parsing attempt for the whole segment
-                print(f"Navigator: Quest {quest_id} data (first entry: {first_entry}) appears to be [gy, gx, map_id] format. Attempting strict parse.")
-
-
-        if attempt_3_element_parsing:
-            all_entries_are_3_element = True
-            temp_coords_3_element = []
-            temp_map_ids_3_element = []
-            for i, entry in enumerate(quest_data_from_file):
-                if isinstance(entry, (list, tuple)) and len(entry) == 3:
-                    try:
-                        gy, gx, map_id_val = entry[0], entry[1], int(entry[2])
-                        temp_coords_3_element.append((gy, gx))
-                        temp_map_ids_3_element.append(map_id_val)
-                    except (ValueError, TypeError) as e:
-                        print(f"Navigator: ERROR - Entry {i} for quest {quest_id} (value: {entry}) could not be parsed as [gy, gx, int(map_id)]. Error: {e}.")
-                        all_entries_are_3_element = False
-                        break 
-                else:
-                    print(f"Navigator: ERROR - Entry {i} for quest {quest_id} (value: {entry}) is not a 3-element list/tuple.")
-                    all_entries_are_3_element = False
-                    break
+                # Format: just "map_id" like "38", "37", "0"
+                return (int(key), 0)
+        
+        # Get current map to prioritize it first
+        try:
+            current_map = self.env.get_game_coords()[2]
+            print(f"Navigator: Current map is {current_map}, prioritizing coordinates on this map first")
+        except:
+            current_map = None
+            print(f"Navigator: Could not determine current map, using standard sorting")
+        
+        # CRITICAL FIX: Custom sorting to start with current map
+        def quest_logical_sort(key):
+            map_id, segment = parse_segment_key(key)
             
-            if all_entries_are_3_element:
-                parsed_coords = temp_coords_3_element
-                parsed_map_ids = temp_map_ids_3_element
-                print(f"Navigator: Successfully parsed {len(parsed_coords)} coordinates as [gy, gx, map_id] for quest {quest_id}.")
+            # Priority 1: Current map goes first
+            if current_map is not None and map_id == current_map:
+                return (0, map_id, segment)  # Highest priority
+            
+            # Priority 2: Other maps in numerical order  
+            return (1, map_id, segment)
+        
+        sorted_segments = sorted(quest_data.keys(), key=quest_logical_sort)
+        
+        print(f"Navigator: Coordinate loading order: {sorted_segments}")
+        
+        for segment_key in sorted_segments:
+            segment_coords = quest_data[segment_key]
+            
+            # Extract map_id from key
+            if '_' in segment_key:
+                map_id = int(segment_key.split('_')[0])
             else:
-                print(f"Navigator: Failed to parse all entries as [gy, gx, map_id] for quest {quest_id}. Falling back to 2-element parsing with placeholder map IDs.")
-                # Force fallback by ensuring attempt_3_element_parsing is false for the next block
-                attempt_3_element_parsing = False # This ensures the next 'if not attempt_3_element_parsing' block runs
-
-        if not attempt_3_element_parsing: # This executes if initial check failed OR if 3-element parsing attempt failed
-            print(f"Navigator: Now parsing quest {quest_id} data as [gy, gx] using placeholder map ID (0) for all {len(quest_data_from_file)} entries.")
-            print(f"Navigator: CRITICAL - About to determine real map IDs for coordinates...")
-            self.using_placeholder_map_ids = True # Set flag here
-            parsed_coords = [] # Reset in case of partial 3-element parse
-            parsed_map_ids = [] # Reset
-            malformed_2_element_entries = 0
-            for i, entry in enumerate(quest_data_from_file):
-                if isinstance(entry, (list, tuple)) and len(entry) == 2:
-                    try:
-                        gy, gx = entry[0], entry[1]
-                        parsed_coords.append((gy, gx))
-                        # DIAGNOSTIC: Determine real map ID for this coordinate
-                        real_map_id = self._determine_map_id_for_coordinate(gy, gx)
-                        parsed_map_ids.append(real_map_id)
-                        print(f"Navigator: COORD_MAP_ID: Index {i}, Coord ({gy}, {gx}) -> Map ID {real_map_id}")
-                    except (ValueError, TypeError) as e:
-                        print(f"Navigator: ERROR - Entry {i} for quest {quest_id} (value: {entry}) could not be parsed as [gy, gx]. Error: {e}")
-                        malformed_2_element_entries +=1
-                else:
-                    # print(f"Navigator: Warning - Entry {i} for quest {quest_id} (value: {entry}) is not a 2-element list/tuple. Skipping.")
-                    malformed_2_element_entries += 1
+                map_id = int(segment_key)
             
-            if malformed_2_element_entries > 0:
-                 print(f"Navigator: Note - {malformed_2_element_entries} entries in quest {quest_id} were not valid [gy, gx] pairs during 2-element parsing attempt and were skipped.")
-            print(f"Navigator: Parsed {len(parsed_coords)} coordinates as [gy, gx] for quest {quest_id} with determined map IDs.")
-            # Update flag since we now have real map IDs
-            self.using_placeholder_map_ids = False
+            for coord in segment_coords:
+                all_coordinates.append((coord[0], coord[1]))
+                map_ids.append(map_id)
 
-
-        if not parsed_coords:
-            print(f"Navigator: CRITICAL - No valid coordinates loaded for quest {quest_id} after all parsing attempts. Path cannot be set.")
-            self.sequential_coordinates = []
-            self.coord_map_ids = []
-            # Do not change active_quest_id here, allow current quest to persist if it was already set
-            # self.active_quest_id = None 
-            self.quest_locked = False # Unlock if path loading fails
+        if not all_coordinates:
+            print(f"Navigator: No coordinates found in quest {quest_id}")
+            if self.logger:
+                self.logger.log_error("NAVIGATION", f"No coordinates found in quest file", {
+                    'quest_id': quest_id,
+                    'segments': list(quest_data.keys())
+                })
             return False
 
-        self.sequential_coordinates = parsed_coords
-        self.coord_map_ids = parsed_map_ids
-        
-        # CRITICAL FIX: Only reset index if loading a different quest or if forced
-        if self.active_quest_id != quest_id or not hasattr(self, '_preserve_index_on_reload'):
-            print(f"Navigator: Resetting coordinate index for quest change ({self.active_quest_id} -> {quest_id})")
-            self.current_coordinate_index = 0
-        else:
-            print(f"Navigator: Preserving coordinate index {self.current_coordinate_index} for quest {quest_id} reload")
-        
-        self.active_quest_id = quest_id # Set active quest ID *after* successful loading
-        self._last_loaded_quest_id = quest_id
-        self.quest_locked = True # Lock to this quest path
-        self.movement_failure_count = 0
+        # Update navigator state
+        self.sequential_coordinates = all_coordinates
+        self.coord_map_ids = map_ids
+        self.current_coordinate_index = 0
+        self.active_quest_id = quest_id
+        self.using_placeholder_map_ids = True
 
-        print(
-            f"Navigator: DEBUG: Successfully loaded quest {quest_id:03d} from continuous file: "
-            f"{len(self.sequential_coordinates)} points, {len(self.coord_map_ids)} map IDs. (Indices {start_idx}-{end_idx-1} from raw file)"
-        )
-        # if self.sequential_coordinates: # Print first few if available
-        #     print(f"  First 3 coords: {self.sequential_coordinates[:3]}")
-        #     print(f"  First 3 mapIDs: {self.coord_map_ids[:3]}")
-        if self.sequential_coordinates:
-            print(f"Navigator: DEBUG: Quest {quest_id} - Parsed Coords (first 5): {self.sequential_coordinates[:5]}, Parsed MapIDs (first 5): {self.coord_map_ids[:5]}")
-            if len(self.sequential_coordinates) > 5:
-                print(f"Navigator: DEBUG: Quest {quest_id} - Parsed Coords (last 5): {self.sequential_coordinates[-5:]}, Parsed MapIDs (last 5): {self.coord_map_ids[-5:]}")
-        print(f"Navigator: DEBUG: At end of load_coordinate_path for quest {quest_id}, self.using_placeholder_map_ids = {self.using_placeholder_map_ids}")
+        # Log successful loading
+        if self.logger:
+            self.logger.log_navigation_event("QUEST_PATH_LOADED", {
+                'message': f'Successfully loaded coordinate path for quest {quest_id}',
+                'quest_id': quest_id,
+                'total_coordinates': len(all_coordinates),
+                'unique_maps': len(set(map_ids)),
+                'first_coordinate': all_coordinates[0] if all_coordinates else None,
+                'first_map_id': map_ids[0] if map_ids else None
+            })
 
-        # CRITICAL FIX: Snap to the nearest coordinate BEFORE logging to ensure correct index
-        print(f"Navigator: SNAP_FIX: Attempting to snap to nearest coordinate before displaying 'Next 5'...")
-        snap_success = self.snap_to_nearest_coordinate()
+        print(f"Navigator: Loaded {len(all_coordinates)} coordinates for quest {quest_id:03d}")
+        print(f"Navigator: Quest uses {len(set(map_ids))} unique maps: {sorted(set(map_ids))}")
         
-        if snap_success:
-            print(f"Navigator: SNAP_FIX: ✅ Successfully snapped to index {self.current_coordinate_index}")
-        else:
-            print(f"Navigator: SNAP_FIX: ⚠️ Failed to snap to nearest coordinate - player might be far from quest {quest_id} path")
-            
-            # ENHANCED: If initial snap fails, try to find ANY nearby coordinate as fallback
-            print(f"Navigator: SNAP_FIX: Attempting fallback snap with extended distance threshold...")
-            if self._emergency_snap_to_path():
-                print(f"Navigator: SNAP_FIX: ✅ Emergency snap successful to index {self.current_coordinate_index}")
-            else:
-                print(f"Navigator: SNAP_FIX: ❌ All snapping attempts failed - keeping default index 0")
-
-        # DIAGNOSTIC: Log next 5 coordinates AFTER snapping has been completed
-        print(f"Navigator: SNAP_FIX: Now logging coordinates after snapping is complete...")
         self._log_next_coordinates_detailed()
 
         setattr(self.env, "current_loaded_quest_id", quest_id) # Sync with environment
@@ -2019,7 +2136,7 @@ class InteractiveNavigator:
             preferred_direction = 1  # Default forward
             
         # ENHANCED: Determine direction based on quest state and position
-        if nearest_idx <= 1:
+        if nearest_idx == 0:
             # At beginning of path - should go forward
             self._direction = 1
             print(f"Navigator: At beginning of path (idx {nearest_idx}), enforcing forward direction")
@@ -2342,8 +2459,8 @@ class InteractiveNavigator:
                 trigger_type = trigger.get("type", "")
                 
                 # Map-specific triggers
-                if trigger_type == "current_map_id_is":
-                    required_map = trigger.get("map_id")
+                if trigger_type == "current_map_id":
+                    required_map = trigger.get("current_map_id")
                     if required_map and required_map != cur_map:
                         result["mismatch"] = True
                         result["reason"] = f"Need to be on map {required_map}, currently on {cur_map}"
@@ -2351,9 +2468,14 @@ class InteractiveNavigator:
                         
                 elif trigger_type == "current_map_is_previous_map_was":
                     required_current_map = trigger.get("current_map_id")
-                    if required_current_map and required_current_map != cur_map:
+                    required_previous_map = trigger.get("previous_map_id")
+                    if required_current_map != cur_map:
                         result["mismatch"] = True
                         result["reason"] = f"Need to transition TO map {required_current_map}, currently on {cur_map}"
+                        return result
+                    if required_previous_map != self.env.map_history[-2]:
+                        result["mismatch"] = True
+                        result["reason"] = f"Need to have been on map {required_previous_map} before current. map_history: {self.env.map_history}"
                         return result
                         
                 # Item-based triggers - check if we're in a location where we can't get the item

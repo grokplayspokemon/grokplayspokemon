@@ -1,7 +1,7 @@
 [
     {
         "quest_id": "001",
-        "begin_quest_text": "Clear game starting screens.",
+        "begin_quest_text": "Clear game starting screens...",
         "location_id": 38,
         "location_name": "Players House Second Floor",
         "subquest_list": [
@@ -11,12 +11,12 @@
             "Name your rival and press START",
             "Spam B to clear the menus until you load into the game. You will find yourself in \"Players House Second Floor.\""
         ],
-        "end_quest_text": "Clear game starting screens.",
+        "end_quest_text": "Starting screens cleared! Let's gooooooo!",
         "associated_coordinates_file": "001_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 38,
+                "type": "current_map_id",
+                "current_map_id": 38,
                 "completed": false
             },
             {
@@ -336,8 +336,8 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 40,
+                "type": "current_map_id",
+                "current_map_id": 40,
                 "completed": false
             }
         ],
@@ -517,8 +517,8 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 41,
+                "type": "current_map_id",
+                "current_map_id": 41,
                 "completed": false
             }
         ],
@@ -568,8 +568,8 @@
         "associated_coordinates_file": "020_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 42,
+                "type": "current_map_id",
+                "current_map_id": 42,
                 "completed": false
             }
         ],
@@ -598,8 +598,8 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 42,
+                "type": "current_map_id",
+                "current_map_id": 42,
                 "completed": false
             }
         ],
@@ -667,8 +667,8 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 33,
+                "type": "current_map_id",
+                "current_map_id": 33,
                 "completed": false
             }
         ],
@@ -701,8 +701,8 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 33,
+                "type": "current_map_id",
+                "current_map_id": 33,
                 "completed": false
             }
         ],
@@ -771,13 +771,13 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 13,
+                "type": "current_map_id",
+                "current_map_id": 13,
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 50,
+                "type": "current_map_id",
+                "current_map_id": 50,
                 "completed": false
             }
         ],
@@ -826,8 +826,8 @@
         "associated_coordinates_file": "028_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 51,
+                "type": "current_map_id",
+                "current_map_id": 51,
                 "comment": "Player has navigated to the area of the second NPC / first trainer battle of quest 029. Precise coord check or pre-battle dialog for trainer 1 would be better.",
                 "completed": false
             }
@@ -859,8 +859,8 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 51,
+                "type": "current_map_id",
+                "current_map_id": 51,
                 "completed": false
             }
         ],
@@ -890,8 +890,8 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 51,
+                "type": "current_map_id",
+                "current_map_id": 51,
                 "completed": false
             }
         ],
@@ -914,8 +914,8 @@
         "associated_coordinates_file": "031_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 47,
+                "type": "current_map_id",
+                "current_map_id": 47,
                 "completed": false
             },
             {
@@ -926,7 +926,7 @@
             },
             {
                 "type": "previous_map_id_was",
-                "map_id": 51,
+                "current_map_id": 51,
                 "completed": false
             }
         ],
@@ -984,8 +984,8 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 58,
+                "type": "current_map_id",
+                "current_map_id": 58,
                 "completed": false
             }
         ],
@@ -1009,8 +1009,8 @@
         "associated_coordinates_file": "034_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 56,
+                "type": "current_map_id",
+                "current_map_id": 56,
                 "completed": false
             }
         ],
@@ -1069,8 +1069,8 @@
         "associated_coordinates_file": "036_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 54,
+                "type": "current_map_id",
+                "current_map_id": 54,
                 "completed": false
             }
         ],
@@ -1104,8 +1104,8 @@
                 "completed": false
             },
             {
-                "type": "current_map_id_is",
-                "map_id": 54,
+                "type": "current_map_id",
+                "current_map_id": 54,
                 "completed": false
             },
             {
@@ -1285,8 +1285,8 @@
         "associated_coordinates_file": "043_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 14,
+                "type": "current_map_id",
+                "current_map_id": 14,
                 "comment": "Player has reached the eastern end of Route 3, ready for Route 4 transition. This may need to be tied to defeating all/most trainers on Route 3 or Nidoran reaching a certain level.",
                 "completed": false
             },
@@ -1342,8 +1342,8 @@
         "associated_coordinates_file": "045_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id_is",
-                "map_id": 68,
+                "type": "current_map_id",
+                "current_map_id": 68,
                 "completed": false
             }
         ],

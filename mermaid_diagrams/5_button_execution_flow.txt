@@ -1,0 +1,39 @@
+graph TD
+    A["User Presses '5' Key"] --> B["Action 6 (PATH_FOLLOW_ACTION)"]
+    B --> C["QuestManager.filter_action(6)"]
+    C --> D["StageManager.scripted_stage_blocking(6)"]
+    D --> E["StageManager.scripted_stage_movement(6)"]
+    E --> F["StageManager._convert_path_follow_to_movement(6)"]
+    
+    F --> G["Check Navigator Warp Handler"]
+    G --> G1["Navigator.warp_tile_handler()"]
+    G1 --> G2{Warp Available?}
+    G2 -->|Yes| G3["Execute Warp + Advance Index"]
+    G2 -->|No| H["Get Navigator Target Coordinate"]
+    G3 --> Z["Return to Environment"]
+    
+    H --> I["Navigator.sequential_coordinates[index]"]
+    I --> J["Calculate Movement Direction"]
+    J --> K["Return Movement Action (0-3)"]
+    K --> L["QuestManager Returns Action"]
+    L --> M["Environment.step(action)"]
+    M --> N["Execute Movement in Game"]
+    N --> O["Check if Target Reached"]
+    O --> O1{At Target?}
+    O1 -->|Yes| P["Navigator.current_coordinate_index += 1"]
+    O1 -->|No| Q["Continue Moving"]
+    P --> R["Quest Progression Check"]
+    Q --> S["Next Step Cycle"]
+    S --> A
+    R --> T{Quest Complete?}
+    T -->|Yes| U["Load Next Quest"]
+    T -->|No| S
+    U --> V["Navigator.load_coordinate_path(next_quest)"]
+    V --> W["Navigator.snap_to_nearest_coordinate()"]
+    W --> S
+    
+    style A fill:#e1f5fe
+    style G3 fill:#ffeb3b
+    style P fill:#4caf50
+    style U fill:#ff9800
+    style Z fill:#f44336

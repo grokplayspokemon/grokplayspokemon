@@ -14,7 +14,7 @@ Expected LLM output format when invoking this tool:
 - No additional fields are permitted.
 
 When invoked, GrokAgent will map this tool call to:
-  env.step(PATH_FOLLOW_ACTION)
+      env.process_action(PATH_FOLLOW_ACTION, source="PressNextTool")
 in the play loop, causing the agent to move a single step along the recorded path.
 """
 

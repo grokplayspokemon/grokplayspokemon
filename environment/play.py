@@ -6,6 +6,7 @@ import pygame
 import time
 import sys
 import math
+import os
 from pathlib import Path
 from typing import Optional
 from omegaconf import OmegaConf, DictConfig
@@ -17,7 +18,6 @@ from environment.environment_helpers.trigger_evaluator import TriggerEvaluator
 from environment.environment_helpers.quest_progression import QuestProgressionEngine
 from queue import SimpleQueue
 from datetime import datetime
-import os
 
 from environment.wrappers.env_wrapper import EnvWrapper
 from environment.wrappers.configured_env_wrapper import ConfiguredEnvWrapper
@@ -25,13 +25,13 @@ from environment.environment import VALID_ACTIONS, PATH_FOLLOW_ACTION
 from pyboy.utils import WindowEvent
 from environment.data.recorder_data.global_map import local_to_global
 from environment.environment_helpers.navigator import InteractiveNavigator, diagnose_environment_coordinate_loading, debug_coordinate_system
-from environment.environment_helpers.saver import save_initial_state, save_loop_state, save_final_state
+from environment.environment_helpers.saver import save_initial_state, save_loop_state, save_final_state, load_latest_run, create_new_run
 from environment.environment_helpers.warp_tracker import record_warp_step, backtrack_warp_sequence
 from environment.environment_helpers.quest_manager import QuestManager, verify_quest_system_integrity, determine_starting_quest
 from ui.quest_ui import start_quest_ui
 from environment.environment_helpers.trigger_evaluator import TriggerEvaluator
-# from web.quest_server import status_queue, start_server
-# from grok_integration import initialize_grok, get_grok_action, shutdown_grok # Removed Grok V1 integration
+from environment.grok_integration import extract_structured_game_state
+from agent.simple_agent import SimpleAgent
 
 project_root_path = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root_path))
@@ -44,6 +44,61 @@ with open(QUESTS_FILE, 'r') as f:
 # Diagnostic functions moved to navigator.py
 
 # Quest functions moved to quest_manager.py
+
+def execute_action_step(env, action, quest_manager=None, navigator=None, logger=None, total_steps=0):
+    """
+    Centralized action execution function that ensures all environment systems stay synchronized.
+    This is the ONLY function that should call env.step() to prevent desynchronization.
+    
+    Args:
+        env: The environment wrapper
+        action: The action to execute
+        quest_manager: Quest manager instance (optional)
+        navigator: Navigator instance (optional) 
+        logger: Logger instance (optional)
+        total_steps: Current total step count
+        
+    Returns:
+        tuple: (obs, reward, terminated, truncated, info, updated_total_steps)
+    """
+    try:
+        # Execute the action in the environment - THE ONLY PLACE env.process_action() SHOULD BE CALLED
+        obs, reward, terminated, truncated, info = env.process_action(action, source="PlayLoop")
+        total_steps += 1
+        
+        # Update all environment systems that depend on the step
+        # Note: update_after_step methods don't currently exist, but we'll check for them
+        if quest_manager:
+            try:
+                if hasattr(quest_manager, 'update_after_step'):
+                    quest_manager.update_after_step(obs, reward, terminated, truncated, info)
+                # Fallback to existing methods
+                elif hasattr(quest_manager, 'update_progress'):
+                    quest_manager.update_progress()
+            except Exception as e:
+                if logger:
+                    logger.warning(f"Quest manager update failed: {e}")
+        
+        if navigator:
+            try:
+                if hasattr(navigator, 'update_after_step'):
+                    navigator.update_after_step(obs, reward, terminated, truncated, info)
+                # Navigator might not need step-by-step updates
+            except Exception as e:
+                if logger:
+                    logger.warning(f"Navigator update failed: {e}")
+        
+        # Log the action if logger is available
+        if logger:
+            logger.debug(f"Executed action {action} at step {total_steps}")
+            
+        return obs, reward, terminated, truncated, info, total_steps
+        
+    except Exception as e:
+        if logger:
+            logger.error(f"Error executing action {action}: {e}")
+        # Return safe defaults
+        return None, 0.0, True, True, {}, total_steps
 
 def process_frame_for_pygame(frame_from_env_render):
     if frame_from_env_render.ndim == 2: # Grayscale
@@ -321,6 +376,19 @@ def main():
 
     config = _setup_configuration(args, project_root_path)
     
+    # Initialize logging system early
+    import sys
+    import os
+    sys.path.append('/puffertank/grok_plays_pokemon')
+    from utils.logging_config import setup_logging, get_pokemon_logger
+    
+    # Setup logging with overwrite mode (easier management per user request)
+    logger = setup_logging(logs_dir="logs", overwrite_logs=True, redirect_stdout=False)
+    logger.log_system_event("Play.py main() starting", {
+        'config_path': args.config_path,
+        'interactive_mode': args.interactive_mode
+    })
+    
     # If disable_ai_actions not set by CLI, use configuration default to disable AI actions
     if args.disable_ai_actions is None:
         args.disable_ai_actions = bool(config.get("disable_ai_actions", True))
@@ -362,57 +430,54 @@ def main():
 
     print(f"play.py: main(): Received info dictionary from env.reset(): {info}") # Keep for general debugging
 
+    # Get current map ID after reset for run creation
+    current_map_id_after_reset = env.get_game_coords()[2]
+
     # 2. Use the environment's persisted statuses for initialization.
     # These are populated by env.reset() if a state (and its quest/trigger data) was loaded.
     # If no load, they default to {} or what was set in env.__init__.
     initial_quest_statuses_from_save = env.persisted_loaded_quest_statuses if env.persisted_loaded_quest_statuses is not None else {}
     initial_trigger_statuses_from_save = env.persisted_loaded_trigger_statuses if env.persisted_loaded_trigger_statuses is not None else {}
-
+    
+    # FIX: Convert old list format to new dictionary format for backwards compatibility
+    if isinstance(initial_trigger_statuses_from_save, list):
+        print(f"play.py: Converting old list format trigger statuses to dictionary format")
+        old_list = initial_trigger_statuses_from_save
+        initial_trigger_statuses_from_save = {trigger_id: True for trigger_id in old_list}
+        print(f"play.py: Converted {len(old_list)} trigger IDs from list to dictionary")
+    
     print(f"play.py: Sourced initial_quest_statuses_from_save from env: {initial_quest_statuses_from_save}")
     print(f"play.py: Sourced initial_trigger_statuses_from_save from env: {initial_trigger_statuses_from_save}")
 
-    # Initialize QuestManager AFTER env reset and AFTER statuses are extracted
-    quest_manager = QuestManager(env, QUESTS) 
-    env.quest_manager = quest_manager # Assign to env if needed by other components via env
-
     # 3. Initialize other components like Pygame screen, status_queue, all_quest_ids BEFORE QuestProgressionEngine
     status_queue = SimpleQueue()
-    all_quest_ids = [int(q["quest_id"]) for q in QUESTS] 
-    
-    # 4. Initialize Navigator (i know it's number 4 but we have to init before or navigator is UnboundLocalError    )
+    all_quest_ids = [int(q["quest_id"]) for q in QUESTS]
+
+    # 4. Initialize Navigator (must be initialized before use)
     navigator = InteractiveNavigator(env)
     if hasattr(env, 'set_navigator'):
-        env.set_navigator(navigator) 
+        env.set_navigator(navigator)
     elif hasattr(env, 'env') and hasattr(env.env, 'set_navigator'):
         env.env.set_navigator(navigator)
-    
+
     # 5. Initialize TriggerEvaluator
-    last_map_id_after_reset = env.get_game_coords()[2] # Get potentially updated map_id
     trigger_evaluator = TriggerEvaluator(env)
-    trigger_evaluator.prev_map_id = last_map_id_after_reset
     setattr(env, "trigger_evaluator", trigger_evaluator)
-    print(f"[Setup] Created and attached trigger_evaluator to environment, initial prev_map_id={last_map_id_after_reset}")
-    
-    # 6. Get run_info from environment (set by RunManager during env.reset)
-    run_info = getattr(env, 'current_run_info', None)
-    run_dir = getattr(env, 'current_run_dir', None)
-    
-    if run_info:
-        # Use existing run info from environment
-        run_dir = run_info.run_dir
-        print(f"Using existing run: {run_info.run_id}")
-    elif run_dir:
-        # Fallback: use run_dir if available
-        print(f"Using existing run dir: {run_dir.name if hasattr(run_dir, 'name') else run_dir}")
-    else:
-        # Last resort: create a new run if none exists
-        from environment.environment_helpers.saver import create_new_run
-        current_map_id = env.get_game_coords()[2]
-        current_map_name = env.get_map_name_by_id(current_map_id)
-        run_info = create_new_run(env, current_map_name, current_map_id)
-        run_dir = run_info.run_dir
-        print(f"Created new run: {run_info.run_id}")
-    
+    print(f"[Setup] Created and attached trigger_evaluator to environment using global map tracking")
+
+    # 6b. Initialize QuestManager now that run_dir is known
+    # Load existing run or create a new one to get run_dir for QuestManager
+    run_info = load_latest_run(env)
+    if run_info is None:
+        # Create a new run using current map name and map id
+        current_map_name = env.get_map_name_by_id(current_map_id_after_reset)
+        run_info = create_new_run(env, current_map_name, current_map_id_after_reset)
+    run_dir = run_info.run_dir
+
+    # Initialize QuestManager with run_dir for proper quest status synchronization
+    quest_manager = QuestManager(env, run_dir=run_dir)
+    env.quest_manager = quest_manager
+
     # 7. NOW, instantiate QuestProgressionEngine with the correctly loaded statuses (SINGLE INITIALIZATION)
     quest_progression_engine = QuestProgressionEngine(
         env=env,
@@ -423,12 +488,36 @@ def main():
         status_queue=status_queue,
         run_dir=run_dir, 
         initial_quest_statuses=initial_quest_statuses_from_save, # This is critical
-        initial_trigger_statuses=initial_trigger_statuses_from_save # This is critical
+        initial_trigger_statuses=initial_trigger_statuses_from_save, # This is critical
+        logger=logger # CRITICAL FIX: Pass logger to enable trigger evaluation logging
     )
     
     quest_manager.quest_progression_engine = quest_progression_engine
+
+    # 8. Initialize NavigationSystemMonitor for comprehensive validation
+    from environment.environment_helpers.navigation_system_monitor import NavigationSystemMonitor
+    navigation_monitor = NavigationSystemMonitor(
+        env=env,
+        navigator=navigator,
+        quest_manager=quest_manager,
+        quest_progression_engine=quest_progression_engine,
+        logger=logger
+    )
     
-    # 8. Refresh QuestManager's current quest based on the now correctly initialized QPE
+    # Store reference in main components for easy access
+    env.navigation_monitor = navigation_monitor
+    navigator.navigation_monitor = navigation_monitor
+    quest_manager.navigation_monitor = navigation_monitor
+    
+    # CRITICAL: Run startup verification to catch any initialization issues
+    print("Running navigation system startup verification...")
+    startup_results = navigation_monitor.check_at_startup()
+    if startup_results.get("total_issues", 0) > 0:
+        print(f"⚠️  Startup verification found {startup_results['total_issues']} issues")
+    else:
+        print("✅ Startup verification passed")
+    
+    # 9. Refresh QuestManager's current quest based on the now correctly initialized QPE
     quest_manager.get_current_quest() # This should pick up the correct starting quest
     status_queue.put(('__current_quest__', quest_manager.current_quest_id))
 
@@ -471,6 +560,8 @@ def main():
         print("Play.py: No initial quest ID available for navigator post-reset.")
 
     print("Starting game loop...")
+    print(f"[DEBUG] Game loop initialization: quest_progression_engine={quest_progression_engine is not None}")
+    print(f"[DEBUG] Game loop initialization: quest_manager.current_quest_id={quest_manager.current_quest_id}")
     start_time = time.time()
     running = True
     
@@ -478,6 +569,15 @@ def main():
     last_map_id = env.get_game_coords()[2]
     visited_warps = set()
     last_player_pos = env.get_game_coords()[:2]
+    
+    # CRITICAL: Initialize map tracking with current map
+    logger.update_map_tracking(last_map_id)
+    logger.log_environment_event("GAME_START", {
+        'message': 'Game initialized',
+        'starting_map_id': last_map_id,
+        'map_name': env.get_map_name_by_id(last_map_id),
+        'coordinates': env.get_game_coords()
+    })
 
     # UI thread for quest status - ENABLED for testing
     ui_thread_started = False
@@ -699,6 +799,99 @@ def main():
             trigger_completed = initial_trigger_statuses_from_save.get(tid, False)
             status_queue.put((tid, trigger_completed))
 
+    # Initialize Grok agent if enabled
+    grok_agent = None
+    if config.get("agent", {}).get("grok_on", False):
+        api_key = config.get("agent", {}).get("api_key") or os.getenv("GROK_API_KEY")
+        if api_key:
+            try:
+                grok_agent = SimpleAgent(
+                    reader=env,              # env is a RedGymEnv (via inheritance) 
+                    quest_manager=quest_manager,
+                    navigator=navigator,
+                    env_wrapper=env,         # same env
+                    xai_api_key=api_key
+                )
+                print("🤖 Grok agent initialized successfully")
+            except Exception as e:
+                print(f"❌ Failed to initialize Grok agent: {e}")
+                grok_agent = None
+        else:
+            print("⚠️  Grok enabled but no API key found (GROK_API_KEY env var or config)")
+
+    # CRITICAL FIX: Synchronize all quest systems BEFORE main loop
+    print("\n=== CRITICAL QUEST SYSTEM SYNCHRONIZATION ===")
+    
+    # Get the current quest from quest manager
+    current_quest = quest_manager.get_current_quest()
+    print(f"✓ Quest Manager current quest: {current_quest}")
+    
+    # Ensure all systems are synchronized with this quest
+    if current_quest is not None:
+        # 1. Sync Navigator
+        if navigator.active_quest_id != current_quest:
+            print(f"⚠️  Navigator quest mismatch: {navigator.active_quest_id} != {current_quest}")
+            navigator.load_coordinate_path(current_quest)
+            print(f"✓ Navigator loaded quest {current_quest}")
+        
+        # 2. Sync Environment 
+        if not hasattr(env, 'current_loaded_quest_id') or env.current_loaded_quest_id != current_quest:
+            print(f"⚠️  Environment quest mismatch: {getattr(env, 'current_loaded_quest_id', None)} != {current_quest}")
+            env.load_coordinate_path(current_quest)
+            print(f"✓ Environment loaded quest {current_quest}")
+        
+        # 3. Verify all systems have coordinates
+        if hasattr(navigator, 'sequential_coordinates') and navigator.sequential_coordinates:
+            print(f"✓ Navigator has {len(navigator.sequential_coordinates)} coordinates")
+        else:
+            print("❌ Navigator has no coordinates loaded!")
+            
+        if hasattr(env, 'combined_path') and env.combined_path:
+            print(f"✓ Environment has {len(env.combined_path)} coordinates")
+        else:
+            print("❌ Environment has no coordinates loaded!")
+            
+        # 4. Check quest definitions are available
+        quest_def = quest_progression_engine.get_quest_data_by_id(current_quest)
+        if quest_def:
+            print(f"✓ Quest {current_quest} definition found: {quest_def.get('name', 'Unknown')}")
+        else:
+            print(f"❌ Quest {current_quest} definition MISSING!")
+            
+        # 5. Verify player position relative to quest coordinates
+        player_x, player_y, map_id = env.get_game_coords()
+        player_global = local_to_global(player_y, player_x, map_id)
+        print(f"✓ Player at local ({player_x}, {player_y}) map {map_id} = global {player_global}")
+        
+        # Check if player is on any quest coordinate
+        on_quest_node = False
+        if navigator.sequential_coordinates:
+            for i, coord in enumerate(navigator.sequential_coordinates):
+                if coord == player_global:
+                    print(f"✓ Player is on quest coordinate {i}: {coord}")
+                    navigator.current_coordinate_index = i
+                    on_quest_node = True
+                    break
+        
+        if not on_quest_node:
+            print(f"⚠️  Player is not on any quest coordinate")
+            # Find closest quest coordinate
+            if navigator.sequential_coordinates:
+                distances = []
+                for i, coord in enumerate(navigator.sequential_coordinates):
+                    dist = abs(coord[0] - player_global[0]) + abs(coord[1] - player_global[1])
+                    distances.append((i, coord, dist))
+                
+                closest = min(distances, key=lambda x: x[2])
+                print(f"   Closest quest coordinate: index {closest[0]}, coord {closest[1]}, distance {closest[2]}")
+    else:
+        print("❌ No current quest found!")
+    
+    print("=== END QUEST SYSTEM SYNCHRONIZATION ===\n")
+    
+    # Store reference in environment
+    env.quest_progression_engine = quest_progression_engine
+
     while running and total_steps < args.max_total_steps:
         current_time = time.time()
         current_action = None
@@ -767,11 +960,23 @@ def main():
                             else:
                                 print(f"\nplay.py: main(): '5' key: Using PATH_FOLLOW_ACTION")
                                 
-                                # Sync navigator with current quest before moving
+                                # CRITICAL FIX: Ensure environment loads the current quest coordinates
                                 current_q = quest_manager.get_current_quest()
                                 if current_q is not None:
+                                    print(f"play.py: '5' key: Current quest is {current_q}")
+                                    
+                                    # Load quest coordinates in environment BEFORE triggering PATH_FOLLOW
+                                    if not env.load_coordinate_path(current_q):
+                                        print(f"play.py: '5' key: ERROR - Failed to load quest {current_q} coordinates")
+                                    else:
+                                        print(f"play.py: '5' key: Successfully loaded quest {current_q} coordinates")
+                                    
+                                    # Sync quest IDs across all components
                                     setattr(env, 'current_loaded_quest_id', current_q)
                                     quest_manager.current_quest_id = current_q
+                                    navigator.active_quest_id = current_q
+                                else:
+                                    print("play.py: '5' key: WARNING - No current quest found")
                                 
                                 # Apply quest-specific overrides (e.g., force A press for quest 015)
                                 desired = quest_manager.filter_action(PATH_FOLLOW_ACTION)
@@ -779,8 +984,10 @@ def main():
                                     # Use PATH_FOLLOW_ACTION directly - let environment handle it
                                     current_action = PATH_FOLLOW_ACTION
                                 else:
-                                    # Override with quest-specific emulator action (e.g., A press)
-                                    current_obs, current_reward, current_terminated, current_truncated, current_info = env.step(desired)
+                                    # FIXED: Override with quest-specific emulator action using centralized execution
+                                    current_obs, current_reward, current_terminated, current_truncated, current_info, total_steps = execute_action_step(
+                                        env, desired, quest_manager, navigator, logger, total_steps
+                                    )
                                     # Record the override action
                                     recorded_playthrough.append(desired)
                                     # Update observation and info for this frame
@@ -808,35 +1015,56 @@ def main():
 
         # AI Action or Manual Action
         if current_action is None and not args.disable_ai_actions: # AI takes over if no manual input and AI enabled
-            # This is where your AI/agent logic would determine the action
-            # For now, let's use a placeholder or random action if QuestManager doesn't provide one
-            # quest_manager.get_current_quest() # Updates internal current_quest_id
-            # current_action = quest_manager.get_next_action() # Needs to be robust
             
-            # Simplified logic: If QuestManager provides an action, use it. Otherwise, random.
-            # This needs to be fleshed out with proper agent logic.
-            # The QuestManager's get_next_action() should be the primary source for quest-driven actions.
-            # The QuestProgressionEngine updates quest states, which QuestManager reads via get_current_quest().
+            # 🤖 GROK INTEGRATION POINT - Clean integration using get_action method
+            if grok_agent and not args.interactive_mode:
+                try:
+                    # Extract current game state for Grok
+                    game_state = extract_structured_game_state(env_wrapper=env, reader=env, quest_manager=quest_manager)
+                    
+                    # Get action decision from Grok (no execution, just decision)
+                    # This should be synchronous!!! We will wait for grok to get the prompt, think, and return a response.
+                    # A tool call will likely be in there - this is how grok chooses an action.
+                    current_action = grok_agent.get_action(game_state)
+                    
+                    if current_action is not None:
+                        print(f"🤖 Grok decided on action: {current_action} ({VALID_ACTIONS[current_action] if current_action < len(VALID_ACTIONS) else 'INVALID'})")
+                    
+                except Exception as e:
+                    print(f"❌ Grok error: {e}, falling back to quest system")
+                    grok_agent = None  # Disable Grok on error to avoid spam
             
-            # Ensure quest_manager has the latest current_quest_id
-            _ = quest_manager.get_current_quest() # This updates quest_manager.current_quest_id
+            # Existing quest/navigation fallback logic (unchanged)
+            if current_action is None:
+                # This is where your AI/agent logic would determine the action
+                # For now, let's use a placeholder or random action if QuestManager doesn't provide one
+                # quest_manager.get_current_quest() # Updates internal current_quest_id
+                # current_action = quest_manager.get_next_action() # Needs to be robust
+                
+                # Simplified logic: If QuestManager provides an action, use it. Otherwise, random.
+                # This needs to be fleshed out with proper agent logic.
+                # The QuestManager's get_next_action() should be the primary source for quest-driven actions.
+                # The QuestProgressionEngine updates quest states, which QuestManager reads via get_current_quest().
+                
+                # Ensure quest_manager has the latest current_quest_id
+                _ = quest_manager.get_current_quest() # This updates quest_manager.current_quest_id
 
-            if quest_manager.is_quest_active():
-                current_action = quest_manager.filter_action(None) # filter_action can decide or pass through
-                if current_action is None: # filter_action decided no specific action, or returned None to indicate default behavior
-                     # Fallback to navigator or random if no quest action
+                if quest_manager.is_quest_active():
+                    current_action = quest_manager.filter_action(None) # filter_action can decide or pass through
+                    if current_action is None: # filter_action decided no specific action, or returned None to indicate default behavior
+                         # Fallback to navigator or random if no quest action
+                        if navigator.sequential_coordinates and navigator.navigation_status != "idle": # Check if navigator has a path and is not idle
+                            current_action = navigator.get_next_action()
+                        else:
+                            # Random fallback: choose a valid action index
+                            current_action = np.random.choice(len(VALID_ACTIONS))
+                else: # No quest active
                     if navigator.sequential_coordinates and navigator.navigation_status != "idle": # Check if navigator has a path and is not idle
                         current_action = navigator.get_next_action()
                     else:
-                        # Random fallback: choose a valid action index
+                        # Random fallback for non-quest, non-navigation: choose a valid action index
+                        # Sloppy and could cause problems. Also, could be helpful if grok somehow gets stuck.
                         current_action = np.random.choice(len(VALID_ACTIONS))
-            else: # No quest active
-                if navigator.sequential_coordinates and navigator.navigation_status != "idle": # Check if navigator has a path and is not idle
-                    current_action = navigator.get_next_action()
-                else:
-                    # Random fallback for non-quest, non-navigation: choose a valid action index
-                    # Sloppy and could cause problems. Also, could be helpful if grok somehow gets stuck.
-                    current_action = np.random.choice(len(VALID_ACTIONS))
 
         elif current_action is None and args.disable_ai_actions and not args.interactive_mode: # Replay/tick mode
             # No-OP mode: skip stepping environment when AI actions are disabled
@@ -860,6 +1088,37 @@ def main():
                 env.pyboy.tick()
                 update_ui_if_needed()
                 time.sleep(0.01)
+            
+            # CRITICAL FIX: Quest progression should always run, even without player actions
+            # This was the main bug - quest triggers were never evaluated when idle!
+            # print(f"[DEBUG] Quest progression idle check: quest_progression_engine={quest_progression_engine is not None}")
+            
+            if quest_progression_engine:
+                current_map_id = env.get_game_coords()[2]
+                
+                # Try to check map history, but don't let failures block quest progression
+                map_changed = False
+                try:
+                    if hasattr(env, 'map_history') and len(env.map_history) >= 2:
+                        map_changed = env.map_history[-2] != env.map_history[-1]
+                        print(f"[DEBUG] Map history check: changed={map_changed}, history={list(env.map_history)}")
+                    else:
+                        print(f"[DEBUG] Map history not available or too short (len={len(env.map_history) if hasattr(env, 'map_history') else 'N/A'})")
+                except Exception as e:
+                    print(f"[DEBUG] Map history check failed: {e}")
+                
+                # ALWAYS run quest progression, regardless of map history
+                try:
+                    if map_changed:
+                        print(f"[DEBUG] Calling quest_progression_engine.step() in idle state at step {total_steps}")
+                        quest_progression_engine.step(trigger_evaluator)
+                        print(f"[DEBUG] Quest progression step completed in idle state")
+                except Exception as e:
+                    print(f"[ERROR] Quest progression failed in idle state: {e}")
+                    logger.log_error("QUEST_PROGRESSION_IDLE", f"Error in idle quest progression: {str(e)}", {
+                        'current_map_id': current_map_id,
+                        'total_steps': total_steps
+                    })
             continue
 
         # Apply quest manager filtering to ALL actions (manual, AI, navigator)
@@ -890,9 +1149,18 @@ def main():
                 'source': action_source
             })
 
-        obs, reward, terminated, truncated, info = env.step(current_action)
+        # FIXED: Use centralized execution instead of direct env.step()
+        obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+            env, current_action, quest_manager, navigator, logger, total_steps
+        )
         total_reward += reward
-        total_steps += 1
+
+        # Navigation System Monitoring - check after each step
+        if navigation_monitor:
+            try:
+                navigation_monitor.check_at_quest_step()
+            except Exception as e:
+                print(f"NavigationMonitor error in step check: {e}")
 
         # FIXED: Save persistent step counter every 100 steps
         if total_steps % 100 == 0:
@@ -906,24 +1174,71 @@ def main():
         new_map_id = env.get_game_coords()[2]
         # new_player_pos = env.get_player_coordinates() # Example
         if new_map_id != last_map_id: # Basic warp detection
+            # CRITICAL: Update map tracking for logging context
+            logger.update_map_tracking(new_map_id)
+            
+            # Log map transition with full context
+            player_x, player_y, _ = env.get_game_coords()
+            logger.log_environment_event("MAP_TRANSITION", {
+                'message': f'Map transition from {last_map_id} to {new_map_id}',
+                'from_map': last_map_id,
+                'to_map': new_map_id,
+                'from_map_name': env.get_map_name_by_id(last_map_id),
+                'to_map_name': env.get_map_name_by_id(new_map_id),
+                'coordinates': [player_x, player_y],
+                'total_steps': total_steps
+            })
+            
             # record_warp_step(env, last_map_id, new_map_id, total_steps) # If function exists
             print(f"[MapTransition] Map ID changed from {last_map_id} to {new_map_id}")
+            
+            # Navigation System Monitoring - check at map transition
+            if navigation_monitor:
+                try:
+                    navigation_monitor.check_at_map_transition()
+                except Exception as e:
+                    print(f"NavigationMonitor error in map transition check: {e}")
+            
             last_map_id = new_map_id
 
         # FIXED: Update quest progression engine with proper trigger evaluator
+        print(f"[DEBUG] Quest progression action check: quest_progression_engine={quest_progression_engine is not None}, action={current_action}, map_id={env.get_game_coords()[2]}")
+        
         if quest_progression_engine:
-            # Update the trigger evaluator's previous map ID before checking triggers
             current_map_id = env.get_game_coords()[2]
             
-            # Debug map ID tracking
-            print(f"[MapTracking] Before trigger evaluation: current_map_id={current_map_id}, trigger_evaluator.prev_map_id={trigger_evaluator.prev_map_id}")
+            # Store previous quest for change detection
+            previous_quest = quest_manager.current_quest_id
             
-            # Pass the persistent evaluator that maintains state
-            quest_progression_engine.step(trigger_evaluator)
-            
-            # Update prev_map_id AFTER trigger evaluation for next step
-            trigger_evaluator.prev_map_id = current_map_id
-            print(f"[MapTracking] After trigger evaluation: current_map_id={current_map_id}, trigger_evaluator.prev_map_id={trigger_evaluator.prev_map_id}\n")
+            # Call quest progression engine to evaluate triggers and progress quests
+            try:
+                print(f"[DEBUG] Calling quest_progression_engine.step() at step {total_steps}, map {current_map_id}, current_quest={previous_quest}")
+                quest_progression_engine.step(trigger_evaluator)
+                print(f"[DEBUG] Quest progression step completed successfully")
+                
+                # Check for quest transitions
+                new_quest = quest_manager.current_quest_id
+                if previous_quest != new_quest:
+                    print(f"[DEBUG] Quest transition detected: {previous_quest} -> {new_quest}")
+                    if navigation_monitor:
+                        try:
+                            navigation_monitor.check_at_quest_transition()
+                        except Exception as e:
+                            print(f"NavigationMonitor error in quest transition check: {e}")
+                else:
+                    print(f"[DEBUG] No quest transition, remained at quest {previous_quest}")
+                        
+            except Exception as e:
+                print(f"[ERROR] Exception in quest progression: {str(e)}")
+                import traceback
+                print(f"[ERROR] Full traceback: {traceback.format_exc()}")
+                logger.log_error("QUEST_PROGRESSION", f"Error in quest progression: {str(e)}", {
+                    'current_quest_id': quest_manager.current_quest_id,
+                    'current_map_id': current_map_id,
+                    'traceback': traceback.format_exc()
+                })
+        else:
+            print(f"[ERROR] quest_progression_engine is None! This should never happen after initialization.")
 
         # FIXED: Update quest UI after player actions (now throttled for performance)
         update_quest_ui()  # Always update after player actions for responsiveness

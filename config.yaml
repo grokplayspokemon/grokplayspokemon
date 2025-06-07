@@ -4,6 +4,8 @@ wandb:
   group: ~
 
 env:
+  # Path to Game Boy ROM file
+  gb_path: environment/red.gb
   # Directory with pyboy save states to load initial state from.
   state_dir: environment/states
   # File within state dir to load from. Overrides init_from_last_ending_state.
@@ -559,6 +561,9 @@ agent:
 
   # Temperature for LLM sampling (0.0 to 1.0)
   temperature: 0.7
+
+  # Grok on or off? True: grok will do things; False: manual play only, no grok.
+  grok_on: False
 
   # API Key for the LLM provider (can also be set via environment variable)
   # e.g., GROK_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, OPENAI_API_KEY

@@ -16,7 +16,7 @@ Expected LLM output format when invoking this tool:
 
 When invoked, GrokAgent will map the `button` string to the corresponding emulator action
 via ACTION_MAPPING_PYGAME_TO_INT and call:
-  env.step(mapped_action)
+      env.process_action(mapped_action, source="PressButtonTool")
 in the play loop, causing the emulator to send the press and release events for that button.
 """
 

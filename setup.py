@@ -25,6 +25,7 @@ setup(
         'parameterized',
         'protobuf',
         'flask==3.0.2',
+        'flask-cors',
         'fastapi>=0.104.0',
         'uvicorn[standard]>=0.24.0',
         'aiofiles>=23.2.1',

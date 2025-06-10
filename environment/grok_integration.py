@@ -1,3 +1,4 @@
+# grok_integration.py
 """
 Grok Integration Module - Fully Modular Autonomous Pokemon Player
 Provides complete isolation of Grok logic from main play.py

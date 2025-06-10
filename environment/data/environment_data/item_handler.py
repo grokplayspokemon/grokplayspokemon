@@ -1,4 +1,3 @@
-
 import sys
 from typing import Union
 import uuid 
@@ -18,6 +17,7 @@ from environment.data.environment_data.constants import ALL_GOOD_ITEMS, GOOD_ITE
     POKEBALL_PRIORITY, POTION_PRIORITY, REVIVE_PRIORITY
 from environment.data.environment_data.constants import MART_ITEMS_ID_DICT, ITEM_TM_IDS_PRICES
 from environment.data.environment_data.ram_addresses import RamAddress as RAM
+from environment.data.environment_data.items import Items
 
 from environment.environment_helpers.navigator import InteractiveNavigator
 from environment.data.recorder_data.global_map import local_to_global, global_to_local
@@ -482,3 +482,16 @@ class ItemHandler:
         # reset item count to trigger scripted_manage_items
         self._last_item_count = 0
         return True
+
+    def has_item(self, item_name: str) -> bool:
+        """
+        Check if the given item_name is in the bag.
+        Accepts item_name as string; normalizes to Enum member.
+        """
+        key = item_name.upper().replace(' ', '_')
+        try:
+            item_enum = Items[key]
+        except KeyError:
+            print(f"ItemHandler: has_item unknown item '{item_name}'")
+            return False
+        return item_enum.value in self.get_items_in_bag()

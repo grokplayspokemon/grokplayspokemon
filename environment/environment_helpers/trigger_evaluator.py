@@ -1,3 +1,4 @@
+# trigger_evaluator.py
 import re
 from typing import Dict, Optional, Tuple, List
 import time
@@ -77,6 +78,10 @@ class TriggerEvaluator:
     def _get_trigger_logic_code(self, trigger: Dict) -> str:
         """Get the actual code/logic string for a trigger"""
         ttype = trigger.get('type')
+        # Support legacy 'current_map_id' trigger as alias for 'current_map_id_is'
+        if ttype == 'current_map_id':
+            target_map = trigger.get('current_map_id')
+            return f"current_map_id == {target_map}"
         if ttype == 'current_map_id_is':
             target_map = trigger['map_id']
             return f"current_map_id == {target_map}"
@@ -113,6 +118,15 @@ class TriggerEvaluator:
         elif ttype == 'battle_type_is':
             battle_type = trigger.get('battle_type_name', '')
             return f"battle_type == '{battle_type}'"
+        elif ttype == 'quest_completed':
+            quest_id = trigger.get('quest_id', '')
+            return f"quest_{quest_id}_completed == True"
+        elif ttype == 'badge_is_obtained':
+            badge_name = trigger.get('badge_name', '')
+            return f"badge_{badge_name}_obtained == True"
+        elif ttype == 'coordinates_are':
+            x_min = trigger.get('x_min', 0)
+            return f"player_x >= {x_min}"
         else:
             return f"unknown_trigger_type('{ttype}')"
 
@@ -140,7 +154,13 @@ class TriggerEvaluator:
         logic_code = self._get_trigger_logic_code(trigger)
 
         ttype = trigger.get('type')
-        # Evaluate each trigger type and store result
+        # Handle legacy 'current_map_id' trigger
+        if ttype == 'current_map_id':
+            curr_map = self.env.get_game_coords()[2]
+            result = (curr_map == trigger.get('current_map_id'))
+            values_str = f"CurrentMap: {curr_map}"
+            debug_str = f"Evaluating: {logic_code} → {result}"
+            return {"result": result, "values_str": values_str, "debug_str": debug_str, "logic_code": logic_code}
         if ttype == 'current_map_id_is':
             # Always use live environment state for current map
             curr_map = self.env.get_game_coords()[2]
@@ -163,7 +183,7 @@ class TriggerEvaluator:
             
             # Enhanced debug logging for map transition triggers
             full_history = list(self.env.map_history) if hasattr(self.env, 'map_history') else "N/A"
-            print(f"[TriggerEvaluator] Map transition trigger: prev={prev_map}, curr={curr_map}, target_prev={target_prev_map_id}, target_curr={target_curr_map_id}, history={full_history}")
+            # print(f"[TriggerEvaluator] Map transition trigger: prev={prev_map}, curr={curr_map}, target_prev={target_prev_map_id}, target_curr={target_curr_map_id}, history={full_history}")
             
             condition_met = ((curr_map == target_curr_map_id) and (prev_map == target_prev_map_id))
             
@@ -183,7 +203,7 @@ class TriggerEvaluator:
                 result = False
                 values_str = f"PrevMap: {prev_map}, CurrMap: {curr_map}"
                 debug_str = f"Evaluating: {logic_code} → {result}"
-                print(f"[TriggerEvaluator] Condition not met: {logic_code}, prev_match={prev_map == target_prev_map_id}, curr_match={curr_map == target_curr_map_id}")
+                # print(f"[TriggerEvaluator] Condition not met: {logic_code}, prev_match={prev_map == target_prev_map_id}, curr_match={curr_map == target_curr_map_id}")
         elif ttype == 'party_size_is':
             current_party_size = self.env.read_m('wPartyCount')
             target_size = trigger.get('size')
@@ -292,6 +312,69 @@ class TriggerEvaluator:
                 result = False
             
             values_str = f"BattleType: {current_battle_type_str}"
+            debug_str = f"Evaluating: {logic_code} → {result}"
+        elif ttype == 'quest_completed':
+            target_quest_id = trigger.get('quest_id', '')
+            target_quest_id_str = str(target_quest_id).zfill(3)
+            
+            # Check if quest is completed via quest manager
+            quest_completed = False
+            if hasattr(self.env, 'quest_manager') and self.env.quest_manager:
+                quest_completed = self.env.quest_manager.quest_completed_status.get(target_quest_id_str, False)
+            
+            result = quest_completed
+            values_str = f"Quest {target_quest_id_str}: {'Complete' if quest_completed else 'Incomplete'}"
+            debug_str = f"Evaluating: {logic_code} → {result}"
+        elif ttype == 'badge_is_obtained':
+            target_badge_name = trigger.get('badge_name', '').upper()
+            
+            # Check badge status via environment's badge system
+            badge_obtained = False
+            try:
+                if hasattr(self.env, 'badges') and self.env.badges:
+                    badge_obtained = self.env.badges.get_badge(target_badge_name)
+                elif hasattr(self.env, 'read_m'):
+                    # Fallback: read from memory directly
+                    # Badge byte format in Red/Blue: bit flags
+                    badges_byte = self.env.read_m('wObtainedBadges')
+                    badge_flags = {
+                        'BOULDER': 0x01,  # Brock
+                        'CASCADE': 0x02,  # Misty  
+                        'THUNDER': 0x04,  # Lt. Surge
+                        'RAINBOW': 0x08,  # Erika
+                        'SOUL': 0x10,     # Koga
+                        'MARSH': 0x20,    # Sabrina
+                        'VOLCANO': 0x40,  # Blaine
+                        'EARTH': 0x80     # Giovanni
+                    }
+                    if target_badge_name in badge_flags:
+                        badge_obtained = bool(badges_byte & badge_flags[target_badge_name])
+            except Exception as e:
+                print(f"[TriggerEvaluator] Error checking badge {target_badge_name}: {e}")
+                badge_obtained = False
+            
+            result = badge_obtained
+            values_str = f"Badge {target_badge_name}: {'Obtained' if badge_obtained else 'Not Obtained'}"
+            debug_str = f"Evaluating: {logic_code} → {result}"
+        elif ttype == 'coordinates_are':
+            x_min = trigger.get('x_min', 0)
+            y_min = trigger.get('y_min', 0)
+            x_max = trigger.get('x_max', None)
+            y_max = trigger.get('y_max', None)
+            
+            # Get current player coordinates
+            player_x, player_y, map_id = self.env.get_game_coords()
+            
+            # Check if player is within coordinate bounds
+            result = player_x >= x_min
+            if y_min is not None:
+                result = result and (player_y >= y_min)
+            if x_max is not None:
+                result = result and (player_x <= x_max)
+            if y_max is not None:
+                result = result and (player_y <= y_max)
+            
+            values_str = f"PlayerPos: ({player_x}, {player_y}), Target: x>={x_min}"
             debug_str = f"Evaluating: {logic_code} → {result}"
         else:
             result = False # Keep default

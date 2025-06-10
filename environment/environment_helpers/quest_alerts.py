@@ -96,10 +96,10 @@ class QuestAlertManager:
         # Create DPG window
         self._create_dpg_quest_stuck_window(alert_id, quest_id, stuck_data)
         
-        self.logger.log_quest_event(quest_id, "Quest stuck alert created", {
-            'alert_id': alert_id,
-            'stuck_duration': stuck_data.get('duration', 'unknown')
-        })
+        # self.logger.log_quest_event(quest_id, "Quest stuck alert created", {
+        #     'alert_id': alert_id,
+        #     'stuck_duration': stuck_data.get('duration', 'unknown')
+        # })
     
     def create_trigger_failure_alert(self, trigger_id: str, failure_data: Dict[str, Any]):
         """Create a popup alert for trigger failure"""

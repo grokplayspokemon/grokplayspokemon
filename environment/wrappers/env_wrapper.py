@@ -1,9 +1,9 @@
+# env_wrapper.py
 from environment.environment import RedGymEnv
 
 class EnvWrapper(RedGymEnv):
     def __init__(self, config):
         super().__init__(config)
-        self.reset(options={"state": None})
 
     """
     A drop-in wrapper ensuring:

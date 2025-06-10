@@ -1,3 +1,4 @@
+# quest_progression.py
 from typing import List, Dict, Optional, Any
 import json
 from pathlib import Path
@@ -7,6 +8,8 @@ import time
 # Add logging integration
 import sys
 import os
+
+from anyio import current_time
 sys.path.append('/puffertank/grok_plays_pokemon')
 from utils.logging_config import get_pokemon_logger
 
@@ -32,6 +35,12 @@ class QuestProgressionEngine:
         self.quest_ids_all = quest_ids_all # This seems to be just a list of integer IDs
         self.status_queue = status_queue
         self.run_dir = run_dir
+
+        self.last_step_time = 0
+        self.step_interval = 0.2  # 5 times per second
+        # Track which quests have already been logged as blocked to avoid repeated logs
+        self.logged_blocked_prereqs = set()
+        self.last_current_qid = None
 
         # Initialize from the passed-in loaded statuses
         self.quest_completed = set()
@@ -155,7 +164,7 @@ class QuestProgressionEngine:
             self.logger.log_quest_event(str(quest_id), f"Quest {quest_id} status changed to {status_str}", data)
 
     def get_quest_data_by_id(self, quest_id_to_find: int) -> Optional[Dict]:
-        self.logger.log_quest_event(str(quest_id_to_find), "get_quest_data_by_id called")
+        # self.logger.log_quest_event(str(quest_id_to_find), "get_quest_data_by_id called")  # Verbose logging suppressed
         
         # Validate input parameter
         if quest_id_to_find is None:
@@ -174,15 +183,23 @@ class QuestProgressionEngine:
                 if quest_id_from_data is None:
                     self.logger.log_error("QuestProgressionEngine", f"Quest data missing quest_id field: {quest_data}")
                     continue
-                    
-                # Handle both string and int quest_id formats
+                
+                # FIXED: Robust conversion handling
+                # Convert both to integers for comparison
                 if isinstance(quest_id_from_data, str):
-                    quest_id_int = int(quest_id_from_data)
+                    # Handle string format like "002" or "2"
+                    quest_id_int = int(quest_id_from_data.lstrip('0') or '0')
                 else:
                     quest_id_int = int(quest_id_from_data)
+                
+                # Also handle the case where quest_id_to_find might be passed as string
+                if isinstance(quest_id_to_find, str):
+                    quest_id_to_find_int = int(quest_id_to_find.lstrip('0') or '0')
+                else:
+                    quest_id_to_find_int = int(quest_id_to_find)
                     
-                if quest_id_int == quest_id_to_find:
-                    self.logger.log_quest_event(str(quest_id_to_find), "Quest data found", {'quest_data_keys': list(quest_data.keys())})
+                if quest_id_int == quest_id_to_find_int:
+                    # self.logger.log_quest_event(str(quest_id_to_find), "Quest data found", {'quest_data_keys': list(quest_data.keys())})  # Verbose logging suppressed
                     return quest_data
                     
             except (ValueError, TypeError) as e:
@@ -248,92 +265,103 @@ class QuestProgressionEngine:
 
     def step(self, evaluator):
         """FIXED: Enhanced quest progression with better error handling"""
-        self.logger.log_quest_event("SYSTEM", "QuestProgressionEngine.step() called")
-        print(f"[QuestProgressionEngine] step() called")
+        current_time_val = time.time()
+        if current_time_val - self.last_step_time < self.step_interval:
+            return
+        self.last_step_time = current_time_val
+        # Removed spam logging
+        # self.logger.log_quest_event("SYSTEM", "QuestProgressionEngine.step() called")
+        # print(f"[QuestProgressionEngine] step() called")
         
         try:
             # 1) evaluate triggers for current quest
             current_qid = getattr(self.quest_manager, 'current_quest_id', None)
-            self.logger.log_quest_event(str(current_qid) if current_qid else "NONE", "Current quest ID retrieved")
+            # Removed spam logging
+            # self.logger.log_quest_event(str(current_qid) if current_qid else "NONE", "Current quest ID retrieved")
             
             if current_qid is not None:
-                active_quest_def = next((qq for qq in self.quests_definitions if int(qq['quest_id']) == current_qid), None) # Use renamed attribute
+                active_quest_def = next((qq for qq in self.quests_definitions if int(qq['quest_id']) == current_qid), None)
                 
                 if active_quest_def:
-                    self.logger.log_quest_event(str(current_qid), "Processing active quest", {'quest_def_found': True})
+                    # Removed spam logging
+                    # self.logger.log_quest_event(str(current_qid), "Processing active quest", {'quest_def_found': True})
                     
                     # process event_triggers
                     event_triggers = active_quest_def.get('event_triggers', [])
-                    self.logger.log_quest_event(str(current_qid), f"About to process {len(event_triggers)} event triggers", {'trigger_count': len(event_triggers)})
+                    # Removed spam logging
+                    # self.logger.log_quest_event(str(current_qid), f"About to process {len(event_triggers)} event triggers", {'trigger_count': len(event_triggers)})
                     
                     for idx, trg_def in enumerate(event_triggers):
                         tid = f"{active_quest_def['quest_id']}_{idx}"
                         
-                        print(f"[QuestProgressionEngine] Checking trigger {tid}: {trg_def.get('type', 'unknown')}")
+                        # print(f"[QuestProgressionEngine] Checking trigger {tid}: {trg_def.get('type', 'unknown')}")
                         
                         # FIXED: Check if trigger is already completed (don't re-evaluate completed triggers)
                         if tid in self.trigger_completed:
                             # Only log on first detection of completed status
                             self._log_trigger_state_change(tid, True)
-                            print(f"[QuestProgressionEngine] Trigger {tid} already completed, skipping")
+                            # print(f"[QuestProgressionEngine] Trigger {tid} already completed, skipping")
                             continue
                             
                         # FIXED: For sequence-based quests, we don't require all previous triggers to remain true
                         # We only require that they have been completed at some point
                         # This allows for map transition sequences like 38->37->0
                         
-                        # Check if all previous triggers have been completed (not necessarily still true)
-                        previous_complete = all(
-                            tid in self.trigger_completed for i in range(idx)
-                        )
+                        # # Check if all previous triggers have been completed (not necessarily still true)
+                        # previous_complete = all(
+                        #     tid in self.trigger_completed for i in range(idx)
+                        # )
                         
-                        # Only evaluate this trigger if it's the first one or all previous are complete
-                        if idx == 0 or previous_complete:
+                        # # Only evaluate this trigger if it's the first one or all previous are complete
+                        # if idx == 0 or previous_complete:
                             
-                            try:
-                                eval_dict = evaluator.check_trigger(trg_def) # Get detailed dict
-                                result = eval_dict["result"]
-                                values_str = eval_dict["values_str"]
-                                debug_str = eval_dict["debug_str"]
+                        try:
+                            eval_dict = evaluator.check_trigger(trg_def) # Get detailed dict
+                            result = eval_dict["result"]
+                            values_str = eval_dict["values_str"]
+                            debug_str = eval_dict["debug_str"]
 
-                                # Remove excessive logging - state change detection handles this
-                                
-                                # Send detailed trigger debug info to UI
-                                # Extend to quests 001-020 for comprehensive debugging
-                                if active_quest_def['quest_id'] in ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', 
-                                                                     '011', '012', '013', '014', '015', '016', '017', '018', '019', '020']:
-                                    self.status_queue.put(('__trigger_debug__', {
-                                        'id': tid,
-                                        'status': result,
-                                        'values_str': values_str,
-                                        'debug_str': debug_str
-                                    }))
-                                else: # For other quests, send simple status for now
-                                    if result: self.status_queue.put((tid, True))
-                                    # No need to send False for simple updates, UI assumes pending
+                            # Remove excessive logging - state change detection handles this
+                            
+                            # Send detailed trigger debug info to UI
+                            # Extend to quests 001-020 for comprehensive debugging
+                            if active_quest_def['quest_id'] in ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', 
+                                                                    '011', '012', '013', '014', '015', '016', '017', '018', '019', '020']:
+                                self.status_queue.put(('__trigger_debug__', {
+                                    'id': tid,
+                                    'status': result,
+                                    'values_str': values_str,
+                                    'debug_str': debug_str
+                                }))
+                            else: # For other quests, send simple status for now
+                                if result: self.status_queue.put((tid, True))
+                                # No need to send False for simple updates, UI assumes pending
 
-                                # Use state change detection for trigger completion
-                                self._log_trigger_state_change(tid, result, values_str, debug_str)
+                            # Use state change detection for trigger completion
+                            self._log_trigger_state_change(tid, result, values_str, debug_str)
+                            
+                            # Update quest monitor with trigger state
+                            if self.quest_monitor:
+                                self.quest_monitor.update_trigger_state(tid, result)
+                            
+                            if result:
+                                self.trigger_completed.add(tid)
                                 
-                                # Update quest monitor with trigger state
-                                if self.quest_monitor:
-                                    self.quest_monitor.update_trigger_state(tid, result)
-                                
-                                if result:
-                                    self.trigger_completed.add(tid)
-                                    
-                            except Exception as e:
-                                self.logger.log_error("SYSTEM", f"Error checking trigger {tid}: {str(e)}")
-                                
-                                # Alert about trigger evaluation errors
-                                if self.quest_monitor:
-                                    self.quest_monitor.report_trigger_error(tid, str(e))
-                        else:
-                            self.logger.log_quest_event(str(current_qid), f"Skipping trigger {tid} - previous triggers not all complete", {
-                                'trigger_id': tid,
-                                'reason': 'previous_triggers_incomplete',
-                                'previous_complete': previous_complete
-                            })
+                        except Exception as e:
+                            self.logger.log_error("SYSTEM", f"Error checking trigger {tid}: {str(e)}")
+                            
+                            # Alert about trigger evaluation errors
+                            if self.quest_monitor:
+                                self.quest_monitor.report_trigger_error(tid, str(e))
+                        # else:
+                        #     self.logger.log_quest_event(str(current_qid), f"Skipping trigger {tid} - previous triggers not all complete", {
+                        #         'trigger_id': tid,
+                        #         'trigger_type': trg_def.get('type', 'unknown'),
+                        #         'trigger_def': trg_def,
+                        #         'reason': 'previous_triggers_incomplete',
+                        #         'previous_triggers': [f"{active_quest_def['quest_id']}_{i}" for i in range(idx)],
+                        #         'previous_complete': previous_complete
+                        #     })
                     
                     # mark quest complete if all triggers done
                     tids = [f"{active_quest_def['quest_id']}_{i}" for i in range(len(active_quest_def.get('event_triggers', [])))]
@@ -375,13 +403,48 @@ class QuestProgressionEngine:
             # 2) advance to next quest if needed
             current_qid = getattr(self.quest_manager, 'current_quest_id', None)
             if current_qid is not None and current_qid not in self.quest_completed:
-                # find next
+                # find next quest that has prerequisites met
                 next_qid = None
                 for qid in self.quest_ids_all:
                     if qid not in self.quest_completed:
-                        next_qid = qid
-                        break
-                
+                        # Check if this quest's prerequisites are met
+                        quest_def = self.get_quest_data_by_id(qid)
+                        if quest_def:
+                            required_completions = quest_def.get("required_completions", [])
+                            prerequisites_met = True
+                            
+                            if required_completions:
+                                # Determine all missing prerequisites for this quest
+                                missing_reqs = [int(r) for r in required_completions if int(r) not in self.quest_completed]
+                                if missing_reqs:
+                                    prerequisites_met = False
+                                    # Log the first missing prerequisite only once per quest
+                                    if qid not in self.logged_blocked_prereqs:
+                                        req_q_id_int = missing_reqs[0]
+                                        self.logger.log_quest_event(str(qid), f"Quest {qid} blocked - prerequisite quest {req_q_id_int} not completed", {
+                                            'blocked_quest': qid,
+                                            'missing_prerequisite': req_q_id_int,
+                                            'action': 'prerequisite_check_failed'
+                                        })
+                                        self.logged_blocked_prereqs.add(qid)
+                                    # Skip further checks for this quest
+                                    break
+                        else:
+                            self.logger.log_error("SYSTEM", f"Could not find quest definition for quest {qid}")
+                            
+                if next_qid is None:
+                    if self.last_current_qid == current_qid:
+                        return
+                    else:
+                        self.logger.log_quest_event(str(current_qid), f"No eligible next quest found - prerequisites not met", {
+                        'current_quest': current_qid,
+                        'action': 'no_eligible_quest',
+                        'next_qid': next_qid,
+                        'current_qid': current_qid
+                        })
+                    
+                        self.last_current_qid = current_qid
+
                 if next_qid and next_qid != current_qid:
                     self.logger.log_quest_event(str(current_qid), f"Quest advancement: Moving from Quest {current_qid} to Quest {next_qid}", {
                         'from_quest': current_qid, 
@@ -389,34 +452,26 @@ class QuestProgressionEngine:
                         'action': 'quest_advancement'
                     })
                     
-                    # CRITICAL FIX: Load new quest coordinates FIRST before setting quest IDs
-                    # This prevents the race condition where StageManager tries to use new quest ID
-                    # with old quest coordinates
+                    # CRITICAL FIX: Load coordinates BEFORE setting quest IDs
+                    coordinates_loaded = False
+                    
                     if hasattr(self.navigator, 'load_coordinate_path'):
                         self.logger.log_navigation_event("COORDINATE_LOADING_START", {
                             'message': f'Loading coordinate path for quest {next_qid} BEFORE setting quest IDs',
                             'quest_id': next_qid
                         })
                         
-                        # ENHANCEMENT: Add retry mechanism for coordinate loading
-                        load_success = False
-                        max_retries = 3
-                        
-                        for attempt in range(max_retries):
+                        # Try to load coordinates with retries
+                        for attempt in range(3):
                             try:
                                 if self.navigator.load_coordinate_path(next_qid):
+                                    coordinates_loaded = True
                                     self.logger.log_navigation_event("COORDINATE_LOADING_SUCCESS", {
                                         'message': f'Successfully loaded coordinate path for quest {next_qid}',
                                         'quest_id': next_qid,
                                         'attempt': attempt + 1
                                     })
-                                    load_success = True
                                     break
-                                else:
-                                    self.logger.log_error("CoordinateLoadingError", f"Failed to load coordinate path for quest {next_qid}", {
-                                        'quest_id': next_qid, 
-                                        'attempt': attempt + 1
-                                    })
                             except Exception as e:
                                 self.logger.log_error("CoordinateLoadingException", f"Exception during coordinate loading", {
                                     'quest_id': next_qid,
@@ -424,155 +479,100 @@ class QuestProgressionEngine:
                                     'error_message': str(e)
                                 })
                             
-                            if attempt < max_retries - 1:
-                                self.logger.log_system_event("Retrying coordinate loading in 0.5 seconds",
-                                                            {'retry_delay': 0.5})
+                            if attempt < 2:
                                 time.sleep(0.5)
-                        
-                        if load_success:
-                            # CRITICAL FIX: Snap to nearest coordinate after loading new quest path
-                            # This ensures Navigator index is properly reset and aligned with new quest
-                            if hasattr(self.navigator, 'snap_to_nearest_coordinate'):
-                                self.logger.log_navigation_event("COORDINATE_SNAPPING", {
-                                    'message': f'Snapping to nearest coordinate for quest {next_qid}',
-                                    'quest_id': next_qid
-                                })
-                                snap_success = False
-                                
-                                # Try regular snap first
-                                if self.navigator.snap_to_nearest_coordinate():
-                                    self.logger.log_navigation_event("COORDINATE_SNAP_SUCCESS", {
-                                        'message': 'Successfully snapped to nearest coordinate',
-                                        'quest_id': next_qid
-                                    })
-                                    snap_success = True
-                                # If regular snap fails, try emergency snap
-                                elif hasattr(self.navigator, '_emergency_snap_to_path') and self.navigator._emergency_snap_to_path():
-                                    self.logger.log_navigation_event("EMERGENCY_SNAP_SUCCESS", {
-                                        'message': 'Emergency snap successful',
-                                        'quest_id': next_qid
-                                    })
-                                    snap_success = True
-                                else:
-                                    self.logger.log_error("SnapFailedError", "All snapping attempts failed - using default index 0", {
-                                        'quest_id': next_qid, 
-                                        'fallback': 'index_0'
-                                    })
-                                    # Fallback: manually set index to 0 as safety measure
-                                    self.navigator.current_coordinate_index = 0
-                                    snap_success = True  # Continue with quest transition
-                                
-                                if snap_success and hasattr(self.navigator, 'get_current_status'):
-                                    status = self.navigator.get_current_status()
-                                    self.logger.log_navigation_event("NAVIGATOR_STATUS_CHECK", {
-                                        'message': 'Navigator status after snapping',
-                                        'quest_id': next_qid,
-                                        'navigator_status': status
-                                    })
-                        else:
-                            self.logger.log_error("CoordinateLoadingFailedError", f"Failed to load coordinate path for quest {next_qid} after {max_retries} attempts", {
-                                'quest_id': next_qid,
-                                'max_retries': max_retries,
-                                'fallback_action': 'preserve_current_quest'
-                            })
-                            # Enhanced fallback: Try to preserve current quest instead of advancing
-                            self.logger.log_quest_event(str(current_qid), f"Preserving current quest {current_qid} due to coordinate loading failure", {
-                                'action': 'quest_preservation'
-                            })
-                            return  # Don't proceed with quest transition
                     
-                    # FIXED: Ensure quest ID is correctly set across all components
-                    # Only set these AFTER coordinates are successfully loaded
-                    self.quest_manager.current_quest_id = next_qid
-                    if hasattr(self.navigator, 'active_quest_id'):
-                        self.navigator.active_quest_id = next_qid
-                    if hasattr(self.env, 'current_loaded_quest_id'):
-                        self.env.current_loaded_quest_id = next_qid
-                    
-                    self.logger.log_quest_event(str(next_qid), f"Quest IDs updated across all components", {
-                        'action': 'component_quest_id_update',
-                        'quest_manager_id': next_qid,
-                        'navigator_id': getattr(self.navigator, 'active_quest_id', None),
-                        'env_id': getattr(self.env, 'current_loaded_quest_id', None)
-                    })
-                    
-                    # Notify UI of quest change
-                    self.status_queue.put(('__current_quest__', next_qid))
-                    self.logger.log_quest_event(str(next_qid), f"Advanced to quest {next_qid}", {
-                        'action': 'quest_advancement_complete'
-                    })
-                    
-                    # DIAGNOSTIC: Verify Navigator state after quest transition
-                    if hasattr(self.navigator, 'sequential_coordinates') and hasattr(self.navigator, 'current_coordinate_index'):
-                        coords_count = len(self.navigator.sequential_coordinates)
-                        current_index = self.navigator.current_coordinate_index
+                    # Only proceed with quest transition if coordinates loaded successfully
+                    if coordinates_loaded:
+                        # Snap to nearest coordinate
+                        if hasattr(self.navigator, 'snap_to_nearest_coordinate'):
+                            self.navigator.snap_to_nearest_coordinate()
                         
-                        self.logger.log_navigation_event("NAVIGATOR_STATE_DIAGNOSTIC", {
-                            'message': 'Navigator state after transition',
-                            'quest_id': next_qid,
-                            'coords_count': coords_count,
-                            'current_index': current_index
-                        })
-                        
-                        if coords_count > 0 and current_index < coords_count:
-                            next_coord = self.navigator.sequential_coordinates[current_index]
-                            self.logger.log_navigation_event("NEXT_TARGET_COORDINATE", {
-                                'message': f'Next target coordinate: {next_coord}',
-                                'quest_id': next_qid,
-                                'coordinates': next_coord
-                            })
-                        else:
-                            self.logger.log_error("NavigatorIndexOutOfRange", f"Index {current_index} out of range for {coords_count} coordinates", {
-                                'current_index': current_index,
-                                'coords_count': coords_count,
-                                'quest_id': next_qid
-                            })
-
-                    # ENHANCEMENT: Add comprehensive state validation
-                    self.logger.log_system_event("Post-transition validation starting", {
-                        'function': 'post_transition_validation'
-                    })
-                    validation_errors = []
-
-                    # Validate Navigator state
-                    if hasattr(self.navigator, 'active_quest_id') and self.navigator.active_quest_id != next_qid:
-                        validation_errors.append(f"Navigator quest ID mismatch: {self.navigator.active_quest_id} != {next_qid}")
-
-                    if hasattr(self.navigator, 'sequential_coordinates') and not self.navigator.sequential_coordinates:
-                        validation_errors.append("Navigator has no coordinates loaded")
-
-                    if hasattr(self.navigator, 'current_coordinate_index') and hasattr(self.navigator, 'sequential_coordinates'):
-                        if self.navigator.current_coordinate_index >= len(self.navigator.sequential_coordinates):
-                            validation_errors.append(f"Navigator index {self.navigator.current_coordinate_index} >= {len(self.navigator.sequential_coordinates)} coordinates")
-
-                    # Validate Environment state
-                    if hasattr(self.env, 'current_loaded_quest_id') and self.env.current_loaded_quest_id != next_qid:
-                        validation_errors.append(f"Environment quest ID mismatch: {self.env.current_loaded_quest_id} != {next_qid}")
-
-                    # Validate QuestManager state
-                    if hasattr(self.quest_manager, 'current_quest_id') and self.quest_manager.current_quest_id != next_qid:
-                        validation_errors.append(f"QuestManager quest ID mismatch: {self.quest_manager.current_quest_id} != {next_qid}")
-
-                    if validation_errors:
-                        self.logger.log_error("SYSTEM", f"Validation errors detected: {validation_errors}")
-                        
-                        # Attempt to fix critical errors
+                        # NOW it's safe to update quest IDs atomically
+                        self.quest_manager.current_quest_id = next_qid
                         if hasattr(self.navigator, 'active_quest_id'):
                             self.navigator.active_quest_id = next_qid
-                            self.logger.log_system_event(f"Fixed Navigator quest ID to {next_qid}", {
-                                'fixed_component': 'navigator'
-                            })
-                        
                         if hasattr(self.env, 'current_loaded_quest_id'):
                             self.env.current_loaded_quest_id = next_qid
-                            self.logger.log_system_event(f"Fixed Environment quest ID to {next_qid}", {
-                                'fixed_component': 'environment'
-                            })
+                        
+                        # Notify UI
+                        self.status_queue.put(('__current_quest__', next_qid))
+                        
+                        self.logger.log_quest_event(str(next_qid), f"Quest transition complete", {
+                            'action': 'quest_advancement_complete',
+                            'coordinates_loaded': coordinates_loaded
+                        })
                     else:
-                        self.logger.log_system_event(f"All components properly synchronized for quest {next_qid}", {
-                            'validation_result': 'success', 
+                        self.logger.log_error("CoordinateLoadingFailedError", f"Failed to load coordinates for quest {next_qid}, aborting transition", {
+                            'quest_id': next_qid,
+                            'current_quest': current_qid
+                        })
+                        # Don't transition if coordinates couldn't be loaded - stay on current quest
+                        self.logger.log_quest_event(str(current_qid), f"Staying on quest {current_qid} due to coordinate loading failure", {
+                            'action': 'quest_transition_aborted',
+                            'failed_quest': next_qid
+                        })
+                    
+                    # DIAGNOSTIC: Only run diagnostics if quest transition was successful
+                    if coordinates_loaded:
+                        if hasattr(self.navigator, 'sequential_coordinates') and hasattr(self.navigator, 'current_coordinate_index'):
+                            coords_count = len(self.navigator.sequential_coordinates)
+                            current_index = self.navigator.current_coordinate_index
+                            
+                            self.logger.log_navigation_event("NAVIGATOR_STATE_DIAGNOSTIC", {
+                                'message': 'Navigator state after successful transition',
+                                'quest_id': next_qid,
+                                'coords_count': coords_count,
+                                'current_index': current_index
+                            })
+                            
+                            if coords_count > 0 and current_index < coords_count:
+                                next_coord = self.navigator.sequential_coordinates[current_index]
+                                self.logger.log_navigation_event("NEXT_TARGET_COORDINATE", {
+                                    'message': f'Next target coordinate: {next_coord}',
+                                    'quest_id': next_qid,
+                                    'coordinates': next_coord
+                                })
+                            else:
+                                self.logger.log_error("NavigatorIndexOutOfRange", f"Index {current_index} out of range for {coords_count} coordinates", {
+                                    'current_index': current_index,
+                                    'coords_count': coords_count,
+                                    'quest_id': next_qid
+                                })
+
+                        # ENHANCEMENT: Add comprehensive state validation for successful transitions
+                        self.logger.log_system_event("Post-transition validation starting", {
+                            'function': 'post_transition_validation',
                             'quest_id': next_qid
                         })
+                        validation_errors = []
+
+                        # Validate Navigator state
+                        if hasattr(self.navigator, 'active_quest_id') and self.navigator.active_quest_id != next_qid:
+                            validation_errors.append(f"Navigator quest ID mismatch: {self.navigator.active_quest_id} != {next_qid}")
+
+                        if hasattr(self.navigator, 'sequential_coordinates') and not self.navigator.sequential_coordinates:
+                            validation_errors.append("Navigator has no coordinates loaded")
+
+                        if hasattr(self.navigator, 'current_coordinate_index') and hasattr(self.navigator, 'sequential_coordinates'):
+                            if self.navigator.current_coordinate_index >= len(self.navigator.sequential_coordinates):
+                                validation_errors.append(f"Navigator index {self.navigator.current_coordinate_index} >= {len(self.navigator.sequential_coordinates)} coordinates")
+
+                        # Validate Environment state
+                        if hasattr(self.env, 'current_loaded_quest_id') and self.env.current_loaded_quest_id != next_qid:
+                            validation_errors.append(f"Environment quest ID mismatch: {self.env.current_loaded_quest_id} != {next_qid}")
+
+                        # Validate QuestManager state
+                        if hasattr(self.quest_manager, 'current_quest_id') and self.quest_manager.current_quest_id != next_qid:
+                            validation_errors.append(f"QuestManager quest ID mismatch: {self.quest_manager.current_quest_id} != {next_qid}")
+
+                        if validation_errors:
+                            self.logger.log_error("SYSTEM", f"Validation errors detected after successful quest transition: {validation_errors}")
+                        else:
+                            self.logger.log_system_event(f"All components properly synchronized for quest {next_qid}", {
+                                'validation_result': 'success', 
+                                'quest_id': next_qid
+                            })
             
             # 3) persist statuses with better error handling
             self._persist_progress()
@@ -582,7 +582,7 @@ class QuestProgressionEngine:
 
     def _persist_progress(self):
         """Persist quest and trigger progress to files"""
-        self.logger.log_system_event("SYSTEM", "_persist_progress called")
+        # self.logger.log_system_event("SYSTEM", "_persist_progress called")
         
         try:
             # Save trigger status - FIX: Save as dictionary mapping trigger_id to completion status
@@ -597,22 +597,24 @@ class QuestProgressionEngine:
             with open(quest_file, 'w') as f:
                 json.dump(quest_status_for_save, f, indent=4)
             
-            self.logger.log_system_event("Progress persisted successfully", {
-                'trigger_count': len(self.trigger_completed),
-                'quest_count': len(self.quest_completed)
-            })
+            # self.logger.log_system_event("Progress persisted successfully", {
+            #     'trigger_count': len(self.trigger_completed),
+            #     'quest_count': len(self.quest_completed)
+            # })
                 
         except Exception as e:
             self.logger.log_error("SYSTEM", f"Error persisting progress: {str(e)}")
 
     def get_quest_status(self) -> Dict[int, bool]:
         """Get current quest completion status"""
-        self.logger.log_system_event("SYSTEM", "get_quest_status called")
+        # Removed frequent logging to avoid log spam
+        # self.logger.log_system_event("SYSTEM", "get_quest_status called")
         return {qid: qid in self.quest_completed for qid in self.quest_ids_all}
 
     def get_trigger_status(self) -> Dict[str, bool]:
         """Get current trigger completion status"""
-        self.logger.log_system_event("SYSTEM", "get_trigger_status called")
+        # Removed frequent logging to avoid log spam
+        # self.logger.log_system_event("SYSTEM", "get_trigger_status called")
         return {tid: tid in self.trigger_completed for tid in self.trigger_completed}
 
     def force_complete_quest(self, quest_id: int):

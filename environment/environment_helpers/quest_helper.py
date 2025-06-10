@@ -1,3 +1,4 @@
+# quest_helper.py
 # Quest Helper
 """
 Simple quest-based warp blocking that integrates with existing stage_helper.blockings
@@ -110,201 +111,8 @@ QUEST_MOVEMENT_RULES = {
     # - 'decrement_pending_b': True - decrement pending B press count
 }
 
-class QuestPathFollower:
-    """Automatic path following system using combined_quest_coordinates_continuous.json"""
-    
-    def __init__(self, env):
-        self.env = env
-        
-        # Path following state
-        self.quest_paths = {}  # Quest ID -> List of (gy, gx) coordinates
-        self.current_quest_path = []  # Current active path
-        self.current_path_index = 0  # Current position in path
-        self.path_following_active = False  # Whether automatic path following is enabled
-        
-        # Action mapping
-        self.action_mapping = {
-            'down': 0,
-            'left': 1, 
-            'right': 2,
-            'up': 3,
-            'a': 4,
-            'b': 5,
-            'path': 6,
-            'start': 7
-        }
-        
-        # Load path data
-        self._load_quest_paths()
-    
-    def _load_quest_paths(self):
-        """Load quest coordinate paths from combined_quest_coordinates_continuous.json"""
-        coords_file = Path(__file__).parent / "quest_paths" / "combined_quest_coordinates_continuous.json"
-        
-        if not coords_file.exists():
-            print(f"QuestPathFollower: Warning - combined coordinate file not found: {coords_file}")
-            return
-            
-        try:
-            with open(coords_file, 'r') as f:
-                data = json.load(f)
-            
-            quest_start_indices = data.get("quest_start_indices", {})
-            all_coordinates = data.get("coordinates", [])
-            
-            # Extract coordinates for each quest
-            for quest_id_str, start_idx in quest_start_indices.items():
-                quest_id = int(quest_id_str)
-                
-                # Find end index by looking for the next quest
-                end_idx = len(all_coordinates)
-                sorted_quest_ids = sorted([int(k) for k in quest_start_indices.keys()])
-                
-                current_quest_idx = sorted_quest_ids.index(quest_id)
-                if current_quest_idx + 1 < len(sorted_quest_ids):
-                    next_quest_id = sorted_quest_ids[current_quest_idx + 1]
-                    end_idx = quest_start_indices[str(next_quest_id)]
-                
-                quest_coords = all_coordinates[start_idx:end_idx]
-                # FIXED: Coordinates in combined file are ALREADY global coordinates
-                # Do NOT convert them with local_to_global - they are already (gy, gx) format
-                self.quest_paths[quest_id] = [(coord[0], coord[1]) for coord in quest_coords]
-            
-            print(f"QuestPathFollower: Loaded {len(self.quest_paths)} quest paths")
-            
-        except Exception as e:
-            print(f"QuestPathFollower: Error loading quest paths: {e}")
-            self.quest_paths = {}
-    
-    def start_path_following(self, quest_id: int) -> bool:
-        """Start automatic path following for the specified quest"""
-        if quest_id not in self.quest_paths:
-            print(f"QuestPathFollower: No path data for quest {quest_id}")
-            return False
-            
-        self.current_quest_path = self.quest_paths[quest_id]
-        self.current_path_index = 0
-        self.path_following_active = True
-        
-        print(f"QuestPathFollower: Started path following for quest {quest_id}")
-        print(f"QuestPathFollower: Path has {len(self.current_quest_path)} coordinates")
-        if self.current_quest_path:
-            first_coord = self.current_quest_path[0]
-            # Validate coordinates are reasonable (global coordinates should be < 400)
-            if first_coord[0] < 400 and first_coord[1] < 400:
-                print(f"QuestPathFollower: Starting at global {first_coord}")
-            else:
-                print(f"QuestPathFollower: WARNING - Invalid starting coordinates {first_coord} (too high for global coords)")
-        else:
-            print(f"QuestPathFollower: No coordinates loaded")
-        
-        return True
-    
-    def stop_path_following(self):
-        """Stop automatic path following"""
-        self.path_following_active = False
-        self.current_quest_path = []
-        self.current_path_index = 0
-        print(f"QuestPathFollower: Stopped path following")
-    
-    def get_next_movement_action(self) -> Optional[int]:
-        """
-        Calculate the next movement action needed to follow the quest path.
-        Returns the action integer, or None if no movement needed.
-        """
-        # CRITICAL: Do not override actions when dialog is active - player needs to interact
-        try:
-            dialog = self.env.read_dialog()
-            if dialog and dialog.strip():
-                print(f"QuestPathFollower: Dialog active, pausing path following for player interaction")
-                return None
-        except Exception as e:
-            print(f"QuestPathFollower: Error checking dialog: {e}")
-            
-        if not self.path_following_active or not self.current_quest_path:
-            return None
-            
-        if self.current_path_index >= len(self.current_quest_path):
-            print(f"QuestPathFollower: Reached end of path, stopping")
-            self.stop_path_following()
-            return None
-        
-        # Get current player position
-        x, y, map_id = self.env.get_game_coords()
-        current_global = local_to_global(y, x, map_id)
-        
-        # Get target coordinate - these are ALREADY global coordinates 
-        target_global = self.current_quest_path[self.current_path_index]
-        
-        print(f"QuestPathFollower: Current pos {current_global}, target {target_global} (index {self.current_path_index})")
-        
-        # Check if we're at the target
-        if current_global == target_global:
-            print(f"QuestPathFollower: Reached target {target_global}, advancing to next")
-            self.current_path_index += 1
-            
-            # Check if we've completed the path
-            if self.current_path_index >= len(self.current_quest_path):
-                print(f"QuestPathFollower: Path completed!")
-                self.stop_path_following()
-                return None
-                
-            # Get next target
-            target_global = self.current_quest_path[self.current_path_index]
-            print(f"QuestPathFollower: New target {target_global}")
-        
-        # Calculate direction needed  
-        # Note: global coordinates are (gy, gx) format from local_to_global
-        dy = target_global[0] - current_global[0]  # target_gy - current_gy (down = positive)
-        dx = target_global[1] - current_global[1]  # target_gx - current_gx (right = positive)
-        
-        # Determine action - prioritize the larger movement first
-        if abs(dy) > abs(dx):
-            # Vertical movement has priority
-            if dy > 0:
-                action_str = 'down'
-            else:
-                action_str = 'up'
-        elif abs(dx) > abs(dy):
-            # Horizontal movement has priority
-            if dx > 0:
-                action_str = 'right'
-            else:
-                action_str = 'left'
-        else:
-            # Equal movement or no movement needed
-            if dy > 0:
-                action_str = 'down'
-            elif dy < 0:
-                action_str = 'up'
-            elif dx > 0:
-                action_str = 'right'
-            elif dx < 0:
-                action_str = 'left'
-            else:
-                # No movement needed
-                return None
-        
-        action_int = self.action_mapping[action_str]
-        print(f"QuestPathFollower: Moving {action_str} (action {action_int}) to reach {target_global}")
-        
-        return action_int
-    
-    def is_on_quest_path(self, global_coords: Tuple[int, int]) -> bool:
-        """Check if the given global coordinates are on the current quest path"""
-        if not self.path_following_active or not self.current_quest_path:
-            return False
-        return global_coords in self.current_quest_path
-    
-    def get_path_status(self) -> Dict[str, Any]:
-        """Get current path following status for debugging"""
-        return {
-            'active': self.path_following_active,
-            'path_length': len(self.current_quest_path),
-            'current_index': self.current_path_index,
-            'current_target': self.current_quest_path[self.current_path_index] if self.current_path_index < len(self.current_quest_path) else None,
-            'progress': f"{self.current_path_index}/{len(self.current_quest_path)}"
-        }
+# QuestPathFollower REMOVED - Navigation logic consolidated into ConsolidatedNavigator
+# All path following functionality now handled by environment_helpers/navigator.py
 
 class QuestWarpBlocker:
     """Quest-based warp blocker and movement controller that integrates with stage_manager"""
@@ -314,8 +122,8 @@ class QuestWarpBlocker:
         self.active_quest_blocks = []
         self.active_quest_movements = []
         
-        # Initialize automatic path follower
-        self.path_follower = QuestPathFollower(env)
+        # Path following now handled by ConsolidatedNavigator
+        # Navigation functionality consolidated in environment_helpers/navigator.py
     
     def update_quest_blocks(self, quest_id: Optional[int]):
         """Update blocking rules and scripted movements based on current quest"""
@@ -343,7 +151,10 @@ class QuestWarpBlocker:
         if quest_id is None:
             self.active_quest_blocks = []
             self.active_quest_movements = []
-            self.path_follower.stop_path_following()
+            # Stop path following via ConsolidatedNavigator
+            if hasattr(self.env, 'navigator') and self.env.navigator:
+                print("QuestWarpBlocker: No quest active, clearing navigator state")
+                self.env.navigator.reset_quest_state()
             print("QuestWarpBlocker: No quest active, all blocks cleared")
             return
             
@@ -378,84 +189,34 @@ class QuestWarpBlocker:
                     self.env.stage_manager.scripted_movements.append(movement)
                     print(f"QuestWarpBlocker: Added scripted movement for quest {quest_id}")
         
-        print(f"QuestWarpBlocker: Quest {quest_id} setup complete. Active blocks: {len(self.active_quest_blocks)}, Path following: {self.path_follower.path_following_active}")
+        print(f"QuestWarpBlocker: Quest {quest_id} setup complete. Active blocks: {len(self.active_quest_blocks)}, Navigator handling path following")
     
     def _generate_path_following_movements(self, quest_id: int) -> List[Dict[str, Any]]:
         """
         Generate scripted movements that force the player to follow the quest path.
         This creates a comprehensive movement override system.
         """
-        if quest_id not in self.path_follower.quest_paths:
-            return []
-            
-        # Create a single comprehensive movement rule that handles all path following
-        path_movement = {
-            'condition': {'always': True, 'quest_path_active': True},
-            'action': 'path_follow',
-            'quest_id': quest_id,
-            'description': f'Automatic path following for quest {quest_id}'
-        }
-        
-        return [path_movement]
+        # Path following movements now handled by ConsolidatedNavigator
+        # No need to generate movement rules here
+        return []
     
     def handle_path_following_movement(self, original_action: int) -> int:
         """
-        Handle automatic path following movement override.
-        Called by stage_manager when path following is active.
+        PATH FOLLOWING MOVED TO NAVIGATOR: All navigation logic now handled by ConsolidatedNavigator.
+        QuestWarpBlocker no longer handles path following to prevent navigation conflicts.
         """
-        # CRITICAL: Do not override actions when dialog is active - player needs to interact
-        try:
-            dialog = self.env.read_dialog()
-            if dialog and dialog.strip():
-                print(f"QuestWarpBlocker: Dialog active, allowing player action {original_action} for interaction")
-                return original_action
-        except Exception as e:
-            print(f"QuestWarpBlocker: Error checking dialog: {e}")
-            
-        if not self.path_follower.path_following_active:
-            return original_action
-            
-        # Get the next required movement from path follower
-        path_action = self.path_follower.get_next_movement_action()
+        print(f"QuestWarpBlocker: Path following delegated to ConsolidatedNavigator")
         
-        if path_action is not None:
-            print(f"QuestWarpBlocker: Path following overriding action {original_action} -> {path_action}")
-            return path_action
+        # Delegate all path following to ConsolidatedNavigator
+        if hasattr(self.env, 'navigator') and self.env.navigator:
+            return self.env.navigator.convert_path_follow_to_movement_action(original_action)
         else:
-            # No specific path movement needed, allow original action
-            # But check if original action would take us off the path
-            if self._would_action_deviate_from_path(original_action):
-                print(f"QuestWarpBlocker: Action {original_action} would deviate from path, blocking")
-                return self._get_noop_action()
-            else:
-                return original_action
+            return original_action
     
     def _would_action_deviate_from_path(self, action: int) -> bool:
-        """Check if the given action would take the player off the quest path"""
-        if not self.path_follower.path_following_active:
-            return False
-            
-        # Get current position
-        x, y, map_id = self.env.get_game_coords()
-        current_global = local_to_global(y, x, map_id)
-        
-        # Calculate where the action would take us
-        new_x, new_y = x, y
-        if action == 0:  # down
-            new_y += 1
-        elif action == 1:  # left
-            new_x -= 1
-        elif action == 2:  # right
-            new_x += 1
-        elif action == 3:  # up
-            new_y -= 1
-        else:
-            return False  # Non-movement actions are allowed
-            
-        new_global = local_to_global(new_y, new_x, map_id)
-        
-        # Check if new position would be on the quest path
-        return not self.path_follower.is_on_quest_path(new_global)
+        """PATH DEVIATION CHECK MOVED TO NAVIGATOR: ConsolidatedNavigator handles all path validation"""
+        # All path checking now handled by ConsolidatedNavigator
+        return False
     
     def _get_noop_action(self) -> int:
         """Get a no-op action that doesn't move the player"""
@@ -483,8 +244,10 @@ class QuestWarpBlocker:
                     self.env.stage_manager.scripted_movements.remove(movement)
                     print(f"QuestWarpBlocker: Removed scripted movement {movement} for quest {quest_id}")
         
-        # Stop path following
-        self.path_follower.stop_path_following()
+        # Stop path following via ConsolidatedNavigator
+        if hasattr(self.env, 'navigator') and self.env.navigator:
+            print(f"QuestWarpBlocker: Clearing navigator state for quest {quest_id}")
+            self.env.navigator.reset_quest_state()
         
         # Clear active blocks and movements
         self.active_quest_blocks = []

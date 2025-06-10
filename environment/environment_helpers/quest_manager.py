@@ -1,3 +1,4 @@
+# quest_manager.py
 # Quest Manager: quest enforcement logic
 """
 Quest Manager: micromanage individual quests to ensure the player completes necessary steps.
@@ -97,7 +98,12 @@ class QuestManager:
             for q_def in self.quest_definitions:
                 try:
                     loc = int(q_def["location_id"])
-                    quest_id_int = int(q_def["quest_id"])
+                    # FIXED: Ensure quest_id is converted to int consistently
+                    quest_id_raw = q_def["quest_id"]
+                    if isinstance(quest_id_raw, str):
+                        quest_id_int = int(quest_id_raw.lstrip('0') or '0')
+                    else:
+                        quest_id_int = int(quest_id_raw)
                     quests_by_location[loc].append(quest_id_int)
                 except (ValueError, TypeError, KeyError) as e:
                     print(f"QuestManager __init__: Error processing quest for location mapping: {q_def.get('quest_id', 'UNKNOWN')}, error: {e}")
@@ -273,6 +279,10 @@ class QuestManager:
         """
         Inspect or modify the given action based on quest logic and warp blocking.
         """
+        # Early exit: no action to filter
+        if action is None:
+            return None
+        
         # CRITICAL: Do not override actions when dialog is active - player needs to interact
         try:
             dialog = self.env.read_dialog()
@@ -301,7 +311,9 @@ class QuestManager:
         
         # Apply scripted movement via stage_manager.scripted_stage_movement()
         if hasattr(self.env, 'stage_manager') and hasattr(self.env.stage_manager, 'scripted_stage_movement'):
+            print(f"QuestManager: Applying scripted stage movement for action {action}")
             action = self.env.stage_manager.scripted_stage_movement(action)
+            print(f"QuestManager: Scripted stage movement returned action {action}")
 
         # CRITICAL FIX: If stage manager converted PATH_FOLLOW_ACTION to a movement action,
         # do NOT apply hardcoded quest overrides that could break path following
@@ -346,10 +358,10 @@ class QuestManager:
         #     if (gy, gx) == (345, 89) and action == self.up_action_index:
         #         return self.down_action_index
         
-        # Hard-coded logic for quest 014: Path following (example, assuming env handles it)
+        # Hard-coded logic for quest 014: Path following (example, assuming navigator handles it)
         if active_quest_id == 14:
-            # Assuming env.load_coordinate_path itself checks if path is already loaded for this quest
-            if self.env.load_coordinate_path(14): # This method should return bool or raise error
+            # Assuming navigator.load_coordinate_path itself checks if path is already loaded for this quest
+            if self.nav.load_coordinate_path(14): # This method should return bool or raise error
                  # If path is successfully loaded (or confirmed loaded) for quest 14
                  # and we are on a coordinate of that path, then trigger path follow.
                  quest_def_14 = self.get_quest_definition(14)
@@ -593,10 +605,10 @@ def determine_starting_quest(player_pos, map_id, completed_quests, quest_ids_all
 def describe_trigger(trg):
     """Function to describe trigger criteria for UI display"""
     ttype = trg.get('type')
-    if ttype == 'current_map_id_is':
-        return f"Map ID == {trg['map_id']}"
+    if ttype == 'current_map_id_is' or ttype == 'current_map_id':
+        return f"Map ID == {trg.get('current_map_id', trg.get('map_id', 'unknown'))}"
     elif ttype == 'previous_map_id_was':
-        return f"Previous Map ID == {trg['map_id']}"
+        return f"Previous Map ID == {trg.get('current_map_id', trg.get('map_id', 'unknown'))}"
     elif ttype == 'dialog_contains_text':
         return f"Dialog contains \"{trg['text']}\""
     elif ttype == 'party_size_is':
@@ -634,11 +646,11 @@ def describe_trigger(trg):
 def describe_trigger_logic(trg):
     """Function to describe the actual code/logic being executed for a trigger"""
     ttype = trg.get('type')
-    if ttype == 'current_map_id_is':
-        target_map = trg['map_id']
+    if ttype == 'current_map_id_is' or ttype == 'current_map_id':
+        target_map = trg.get('current_map_id', trg.get('map_id', 'unknown'))
         return f"current_map_id == {target_map}"
     elif ttype == 'previous_map_id_was':
-        target_map = trg['map_id']
+        target_map = trg.get('current_map_id', trg.get('map_id', 'unknown'))
         return f"prev_map_id == {target_map}"
     elif ttype == 'dialog_contains_text':
         text = trg['text']

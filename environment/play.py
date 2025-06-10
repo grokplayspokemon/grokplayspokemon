@@ -1,13 +1,19 @@
-# play.py - CLEANED VERSION (showing only key functions)
+# play.py
+import sys
+from pathlib import Path
+
+# Ensure the project root is in the Python path
+project_root_path = Path(__file__).resolve().parent.parent
+if str(project_root_path) not in sys.path:
+    sys.path.insert(0, str(project_root_path))
+
 import argparse
 import numpy as np
 import json
 import pygame
 import time
-import sys
 import math
 import os
-from pathlib import Path
 from typing import Optional
 from omegaconf import OmegaConf, DictConfig
 import threading
@@ -21,10 +27,10 @@ from datetime import datetime
 
 from environment.wrappers.env_wrapper import EnvWrapper
 from environment.wrappers.configured_env_wrapper import ConfiguredEnvWrapper
-from environment.environment import VALID_ACTIONS, PATH_FOLLOW_ACTION
+from environment.environment import VALID_ACTIONS, PATH_FOLLOW_ACTION, VALID_ACTIONS_STR
 from pyboy.utils import WindowEvent
 from environment.data.recorder_data.global_map import local_to_global
-from environment.environment_helpers.navigator import InteractiveNavigator, diagnose_environment_coordinate_loading, debug_coordinate_system
+from environment.environment_helpers.navigator import InteractiveNavigator
 from environment.environment_helpers.saver import save_initial_state, save_loop_state, save_final_state, load_latest_run, create_new_run
 from environment.environment_helpers.warp_tracker import record_warp_step, backtrack_warp_sequence
 from environment.environment_helpers.quest_manager import QuestManager, verify_quest_system_integrity, determine_starting_quest
@@ -32,9 +38,9 @@ from ui.quest_ui import start_quest_ui
 from environment.environment_helpers.trigger_evaluator import TriggerEvaluator
 from environment.grok_integration import extract_structured_game_state
 from agent.simple_agent import SimpleAgent
-
-project_root_path = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(project_root_path))
+from environment.data.environment_data.item_handler import ItemHandler
+from shared import game_started, grok_enabled
+VALID_ACTIONS_STRVALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start"]
 
 # Load quest definitions
 QUESTS_FILE = Path(__file__).parent / "environment_helpers" / "required_completions.json"
@@ -96,18 +102,31 @@ def execute_action_step(env, action, quest_manager=None, navigator=None, logger=
         
     except Exception as e:
         if logger:
-            logger.error(f"Error executing action {action}: {e}")
+            import traceback
+            # Get the full traceback with line numbers, function names, and files
+            tb_str = traceback.format_exc()
+            logger.error(f"Error executing action {action}: {e}\n"
+                        f"Full traceback:\n{tb_str}")
         # Return safe defaults
         return None, 0.0, True, True, {}, total_steps
 
 def process_frame_for_pygame(frame_from_env_render):
-    if frame_from_env_render.ndim == 2: # Grayscale
+    # Ensure frame has shape (H, W, 3) for Pygame surface
+    if frame_from_env_render.ndim == 2:
+        # Grayscale -> replicate channels
         frame_rgb = np.stack((frame_from_env_render,) * 3, axis=-1)
-    elif frame_from_env_render.ndim == 3 and frame_from_env_render.shape[2] == 1: # Grayscale with channel dim
-        frame_rgb = np.concatenate([frame_from_env_render] * 3, axis=2)
-    else: # Already RGB or other format, use as is (might need adjustment)
-        frame_rgb = frame_from_env_render
-    
+    elif frame_from_env_render.ndim == 3:
+        ch = frame_from_env_render.shape[2]
+        if ch == 1:
+            # Single-channel grayscale -> replicate
+            frame_rgb = np.concatenate([frame_from_env_render] * 3, axis=2)
+        else:
+            # RGB or RGBA: take first three channels (drop alpha)
+            frame_rgb = frame_from_env_render[:, :, :3]
+    else:
+        # Fallback: convert to 3-channel grayscale
+        gray = frame_from_env_render.astype(np.uint8)
+        frame_rgb = np.stack((gray,) * 3, axis=-1)
     return frame_rgb
 
 def update_screen(screen, frame_rgb, target_width, target_height):
@@ -116,56 +135,64 @@ def update_screen(screen, frame_rgb, target_width, target_height):
     screen.blit(obs_surface, (0, 0))
     pygame.display.flip()
 
-def get_default_config(rom_path, initial_state_path, infinite_money=False, infinite_health=False, emulator_delay=11,
-                       disable_wild_encounters=False, auto_teach_cut=True, auto_use_cut=True, auto_teach_surf=True, auto_use_surf=True,
-                       auto_teach_strength=True, auto_use_strength=True, auto_solve_strength_puzzles=True,
-                       auto_remove_all_nonuseful_items=False, auto_pokeflute=True, auto_next_elevator_floor=False,
-                       skip_safari_zone=False, infinite_safari_steps=False, insert_saffron_guard_drinks=False,
-                       save_video=False, fast_video=False, n_record=0, perfect_ivs=False, reduce_res=False,
-                       log_frequency=1000, two_bit=False, auto_flash=False, required_tolerance=None,
-                       disable_ai_actions=True, use_global_map=False, save_state=True, animate_scripts=True, exploration_inc=0.01, exploration_max=1.0,
-                       max_steps_scaling=0.0, map_id_scalefactor=1.0):
-    initial_state_name = None
-    if initial_state_path:
-        p = Path(initial_state_path)
-        if p.suffix == '.state' and p.exists():
-            initial_state_name = str(p)
-        elif p.exists(): # a directory or stem name
-            initial_state_name = p.stem
-        # else: initial_state_name remains None, indicating path not found or not usable
 
+def get_default_config(
+    gb_path,
+    state_dir,
+    override_init_state=None,
+    init_from_last_ending_state=True,
+    interactive_mode=True,
+    record_replays=True,
+    headless=False,
+    video_dir="video",
+    emulator_delay=11,
+    action_freq=24,
+    save_video=False,
+    fast_video=False,
+    n_record=10,
+    perfect_ivs=True,
+    auto_flash=False,
+    disable_wild_encounters=True,
+    auto_teach_cut=True,
+    auto_use_cut=True,
+    auto_teach_surf=True,
+    auto_use_surf=True,
+    auto_teach_strength=True,
+    auto_use_strength=True,
+    auto_solve_strength_puzzles=True,
+    auto_remove_all_nonuseful_items=False,
+    auto_pokeflute=True,
+    auto_next_elevator_floor=True,
+    skip_safari_zone=False,
+    infinite_safari_steps=False,
+    insert_saffron_guard_drinks=False,
+    infinite_money=True,
+    infinite_health=True,
+    animate_scripts=True,
+):
     env_config = {
-        "headless": False,
+        "gb_path": gb_path,
+        "state_dir": state_dir,
+        "override_init_state": override_init_state,
+        "init_from_last_ending_state": init_from_last_ending_state,
+        "interactive_mode": interactive_mode,
+        "record_replays": record_replays,
+        "headless": headless,
+        "video_dir": video_dir,
+        "emulator_delay": emulator_delay,
+        "action_freq": action_freq,
         "save_video": save_video,
         "fast_video": fast_video,
-        "action_freq": 24,
-        "init_state": initial_state_name,
-        "state_dir": str(Path(__file__).parent / "states"),
-        "video_dir": str(Path(__file__).parent / "replays" / "videos"),
-        "gb_path": rom_path, # Will be overridden by YAML or CLI if provided
-        "debug": False,
-        "sim_frame_dist": 2_000_000.0,
-        "max_steps": 2048 * 100,
-        "save_final_state": True,
-        "print_rewards": True,
-        # "mapping_file": str(Path(__file__).resolve().parent.parent.parent / "mapping.txt"), # Ensure this path is correct if used
-        "session_id": None, # To be set by _setup_configuration
-        "emulator_delay": emulator_delay,
         "n_record": n_record,
         "perfect_ivs": perfect_ivs,
-        "reduce_res": reduce_res,
-        "log_frequency": log_frequency,
-        "two_bit": two_bit,
         "auto_flash": auto_flash,
-        "required_tolerance": required_tolerance,
         "disable_wild_encounters": disable_wild_encounters,
-        "disable_ai_actions": disable_ai_actions,
         "auto_teach_cut": auto_teach_cut,
-        "auto_teach_surf": auto_teach_surf,
-        "auto_teach_strength": auto_teach_strength,
         "auto_use_cut": auto_use_cut,
-        "auto_use_strength": auto_use_strength,
+        "auto_teach_surf": auto_teach_surf,
         "auto_use_surf": auto_use_surf,
+        "auto_teach_strength": auto_teach_strength,
+        "auto_use_strength": auto_use_strength,
         "auto_solve_strength_puzzles": auto_solve_strength_puzzles,
         "auto_remove_all_nonuseful_items": auto_remove_all_nonuseful_items,
         "auto_pokeflute": auto_pokeflute,
@@ -175,146 +202,128 @@ def get_default_config(rom_path, initial_state_path, infinite_money=False, infin
         "insert_saffron_guard_drinks": insert_saffron_guard_drinks,
         "infinite_money": infinite_money,
         "infinite_health": infinite_health,
-        "use_global_map": use_global_map,
-        "save_state": save_state,
         "animate_scripts": animate_scripts,
-        "exploration_inc": exploration_inc,
-        "exploration_max": exploration_max,
-        "max_steps_scaling": max_steps_scaling,
-        "map_id_scalefactor": map_id_scalefactor,
-        "record_replays": False
     }
     return OmegaConf.create(env_config)
 
 def _setup_configuration(args, project_root_path):
-    yaml_config = OmegaConf.load(args.config_path) if args.config_path and Path(args.config_path).exists() else OmegaConf.create()
+    yaml_path = Path(args.config_path)
+    yaml_config = OmegaConf.load(yaml_path) if yaml_path.exists() else OmegaConf.create()
 
-    initial_state_from_yaml = yaml_config.get('env_config', {}).get('init_state')
-    final_initial_state_path = args.initial_state_path
-    if not final_initial_state_path and not initial_state_from_yaml:
-        final_initial_state_path = str(project_root_path / "initial_states" / "init.state")
-    elif initial_state_from_yaml and not args.initial_state_path:
-        final_initial_state_path = initial_state_from_yaml
-    
-    default_cli_config = get_default_config(
-        rom_path=args.rom_path,
-        initial_state_path=final_initial_state_path,
-        infinite_money=args.infinite_money,
-        infinite_health=args.infinite_health,
-        emulator_delay=args.emulator_delay,
-        disable_wild_encounters=args.disable_wild_encounters,
-        auto_teach_cut=args.auto_teach_cut,
-        auto_use_cut=args.auto_use_cut,
-        auto_teach_surf=args.auto_teach_surf,
-        auto_use_surf=args.auto_use_surf,
-        auto_teach_strength=args.auto_teach_strength,
-        auto_use_strength=args.auto_use_strength,
-        auto_solve_strength_puzzles=args.auto_solve_strength_puzzles,
-        auto_remove_all_nonuseful_items=args.auto_remove_all_nonuseful_items,
-        auto_pokeflute=args.auto_pokeflute,
-        auto_next_elevator_floor=args.auto_next_elevator_floor,
-        skip_safari_zone=args.skip_safari_zone,
-        infinite_safari_steps=args.infinite_safari_steps,
-        insert_saffron_guard_drinks=args.insert_saffron_guard_drinks,
-        save_video=args.save_video,
-        fast_video=args.fast_video,
-        n_record=args.n_record,
-        perfect_ivs=args.perfect_ivs,
-        reduce_res=args.reduce_res,
-        log_frequency=args.log_frequency,
-        two_bit=args.two_bit,
-        auto_flash=args.auto_flash,
-        required_tolerance=args.required_tolerance,
-        disable_ai_actions=args.disable_ai_actions,
-        use_global_map=args.use_global_map,
-        save_state=args.save_state,
-        animate_scripts=args.animate_scripts,
-        exploration_inc=args.exploration_inc,
-        exploration_max=args.exploration_max,
-        max_steps_scaling=args.max_steps_scaling,
-        map_id_scalefactor=args.map_id_scalefactor
+    cli_args = {k: v for k, v in vars(args).items() if v is not None}
+
+    # Extract env settings from YAML
+    env_yaml = yaml_config.get('env', {})
+
+    # Build defaults from YAML + hardcoded defaults
+    defaults = get_default_config(
+        gb_path=cli_args.get('rom_path', env_yaml.get('gb_path')),
+        state_dir=env_yaml.get('state_dir'),
+        override_init_state=env_yaml.get('override_init_state'),
+        init_from_last_ending_state=env_yaml.get('init_from_last_ending_state'),
+        interactive_mode=env_yaml.get('interactive_mode'),
+        record_replays=env_yaml.get('record_replays'),
+        headless=env_yaml.get('headless'),
+        video_dir=env_yaml.get('video_dir'),
+        emulator_delay=env_yaml.get('emulator_delay'),
+        action_freq=env_yaml.get('action_freq'),
+        save_video=env_yaml.get('save_video'),
+        fast_video=env_yaml.get('fast_video'),
+        n_record=env_yaml.get('n_record'),
+        perfect_ivs=env_yaml.get('perfect_ivs'),
+        auto_flash=env_yaml.get('auto_flash'),
+        disable_wild_encounters=env_yaml.get('disable_wild_encounters'),
+        auto_teach_cut=env_yaml.get('auto_teach_cut'),
+        auto_use_cut=env_yaml.get('auto_use_cut'),
+        auto_teach_surf=env_yaml.get('auto_teach_surf'),
+        auto_use_surf=env_yaml.get('auto_use_surf'),
+        auto_teach_strength=env_yaml.get('auto_teach_strength'),
+        auto_use_strength=env_yaml.get('auto_use_strength'),
+        auto_solve_strength_puzzles=env_yaml.get('auto_solve_strength_puzzles'),
+        auto_remove_all_nonuseful_items=env_yaml.get('auto_remove_all_nonuseful_items'),
+        auto_pokeflute=env_yaml.get('auto_pokeflute'),
+        auto_next_elevator_floor=env_yaml.get('auto_next_elevator_floor'),
+        skip_safari_zone=env_yaml.get('skip_safari_zone'),
+        infinite_safari_steps=env_yaml.get('infinite_safari_steps'),
+        insert_saffron_guard_drinks=env_yaml.get('insert_saffron_guard_drinks'),
+        infinite_money=env_yaml.get('infinite_money'),
+        infinite_health=env_yaml.get('infinite_health'),
+        animate_scripts=env_yaml.get('animate_scripts'),
     )
 
-    # Patch any None values in default_cli_config with true defaults
-    _true_defaults = get_default_config(rom_path=args.rom_path, initial_state_path=final_initial_state_path)
-    if default_cli_config.exploration_inc is None:
-        default_cli_config.exploration_inc = _true_defaults.exploration_inc
-    if default_cli_config.exploration_max is None:
-        default_cli_config.exploration_max = _true_defaults.exploration_max
-    if default_cli_config.max_steps_scaling is None:
-        default_cli_config.max_steps_scaling = _true_defaults.max_steps_scaling
-    if default_cli_config.map_id_scalefactor is None:
-        default_cli_config.map_id_scalefactor = _true_defaults.map_id_scalefactor
-    
-    config_parts = [default_cli_config]
-    # Merge YAML environment settings: prefer 'env' section if present, else 'env_config'
-    if 'env' in yaml_config:
-        config_parts.append(yaml_config.env)
-    elif 'env_config' in yaml_config:
-        config_parts.append(yaml_config.env_config)
+    # Merge defaults + YAML + CLI
+    final_config = OmegaConf.merge(defaults, yaml_config.get('env', {}), OmegaConf.create(cli_args))
 
-    cli_overrides = {}
-    for arg_name, arg_value in vars(args).items():
-        # Only consider args that are explicitly set (not None) and are relevant to env_config
-        if arg_value is not None and arg_name not in ["config_path", "required_completions_path", "max_total_steps", "interactive_mode", "run_dir", "grok_api_key"]: # Exclude non-env_config args
-            mapped_key = arg_name
-            if arg_name == "rom_path": # Map rom_path to gb_path for config
-                mapped_key = "gb_path"
-            elif arg_name == "initial_state_path": # Map initial_state_path to init_state
-                mapped_key = "init_state"
-            
-            # Only add to overrides if it's a known key in default_cli_config or the mapped key is
-            # and the arg_value is not None (meaning it was explicitly set by the user via CLI)
-            if mapped_key in default_cli_config or arg_name in default_cli_config:
-                 cli_overrides[mapped_key if mapped_key in default_cli_config else arg_name] = arg_value
-    
-    if cli_overrides:
-        # Create a temporary config with env_config structure for merging
-        override_conf = OmegaConf.create({"env_config": cli_overrides})
-        config_parts.append(override_conf.env_config)
-    
-    final_config = OmegaConf.merge(*config_parts)
+    # Validate and resolve paths
+    if not final_config.gb_path:
+        raise ValueError("ROM path ('gb_path') cannot be None.")
+    resolved_rom = Path(final_config.gb_path)
+    if not resolved_rom.is_absolute():
+        resolved_rom = project_root_path / resolved_rom
+    final_config.gb_path = str(resolved_rom)
 
-    # Ensure gb_path is correctly set, CLI > YAML > Default
-    if args.rom_path:
-        final_config.gb_path = args.rom_path
-    elif yaml_config.get('env_config', {}).get('gb_path'):
-        final_config.gb_path = yaml_config.env_config.gb_path
-    # Default is already set by get_default_config if neither CLI nor YAML provides it
+    # Sync agent settings
+    if 'agent' in yaml_config:
+        final_config.agent = OmegaConf.merge(yaml_config.agent)
+        final_config.grok_on = final_config.agent.get('grok_on')
 
-    # Final resolution for init_state from Path object to string if necessary
-    # Priority: CLI > YAML > Default derived from final_initial_state_path
-    if args.initial_state_path:
-        p = Path(args.initial_state_path)
-        if p.suffix == '.state' and p.exists(): final_config.init_state = str(p)
-        elif p.exists(): final_config.init_state = p.stem
-        else: final_config.init_state = None
-    elif initial_state_from_yaml:
-        p = Path(initial_state_from_yaml)
-        if p.suffix == '.state' and p.exists(): final_config.init_state = str(p)
-        elif p.exists(): final_config.init_state = p.stem
-        else: final_config.init_state = None
-    elif final_initial_state_path: # Default logic
-        p = Path(final_initial_state_path)
-        if p.suffix == '.state' and p.exists(): final_config.init_state = str(p)
-        elif p.exists(): final_config.init_state = p.stem
-        else: final_config.init_state = None
-
-
-    if isinstance(final_config.get("init_state"), Path): # Should be string by now zz
-        final_config.init_state = str(final_config.init_state)
-    
-    # Ensure session_id is present
-    if 'session_id' not in final_config or not final_config.session_id:
+    # Session ID
+    if not final_config.get('session_id'):
         final_config.session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
-    
-    # Ensure mapping_file path is resolved correctly if used
-    if 'mapping_file' in final_config and final_config.mapping_file:
-        # Example: resolve relative to project_root_path if it's a relative path
-        # This depends on how mapping_file is intended to be specified
-        pass
 
     return final_config
+
+
+# def _setup_configuration(args, project_root_path):
+#     # Load YAML config if it exists
+#     yaml_path = Path(args.config_path)
+#     yaml_config = OmegaConf.load(yaml_path) if yaml_path.exists() else OmegaConf.create()
+
+#     # Get CLI arguments, filtering out None values
+#     cli_args = {k: v for k, v in vars(args).items() if v is not None}
+
+#     # Manually determine rom_path and init_state with clear priority: CLI > YAML > Default
+#     rom_path = cli_args.get('rom_path', yaml_config.get('env', {}).get('gb_path'))
+#     init_state = cli_args.get('initial_state_path', yaml_config.get('env', {}).get('init_state', "initial_states/init.state"))
+
+#     # Get the full default config dictionary
+#     defaults = get_default_config(gb_path=rom_path, initial_state_path=init_state)
+
+#     # Create the final config, starting with defaults and merging YAML and CLI
+#     final_config = defaults
+#     if 'env' in yaml_config:
+#         final_config = OmegaConf.merge(final_config, yaml_config.env)
+#     if 'agent' in yaml_config:
+#         final_config.agent = OmegaConf.merge(final_config.get('agent', {}), yaml_config.agent)
+#     final_config = OmegaConf.merge(final_config, OmegaConf.create(cli_args))
+    
+#     # --- Final Path and Value Resolution ---
+#     # ROM Path
+#     if not final_config.gb_path:
+#         raise ValueError("ROM path ('gb_path') cannot be None after configuration merge.")
+#     resolved_rom_path = Path(final_config.gb_path)
+#     if not resolved_rom_path.is_absolute():
+#         resolved_rom_path = project_root_path / resolved_rom_path
+#     if not resolved_rom_path.exists():
+#         raise FileNotFoundError(f"ROM file not found at resolved path: {resolved_rom_path}")
+#     final_config.gb_path = str(resolved_rom_path)
+
+#     # Initial State Path
+#     resolved_init_state = Path(final_config.init_state)
+#     if not resolved_init_state.is_absolute():
+#         resolved_init_state = project_root_path / resolved_init_state
+#     final_config.init_state = str(resolved_init_state)
+    
+
+#     # Sync agent's grok_on to top-level so every module (and shared flags) sees it
+#     if 'agent' in final_config and 'grok_on' in final_config.agent:
+#         final_config.grok_on = final_config.agent.grok_on
+
+#     # Session ID
+#     if 'session_id' not in final_config or not final_config.session_id:
+#         final_config.session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+#     return final_config
 
 ACTION_MAPPING_PYGAME_TO_INT = {
     pygame.K_DOWN: VALID_ACTIONS.index(WindowEvent.PRESS_ARROW_DOWN),
@@ -329,21 +338,17 @@ ACTION_MAPPING_PYGAME_TO_INT = {
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--headless", action="store_true", default=None, help="Run without Pygame display to reduce CPU usage")
     # Removed --run_dir argument - use config only
     parser.add_argument("--config_path", type=str, default=str(project_root_path / "config.yaml"))
     parser.add_argument("--rom_path", type=str, default=None) # Default to None, expect from YAML or error
-    parser.add_argument("--initial_state_path", type=str, default="") # Default to empty, logic in _setup_configuration handles it
-    parser.add_argument("--save_video", type=bool, default=None) # Use None to let config file or default take precedence
+    parser.add_argument("--initial_state_path", type=str, default=None, help="Initial state file path (optional)")
+    parser.add_argument("--save_video", type=bool, default=None)
     parser.add_argument("--fast_video", type=bool, default=None)
     parser.add_argument("--n_record", type=int, default=None)
     parser.add_argument("--perfect_ivs", type=bool, default=None)
-    parser.add_argument("--log_frequency", type=int, default=None)
-    parser.add_argument("--two_bit", type=bool, default=None)
-    parser.add_argument("--disable_ai_actions", type=bool, default=None)
     parser.add_argument("--use_global_map", type=bool, default=None)
     parser.add_argument("--save_state", type=bool, default=None)
-    parser.add_argument("--required_completions_path", type=str, default=str(Path(__file__).parent / "environment_helpers" / "required_completions.json"))
-    parser.add_argument("--max_total_steps", type=int, default=1_000_000)
     parser.add_argument("--interactive_mode", type=bool, default=True) # Default to True for manual testing
     parser.add_argument("--infinite_money", type=bool, default=None)
     parser.add_argument("--infinite_health", type=bool, default=None)
@@ -362,19 +367,21 @@ def main():
     parser.add_argument("--skip_safari_zone", type=bool, default=None)
     parser.add_argument("--infinite_safari_steps", type=bool, default=None)
     parser.add_argument("--insert_saffron_guard_drinks", type=bool, default=None)
-    parser.add_argument("--reduce_res", type=bool, default=None)
     parser.add_argument("--auto_flash", type=bool, default=None)
-    parser.add_argument("--required_tolerance", type=float, default=None)
     parser.add_argument("--animate_scripts", type=bool, default=None)
-    parser.add_argument("--exploration_inc", type=float, default=None)
-    parser.add_argument("--exploration_max", type=float, default=None)
-    parser.add_argument("--max_steps_scaling", type=float, default=None)
-    parser.add_argument("--map_id_scalefactor", type=float, default=None)
     parser.add_argument("--grok_api_key", type=str, default=None) # Keep for potential future use
 
     args = parser.parse_args()
 
     config = _setup_configuration(args, project_root_path)
+    import shared
+    # Set or clear the Grok enabled event based on config
+    if config.grok_on:
+        shared.grok_enabled.set()
+    else:
+        shared.grok_enabled.clear()
+    # Ensure game_started is cleared before starting
+    shared.game_started.clear()
     
     # Initialize logging system early
     import sys
@@ -389,9 +396,6 @@ def main():
         'interactive_mode': args.interactive_mode
     })
     
-    # If disable_ai_actions not set by CLI, use configuration default to disable AI actions
-    if args.disable_ai_actions is None:
-        args.disable_ai_actions = bool(config.get("disable_ai_actions", True))
     # If interactive_mode not set by CLI, use configuration default for interactive mode
     if args.interactive_mode is None:
         args.interactive_mode = bool(config.get("interactive_mode", True))
@@ -399,12 +403,11 @@ def main():
     # Initialize the environment using ConfiguredEnvWrapper
     # Pass the fully resolved config and original cli_args
     env = ConfiguredEnvWrapper(base_conf=config, cli_args=args) 
-
-    # FIXED: Disable environment's automatic run creation since play.py manages it
-    if hasattr(env, 'record_replays'):
-        env.record_replays = False
-    if hasattr(env, 'env') and hasattr(env.env, 'record_replays'):
-        env.env.record_replays = False
+    # Propagate headless config to environment wrapper
+    if hasattr(env, 'headless'):
+        env.headless = config.get('headless', False)
+    else:
+        setattr(env, 'headless', config.get('headless', False))
 
     # FIXED: Load persistent step counter
     step_counter_file = Path("total_steps.json")
@@ -477,6 +480,35 @@ def main():
     # Initialize QuestManager with run_dir for proper quest status synchronization
     quest_manager = QuestManager(env, run_dir=run_dir)
     env.quest_manager = quest_manager
+    
+    # PREVENTION: Validate quest system integrity at startup
+    try:
+        from environment.environment_helpers.quest_validator import validate_quest_system
+        print("Validating quest coordinate files...")
+        validation_results = validate_quest_system(output_report=False)
+        
+        if not validation_results.get('validation_passed'):
+            critical_count = validation_results.get('total_critical_errors', 0)
+            warning_count = validation_results.get('total_warnings', 0)
+            
+            if critical_count > 0:
+                print(f"⚠️  QUEST VALIDATION: {critical_count} critical errors found in quest files!")
+                print("This may cause navigation issues. Check quest_validation_report.txt for details.")
+                
+                # Log the validation issues
+                logger.log_system_event("QUEST_VALIDATION_FAILED", {
+                    'critical_errors': critical_count,
+                    'warnings': warning_count,
+                    'failed_quests': validation_results.get('quests_with_errors', 0)
+                })
+            else:
+                print(f"✅ Quest validation passed with {warning_count} warnings")
+        else:
+            print("✅ All quest coordinate files validated successfully")
+            
+    except Exception as e:
+        print(f"Warning: Could not validate quest files: {e}")
+        logger.log_error("QUEST_VALIDATION", f"Quest validation failed: {e}", {})
 
     # 7. NOW, instantiate QuestProgressionEngine with the correctly loaded statuses (SINGLE INITIALIZATION)
     quest_progression_engine = QuestProgressionEngine(
@@ -517,9 +549,16 @@ def main():
     else:
         print("✅ Startup verification passed")
     
-    # 9. Refresh QuestManager's current quest based on the now correctly initialized QPE
+    # 9. Refresh QuestManager's current quest and load coordinates into navigator
     quest_manager.get_current_quest() # This should pick up the correct starting quest
+    if quest_manager.current_quest_id is not None:
+        navigator.load_coordinate_path(quest_manager.current_quest_id)
+        print(f"Play.py: Loaded quest {quest_manager.current_quest_id} into navigator post-reset, aligning with QuestManager.")
+
     status_queue.put(('__current_quest__', quest_manager.current_quest_id))
+    
+    # Propagate configs to web_server
+    status_queue.put(('__config__', OmegaConf.to_container(config, resolve=True)))
 
     screen = None
     if not config.get("headless", False):
@@ -527,6 +566,8 @@ def main():
         screen_width, screen_height = 640, 566
         screen = pygame.display.set_mode((screen_width, screen_height))
         pygame.display.set_caption("Pokemon Red")
+        # Limit main loop to 30 FPS when rendering
+        loop_clock = pygame.time.Clock()
 
     # Main game loop
     current_action = 0
@@ -541,14 +582,15 @@ def main():
     key_repeat_delay = 0.15  # Initial delay before repeat starts
     key_repeat_rate = 0.05   # Rate of repeat
     
-    # FIXED: UI update throttling for real-time NPC movement
-    ui_update_counter = 0
-    ui_update_frequency = 5  # Update UI every N ticks (adjust for performance)
+    # UI update throttling: only by time interval (2 FPS max)
     last_ui_update_time = time.time()
-    ui_update_min_interval = 0.1  # Minimum seconds between UI updates (10 FPS max)
+    ui_update_min_interval = 0.5  # Minimum seconds between UI updates (2 FPS max)
     
+    current_quest = None
+    action_source = "human"
+
     if quest_manager.current_quest_id is not None:
-         if navigator.active_quest_id != quest_manager.current_quest_id:
+        if navigator.active_quest_id != quest_manager.current_quest_id:
             navigator.load_coordinate_path(quest_manager.current_quest_id)
             print(f"Play.py: Loaded quest {quest_manager.current_quest_id} into navigator post-reset, aligning with QuestManager.")
     elif info and 'current_quest_id' in info and info['current_quest_id'] is not None:
@@ -578,17 +620,28 @@ def main():
         'map_name': env.get_map_name_by_id(last_map_id),
         'coordinates': env.get_game_coords()
     })
-
-    # UI thread for quest status - ENABLED for testing
+  
+    # UI thread for web server
     ui_thread_started = False
     if not config.get("headless", False):
         try:
-            ui_thread = threading.Thread(target=start_quest_ui, args=(QUESTS, status_queue), daemon=True)
+            # Import and start the Flask web server
+            from web.web_server import start_server
+            
+            ui_thread = threading.Thread(
+                target=start_server, 
+                args=(status_queue, '0.0.0.0', 8080), 
+                daemon=True
+            )
             ui_thread.start()
             ui_thread_started = True
-            print("Quest UI thread started successfully")
+            print("Web UI server started on http://localhost:8080")
+            # Signal that the game has started
+            shared.game_started.set()
+            
         except Exception as e:
-            print(f"Failed to start quest UI thread: {e}")
+            print(f"Failed to start web UI server: {e}")
+            raise
     
     if config.get("save_state", True) and run_info: # Check config for save_state
         # Save the initial emulator state using RunManager
@@ -596,84 +649,95 @@ def main():
 
     # Function to update quest UI with environment data
     def update_quest_ui():
+        nonlocal total_steps, action_source
         try:
+            # Update basic stats
+            status_queue.put(('__total_steps__', total_steps))
+
             # Get current coordinates
             x, y, map_id = env.get_game_coords()
             map_name = env.get_map_name_by_id(map_id)
-            
-            # Send location data to UI - send LOCAL coordinates for UI to convert
-            status_queue.put(('__location__', (x, y, map_id, map_name)))
-            status_queue.put(('__local_location__', (x, y)))
-            
-            # Send current quest
-            current_quest = quest_manager.current_quest_id
-            status_queue.put(('__current_quest__', current_quest))
-            
+
+            global_y, global_x = local_to_global(y, x, map_id)
+
+            # Send location data with proper global coords
+            status_queue.put(('__location__', {
+                'x': x, 'y': y,
+                'map_id': map_id,
+                'map_name': map_name,
+                'gx': global_x,
+                'gy': global_y
+            }))
+
+
+            # Send current quest info
+            if quest_manager and quest_manager.current_quest_id:
+                status_queue.put(('__current_quest__', quest_manager.current_quest_id))
+
             # Send additional environment data
             try:
                 dialog = env.read_dialog() or ""
                 status_queue.put(('__dialog__', dialog.strip()))
             except:
                 status_queue.put(('__dialog__', ""))
-            
+
+            # Send Pokemon team data
+            try:
+                party_data = []
+                party_size = env.read_m("wPartyCount")
+                for i in range(party_size):
+                    base_addr = 0xD164 + (i * 44)
+                    species = env.read_m(base_addr)
+                    if species == 0: continue
+                    party_data.append({
+                        'slot': i,
+                        'id': species,
+                        'level': env.read_m(base_addr + 33),
+                        'hp': env.read_m(base_addr + 1) + (env.read_m(base_addr + 2) << 8),
+                        'maxHp': env.read_m(base_addr + 34) + (env.read_m(base_addr + 35) << 8),
+                    })
+                status_queue.put(('__pokemon_team__', party_data))
+            except Exception as e:
+                logger.debug(f"Failed to get pokemon team for UI: {e}")
+
+            # Send game statistics
+            try:
+                stats = {
+                    'money': env.item_handler.read_money(),
+                    'badges': bin(env.read_m("wObtainedBadges")).count('1'),
+                    'pokedex_seen': sum(bin(env.read_m(0xD2F7 + i)).count('1') for i in range(19)),
+                    'pokedex_caught': sum(bin(env.read_m(0xD2E3 + i)).count('1') for i in range(19)),
+                    'steps': total_steps # Using the loop's total_steps
+                }
+                for stat_name, value in stats.items():
+                    status_queue.put((f'__stats_{stat_name}__', value))
+            except Exception as e:
+                logger.debug(f"Failed to get game stats for UI: {e}")
+
+            # Send quest data
+            if quest_manager and quest_manager.quest_progression_engine:
+                quest_statuses = quest_manager.quest_progression_engine.get_quest_status()
+                trigger_statuses = quest_manager.quest_progression_engine.get_trigger_status()
+                
+                # Combine statuses into a single object for the UI
+                all_statuses = {
+                    "quests": quest_statuses,
+                    "triggers": trigger_statuses
+                }
+                
+                status_queue.put(('__quest_data__', all_statuses))
+
             # Send navigation status
             nav_status = getattr(navigator, 'navigation_status', 'unknown')
             status_queue.put(('__nav_status__', nav_status))
             
-            # FIXED: Send proper run directory name only
-            if run_info:
-                run_dir_display = run_info.run_id
-            elif run_dir:
-                run_dir_display = run_dir.name
-            else:
-                run_dir_display = "None"
-            status_queue.put(('__run_dir__', run_dir_display))
-            
-            # Send total steps
-            status_queue.put(('__total_steps__', total_steps))
-            
-            # Send facing direction
-            try:
-                # Try to get direction from the environment instance directly
-                # This assumes env object (or its wrapper) has a method to get facing direction string
-                if hasattr(env, 'get_facing_direction_str'):
-                    facing_str = env.get_facing_direction_str()
-                else: # Fallback to reading memory if method doesn't exist
-                    direction_byte = env.read_m("wSpritePlayerStateData1FacingDirection")
-                    if direction_byte == 0: facing_str = "Down"
-                    elif direction_byte == 4: facing_str = "Up"
-                    elif direction_byte == 8: facing_str = "Left"
-                    elif direction_byte == 12: facing_str = "Right"
-                    else: facing_str = "Unknown"
-                status_queue.put(('__facing_direction__', facing_str))
-            except Exception as e:
-                # print(f"Error getting facing direction for UI: {e}") # Avoid console spam
-                status_queue.put(('__facing_direction__', "Error"))
-            
-            # Send path info
-            if hasattr(navigator, 'sequential_coordinates') and navigator.sequential_coordinates:
-                status_queue.put(('__path_index__', navigator.current_coordinate_index))
-                status_queue.put(('__path_length__', len(navigator.sequential_coordinates)))
-                # Send full navigator path coordinates
-                status_queue.put(('__nav_path__', list(navigator.sequential_coordinates)))
-                # Send full environment path coordinates if available
-                if hasattr(env, 'combined_path') and env.combined_path:
-                    status_queue.put(('__env_path__', list(env.combined_path)))
-                else:
-                    status_queue.put(('__env_path__', []))
-            else:
-                status_queue.put(('__path_index__', 0))
-                status_queue.put(('__path_length__', 0))
-                status_queue.put(('__nav_path__', []))
-                status_queue.put(('__env_path__', []))
-                
             # FIXED: Send proper status
             if dialog and dialog.strip():
                 status = "Dialog Active"
             elif nav_status == "navigating":
                 status = "Navigating"
-            elif current_quest:
-                status = f"Quest {current_quest:03d}"
+            elif quest_manager.current_quest_id:
+                status = f"Quest {quest_manager.current_quest_id:03d}"
             else:
                 status = "Exploring"
             status_queue.put(('__status__', status))
@@ -710,31 +774,31 @@ def main():
                     warp_debug_info = env.get_warp_debug_info()
                     # Send both minimap data and debug info
                     combined_data = {
-                        "minimap": warp_minimap_data,
+                        "minimap": warp_minimap_data.tolist(),
                         "debug_info": warp_debug_info
                     }
                     status_queue.put(('__warp_minimap__', combined_data))
             except Exception as e:
                 print(f"Error getting warp minimap data: {e}")
 
+            # Send Grok status
+            status_queue.put(('__grok_enabled__', grok_enabled.is_set()))
+            
             # Send emulator screen data to UI
             try:
                 raw_screen_frame = env.render() # This is a numpy array HxW or HxWx1 (grayscale)
                 if raw_screen_frame is not None:
                     img_height, img_width = raw_screen_frame.shape[0], raw_screen_frame.shape[1]
                     # Convert to RGB bytes for Pillow Image.frombytes
-                    if raw_screen_frame.ndim == 2: # Grayscale HxW
-                        rgb_frame = np.stack((raw_screen_frame,)*3, axis=-1) # HxWx3
-                        img_mode = "RGB"
-                    elif raw_screen_frame.ndim == 3 and raw_screen_frame.shape[2] == 1: # Grayscale HxWx1
-                        rgb_frame = np.concatenate([raw_screen_frame]*3, axis=2) # HxWx3
-                        img_mode = "RGB"
-                    elif raw_screen_frame.ndim == 3 and raw_screen_frame.shape[2] == 3: # Already RGB HxWx3
-                        rgb_frame = raw_screen_frame
-                        img_mode = "RGB"
+                    if raw_screen_frame.ndim == 2:
+                        # Grayscale -> replicate channels
+                        rgb_frame = np.stack((raw_screen_frame,) * 3, axis=-1)
+                    elif raw_screen_frame.ndim == 3:
+                        # RGB or RGBA -> keep first three channels
+                        rgb_frame = raw_screen_frame[:, :, :3]
                     else:
-                        # print(f"Unsupported screen format: {raw_screen_frame.shape}") # Avoid console spam
                         rgb_frame = None
+                    img_mode = "RGB"
 
                     if rgb_frame is not None:
                         pixel_data_bytes = rgb_frame.tobytes()
@@ -763,20 +827,12 @@ def main():
 
     # FIXED: Throttled UI update function for real-time NPC movement
     def update_ui_if_needed():
-        """Update UI only if enough time has passed or enough ticks have occurred"""
-        nonlocal ui_update_counter, last_ui_update_time
-        
+        """Update UI only if enough time has passed (based on ui_update_min_interval)"""
+        nonlocal last_ui_update_time
         current_time = time.time()
-        ui_update_counter += 1
-        
-        # Check if we should update based on time interval or tick count
-        time_elapsed = current_time - last_ui_update_time
-        
-        if (ui_update_counter >= ui_update_frequency or 
-            time_elapsed >= ui_update_min_interval):
-            
+        # Throttle to 2 FPS max
+        if current_time - last_ui_update_time >= ui_update_min_interval:
             update_quest_ui()
-            ui_update_counter = 0
             last_ui_update_time = current_time
 
     # FIXED: Call update_quest_ui immediately to initialize UI
@@ -802,22 +858,38 @@ def main():
     # Initialize Grok agent if enabled
     grok_agent = None
     if config.get("agent", {}).get("grok_on", False):
-        api_key = config.get("agent", {}).get("api_key") or os.getenv("GROK_API_KEY")
+        print(f'play.py: mains(): GROK ON: config.agent.grok_on={config.agent.grok_on}\n')
+        # Determine API key: check config, then GROK_API_KEY or XAI_API_KEY env vars, then CLI arg
+        env_key = os.getenv("GROK_API_KEY")
+        xai_key = os.getenv("XAI_API_KEY")
+        api_key = (
+            config.get("agent", {}).get("api_key")
+            or env_key
+            or xai_key
+            or args.grok_api_key
+        )
         if api_key:
             try:
                 grok_agent = SimpleAgent(
-                    reader=env,              # env is a RedGymEnv (via inheritance) 
+                    reader=env,
                     quest_manager=quest_manager,
                     navigator=navigator,
-                    env_wrapper=env,         # same env
+                    env_wrapper=env,
                     xai_api_key=api_key
                 )
-                print("🤖 Grok agent initialized successfully")
+                grok_enabled.set()  # Activate AI control based on config
+                print("🤖 Grok agent initialized and enabled")
+                logger.log_system_event("GROK_INITIALIZED", {
+                    'message': 'Grok agent initialized',
+                    'model': 'grok-3-mini'
+                })
             except Exception as e:
                 print(f"❌ Failed to initialize Grok agent: {e}")
+                logger.log_error("GROK_INIT_FAILED", f"Failed to initialize Grok: {str(e)}", {})
                 grok_agent = None
         else:
-            print("⚠️  Grok enabled but no API key found (GROK_API_KEY env var or config)")
+            print("⚠️  Grok enabled but no API key found (use --grok_api_key, GROK_API_KEY or XAI_API_KEY env var, or config)")
+            raise Exception("Grok enabled but no API key found (use --grok_api_key, GROK_API_KEY or XAI_API_KEY env var, or config)")
 
     # CRITICAL FIX: Synchronize all quest systems BEFORE main loop
     print("\n=== CRITICAL QUEST SYSTEM SYNCHRONIZATION ===")
@@ -837,8 +909,8 @@ def main():
         # 2. Sync Environment 
         if not hasattr(env, 'current_loaded_quest_id') or env.current_loaded_quest_id != current_quest:
             print(f"⚠️  Environment quest mismatch: {getattr(env, 'current_loaded_quest_id', None)} != {current_quest}")
-            env.load_coordinate_path(current_quest)
-            print(f"✓ Environment loaded quest {current_quest}")
+            navigator.load_coordinate_path(current_quest)
+            print(f"✓ Navigator loaded quest {current_quest} (syncing environment)")
         
         # 3. Verify all systems have coordinates
         if hasattr(navigator, 'sequential_coordinates') and navigator.sequential_coordinates:
@@ -889,10 +961,41 @@ def main():
     
     print("=== END QUEST SYSTEM SYNCHRONIZATION ===\n")
     
+    # Store item handler reference in environment
+    env.item_handler = ItemHandler(env)
+    
     # Store reference in environment
     env.quest_progression_engine = quest_progression_engine
 
-    while running and total_steps < args.max_total_steps:
+    # Grok toggle control: when True Grok runs each tick, when False disabled
+    grok_active = False
+
+    while running:
+        # Wait until user clicks Start before stepping the environment or running quest progression
+        if not game_started.is_set():
+            if not env.headless:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        running = False
+                # Tick emulator and render frame even when not started
+                env.pyboy.tick()
+                raw_frame = env.render()
+                processed_frame = process_frame_for_pygame(raw_frame)
+                update_screen(screen, processed_frame, screen_width, screen_height)
+                # Update UI while idle
+                update_ui_if_needed()
+                # Cap to 30 FPS
+                loop_clock.tick(30)
+            else:
+                # Headless mode: tick emulator and update UI
+                env.pyboy.tick()
+                update_ui_if_needed()
+                time.sleep(0.1)
+            continue
+
+        if env.map_history[-1] != env.read_m("wCurMap"):
+            print(f'line 986 of play.py in main(): player location: {env.get_game_coords()}')
+        
         current_time = time.time()
         current_action = None
 
@@ -966,7 +1069,7 @@ def main():
                                     print(f"play.py: '5' key: Current quest is {current_q}")
                                     
                                     # Load quest coordinates in environment BEFORE triggering PATH_FOLLOW
-                                    if not env.load_coordinate_path(current_q):
+                                    if not navigator.load_coordinate_path(current_q):
                                         print(f"play.py: '5' key: ERROR - Failed to load quest {current_q} coordinates")
                                     else:
                                         print(f"play.py: '5' key: Successfully loaded quest {current_q} coordinates")
@@ -1001,125 +1104,161 @@ def main():
                                 print("Navigator: Manual warp failed")
                             last_key_pressed = None  # Don't repeat warp action
                             continue
+                        # Spacebar: toggle Grok on/off
+                        elif event.key == pygame.K_SPACE and args.interactive_mode and grok_enabled.is_set():
+                            grok_active = not grok_active
+                            print(f"Grok {'enabled' if grok_active else 'disabled'} by toggle")
+                            continue
                         else:
                             # Regular key handling
+                            print(f"play.py: main(): keydown event: {event.key}; current player location: {env.get_game_coords()}\n\n\n\n")
                             key_action = navigator.handle_pygame_event(event)
                             if key_action is not None:
                                 current_action = key_action # Store manual action
                                 last_key_pressed = key_action
                                 key_repeat_timer = current_time
-                                key_repeat_delay = 0.15
                 elif event.type == pygame.KEYUP:
                     # Stop key repeat when key is released
                     last_key_pressed = None
 
-        # AI Action or Manual Action
-        if current_action is None and not args.disable_ai_actions: # AI takes over if no manual input and AI enabled
-            
-            # 🤖 GROK INTEGRATION POINT - Clean integration using get_action method
-            if grok_agent and not args.interactive_mode:
-                try:
-                    # Extract current game state for Grok
-                    game_state = extract_structured_game_state(env_wrapper=env, reader=env, quest_manager=quest_manager)
-                    
-                    # Get action decision from Grok (no execution, just decision)
-                    # This should be synchronous!!! We will wait for grok to get the prompt, think, and return a response.
-                    # A tool call will likely be in there - this is how grok chooses an action.
-                    current_action = grok_agent.get_action(game_state)
-                    
-                    if current_action is not None:
-                        print(f"🤖 Grok decided on action: {current_action} ({VALID_ACTIONS[current_action] if current_action < len(VALID_ACTIONS) else 'INVALID'})")
-                    
-                except Exception as e:
-                    print(f"❌ Grok error: {e}, falling back to quest system")
-                    grok_agent = None  # Disable Grok on error to avoid spam
-            
-            # Existing quest/navigation fallback logic (unchanged)
-            if current_action is None:
-                # This is where your AI/agent logic would determine the action
-                # For now, let's use a placeholder or random action if QuestManager doesn't provide one
-                # quest_manager.get_current_quest() # Updates internal current_quest_id
-                # current_action = quest_manager.get_next_action() # Needs to be robust
-                
-                # Simplified logic: If QuestManager provides an action, use it. Otherwise, random.
-                # This needs to be fleshed out with proper agent logic.
-                # The QuestManager's get_next_action() should be the primary source for quest-driven actions.
-                # The QuestProgressionEngine updates quest states, which QuestManager reads via get_current_quest().
-                
-                # Ensure quest_manager has the latest current_quest_id
-                _ = quest_manager.get_current_quest() # This updates quest_manager.current_quest_id
+        if total_steps % 100 == 0:  # Every 100 steps
+            # print(f"🔍 [DEBUG] Step {total_steps}: current_action={current_action}, grok_enabled={grok_enabled.is_set()}, grok_agent={grok_agent is not None}")
+            pass
 
-                if quest_manager.is_quest_active():
-                    current_action = quest_manager.filter_action(None) # filter_action can decide or pass through
-                    if current_action is None: # filter_action decided no specific action, or returned None to indicate default behavior
-                         # Fallback to navigator or random if no quest action
-                        if navigator.sequential_coordinates and navigator.navigation_status != "idle": # Check if navigator has a path and is not idle
-                            current_action = navigator.get_next_action()
+        # GROK_INTEGRATION_POINT: only call Grok when toggled on
+        if current_action is None and grok_agent and grok_enabled.is_set() and grok_active:
+            try:
+                # Extract current game state for Grok
+                game_state = extract_structured_game_state(env_wrapper=env, reader=env, quest_manager=quest_manager)
+                # Call Grok to get next action
+                current_action = grok_agent.get_action(game_state)
+                print(f"🤖 [DEBUG] Grok returned: {current_action}")
+                # Send Grok thinking and response to status queue
+                if hasattr(grok_agent, 'last_thinking') and grok_agent.last_thinking:
+                    status_queue.put(('__grok_thinking__', grok_agent.last_thinking))
+                if hasattr(grok_agent, 'last_response') and grok_agent.last_response:
+                    status_queue.put(('__grok_response__', grok_agent.last_response))
+                if current_action is not None:
+                    print(f"🤖 ✅ Grok action: {current_action} = {VALID_ACTIONS_STR[current_action]}")
+                    action_source = 'grok'
+                    
+                    # CRITICAL FIX: When Grok returns PATH_FOLLOW_ACTION (6), handle it like human key 5 input
+                    if current_action == PATH_FOLLOW_ACTION:
+                        print(f"\nplay.py: main(): '5' key (from Grok): Using PATH_FOLLOW_ACTION")
+                        
+                        # CRITICAL FIX: Ensure environment loads the current quest coordinates
+                        current_q = quest_manager.get_current_quest()
+                        if current_q is not None:
+                            print(f"play.py: Grok PATH_FOLLOW: Current quest is {current_q}")
+                            
+                            # Load quest coordinates in environment BEFORE triggering PATH_FOLLOW
+                            if not navigator.load_coordinate_path(current_q):
+                                print(f"play.py: Grok PATH_FOLLOW: ERROR - Failed to load quest {current_q} coordinates")
+                            else:
+                                print(f"play.py: Grok PATH_FOLLOW: Successfully loaded quest {current_q} coordinates")
+                            
+                            # Sync quest IDs across all components
+                            setattr(env, 'current_loaded_quest_id', current_q)
+                            quest_manager.current_quest_id = current_q
+                            navigator.active_quest_id = current_q
                         else:
-                            # Random fallback: choose a valid action index
-                            current_action = np.random.choice(len(VALID_ACTIONS))
-                else: # No quest active
-                    if navigator.sequential_coordinates and navigator.navigation_status != "idle": # Check if navigator has a path and is not idle
-                        current_action = navigator.get_next_action()
-                    else:
-                        # Random fallback for non-quest, non-navigation: choose a valid action index
-                        # Sloppy and could cause problems. Also, could be helpful if grok somehow gets stuck.
-                        current_action = np.random.choice(len(VALID_ACTIONS))
+                            print("play.py: Grok PATH_FOLLOW: WARNING - No current quest found")
+                        
+                        # Apply quest-specific overrides (e.g., force A press for quest 015)
+                        desired = quest_manager.filter_action(PATH_FOLLOW_ACTION)
+                        if desired == PATH_FOLLOW_ACTION:
+                            # Use PATH_FOLLOW_ACTION directly - let environment handle it
+                            current_action = PATH_FOLLOW_ACTION
+                        else:
+                            # FIXED: Override with quest-specific emulator action using centralized execution
+                            current_obs, current_reward, current_terminated, current_truncated, current_info, total_steps = execute_action_step(
+                                env, desired, quest_manager, navigator, logger, total_steps
+                            )
+                            # Record the override action
+                            recorded_playthrough.append(desired)
+                            # Update observation and info for this frame
+                            obs, reward, terminated, truncated, info = current_obs, current_reward, current_terminated, current_truncated, current_info
+                else:
+                    print("🤖 Grok returned None")
+            except Exception as e:
+                print(f"❌ Grok error: {e}")
+                import traceback
+                traceback.print_exc()
+                current_action = None
 
-        elif current_action is None and args.disable_ai_actions and not args.interactive_mode: # Replay/tick mode
-            # No-OP mode: skip stepping environment when AI actions are disabled
-            time.sleep(0.01)
+        if current_action is None:
+            # Existing quest/navigation fallback logic
+            if not config.interactive_mode or (grok_agent and grok_enabled.is_set()):
+                # Ensure quest_manager has the latest current_quest_id
+                _ = quest_manager.get_current_quest()
+
+                # Try to get an action from the quest manager or navigator
+                if quest_manager.is_quest_active():
+                    # Fallback: use navigator to get next action for active quest
+                    if navigator.sequential_coordinates and navigator.navigation_status != "idle":
+                        current_action = navigator.get_next_action()
+                        # Apply quest-specific filtering to the actual navigator action
+                        current_action = quest_manager.filter_action(current_action)
+                elif navigator.sequential_coordinates and navigator.navigation_status != "idle":
+                    current_action = navigator.get_next_action()
+
+        elif current_action is None and not config.interactive_mode: # Replay/tick mode
+            # No-OP mode: slow down loop when AI actions are disabled
+            time.sleep(0.05)
             continue
 
+        if grok_enabled.is_set() and current_action is None and env.headless:
+            time.sleep(0.01)  # Very short sleep when waiting for Grok
+        
         if current_action is None: # Still no action (e.g. interactive mode with no key press)
-            if not env.headless: # Only tick if we need to render for interactive
+            if not env.headless: # Only render UI in interactive, do not advance game state
+                # Always tick the emulator even without action
                 env.pyboy.tick()
                 raw_frame = env.render()
-                processed_frame_rgb = process_frame_for_pygame(raw_frame) # Process the frame
+                processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
                 update_screen(screen, processed_frame_rgb, screen_width, screen_height)
-                # pygame.display.flip() # update_screen handles flip
-                
-                # FIXED: Update UI after game tick to show real-time NPC movement
+                # Update UI without advancing game state
                 update_ui_if_needed()
-                
-                time.sleep(0.01) # Minimal delay
-            else: # Headless, no action -> could be an issue or intentional pause
-                # FIXED: Still tick and update UI in headless mode for NPC movement
+                loop_clock.tick(30)
+            else: # Headless, no action -> could be intentional pause
+                # Always tick the emulator in headless mode too
                 env.pyboy.tick()
+                # Render UI update without game state advancement
                 update_ui_if_needed()
-                time.sleep(0.01)
+                # Slow down headless idle loop without advancing game state
+                time.sleep(0.05)
+        
+        # CRITICAL FIX: Quest progression should always run, even without player actions
+        # This was the main bug - quest triggers were never evaluated when idle!
+        # BUT: Don't spam it every tick - only check when map actually changes
+        if quest_progression_engine:
+            current_map_id = env.get_game_coords()[2]
             
-            # CRITICAL FIX: Quest progression should always run, even without player actions
-            # This was the main bug - quest triggers were never evaluated when idle!
-            # print(f"[DEBUG] Quest progression idle check: quest_progression_engine={quest_progression_engine is not None}")
+            # Try to check map history, but don't let failures block quest progression
+            map_changed = False
+            try:
+                if hasattr(env, 'map_history') and len(env.map_history) >= 2:
+                    map_changed = env.map_history[-2] != env.map_history[-1]
+                    # print(f"[DEBUG] Map history check: changed={map_changed}, history={list(env.map_history)}")
+                else:
+                    # print(f"[DEBUG] Map history not available or too short (len={len(env.map_history) if hasattr(env, 'map_history') else 'N/A'})")
+                    pass
+            except Exception as e:
+                # print(f"[DEBUG] Map history check failed: {e}")
+                pass
             
-            if quest_progression_engine:
-                current_map_id = env.get_game_coords()[2]
-                
-                # Try to check map history, but don't let failures block quest progression
-                map_changed = False
-                try:
-                    if hasattr(env, 'map_history') and len(env.map_history) >= 2:
-                        map_changed = env.map_history[-2] != env.map_history[-1]
-                        print(f"[DEBUG] Map history check: changed={map_changed}, history={list(env.map_history)}")
-                    else:
-                        print(f"[DEBUG] Map history not available or too short (len={len(env.map_history) if hasattr(env, 'map_history') else 'N/A'})")
-                except Exception as e:
-                    print(f"[DEBUG] Map history check failed: {e}")
-                
-                # ALWAYS run quest progression, regardless of map history
-                try:
-                    if map_changed:
-                        print(f"[DEBUG] Calling quest_progression_engine.step() in idle state at step {total_steps}")
-                        quest_progression_engine.step(trigger_evaluator)
-                        print(f"[DEBUG] Quest progression step completed in idle state")
-                except Exception as e:
-                    print(f"[ERROR] Quest progression failed in idle state: {e}")
-                    logger.log_error("QUEST_PROGRESSION_IDLE", f"Error in idle quest progression: {str(e)}", {
-                        'current_map_id': current_map_id,
-                        'total_steps': total_steps
-                    })
-            continue
+            # ONLY run quest progression when map actually changes (to prevent spam)
+            try:
+                if map_changed:
+                    # print(f"[DEBUG] Calling quest_progression_engine.step() in idle state at step {total_steps}")
+                    quest_progression_engine.step(trigger_evaluator)
+                    # print(f"[DEBUG] Quest progression step completed in idle state")
+            except Exception as e:
+                print(f"[ERROR] Quest progression failed in idle state: {e}")
+                logger.log_error("QUEST_PROGRESSION_IDLE", f"Error in idle quest progression: {str(e)}", {
+                    'current_map_id': current_map_id,
+                    'total_steps': total_steps
+                })
 
         # Apply quest manager filtering to ALL actions (manual, AI, navigator)
         if current_action is not None:
@@ -1135,10 +1274,15 @@ def main():
                 action_source = 'manual_filtered'
             elif args.interactive_mode:
                 action_source = 'manual'
+            elif grok_agent and current_action is not None and hasattr(grok_agent, 'last_response'):
+                action_source = 'grok'
             elif navigator.navigation_status == "navigating":
                 action_source = 'navigator'
             else:
                 action_source = 'ai'
+
+            # Store for UI update
+            update_quest_ui.last_action_source = action_source
             
             # Record action for replay functionality
             recorded_playthrough.append({
@@ -1149,18 +1293,22 @@ def main():
                 'source': action_source
             })
 
-        # FIXED: Use centralized execution instead of direct env.step()
-        obs, reward, terminated, truncated, info, total_steps = execute_action_step(
-            env, current_action, quest_manager, navigator, logger, total_steps
-        )
-        total_reward += reward
+        # Execute environment step only if we have a valid action
+        if current_action is not None:
+            obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                env, current_action, quest_manager, navigator, logger, total_steps
+            )
+            total_reward += reward
+        else:
+            # No action: skip stepping the environment to prevent NoneType errors
+            obs, reward, terminated, truncated, info = None, 0.0, False, False, {}
 
-        # Navigation System Monitoring - check after each step
-        if navigation_monitor:
-            try:
-                navigation_monitor.check_at_quest_step()
-            except Exception as e:
-                print(f"NavigationMonitor error in step check: {e}")
+        # # Navigation System Monitoring - check after each step
+        # if navigation_monitor:
+        #     try:
+        #         navigation_monitor.check_at_quest_step()
+        #     except Exception as e:
+        #         print(f"NavigationMonitor error in step check: {e}")
 
         # FIXED: Save persistent step counter every 100 steps
         if total_steps % 100 == 0:
@@ -1202,7 +1350,7 @@ def main():
             last_map_id = new_map_id
 
         # FIXED: Update quest progression engine with proper trigger evaluator
-        print(f"[DEBUG] Quest progression action check: quest_progression_engine={quest_progression_engine is not None}, action={current_action}, map_id={env.get_game_coords()[2]}")
+        # print(f"[DEBUG] Quest progression action check: quest_progression_engine={quest_progression_engine is not None}, action={current_action}, map_id={env.get_game_coords()[2]}")
         
         if quest_progression_engine:
             current_map_id = env.get_game_coords()[2]
@@ -1212,9 +1360,9 @@ def main():
             
             # Call quest progression engine to evaluate triggers and progress quests
             try:
-                print(f"[DEBUG] Calling quest_progression_engine.step() at step {total_steps}, map {current_map_id}, current_quest={previous_quest}")
+                # print(f"[DEBUG] Calling quest_progression_engine.step() at step {total_steps}, map {current_map_id}, current_quest={previous_quest}")  # Suppressed verbose debug
                 quest_progression_engine.step(trigger_evaluator)
-                print(f"[DEBUG] Quest progression step completed successfully")
+                # print(f"[DEBUG] Quest progression step completed successfully")  # Suppressed verbose debug
                 
                 # Check for quest transitions
                 new_quest = quest_manager.current_quest_id
@@ -1226,7 +1374,8 @@ def main():
                         except Exception as e:
                             print(f"NavigationMonitor error in quest transition check: {e}")
                 else:
-                    print(f"[DEBUG] No quest transition, remained at quest {previous_quest}")
+                    # print(f"[DEBUG] No quest transition, remained at quest {previous_quest}")  # Suppressed verbose debug
+                    pass
                         
             except Exception as e:
                 print(f"[ERROR] Exception in quest progression: {str(e)}")
@@ -1240,8 +1389,8 @@ def main():
         else:
             print(f"[ERROR] quest_progression_engine is None! This should never happen after initialization.")
 
-        # FIXED: Update quest UI after player actions (now throttled for performance)
-        update_quest_ui()  # Always update after player actions for responsiveness
+        # Throttled UI update for SSE messages and statuses (2 FPS max)
+        update_ui_if_needed()
 
         if total_steps % config.get("log_frequency", 1000) == 0:
             elapsed_time = time.time() - start_time
@@ -1254,7 +1403,7 @@ def main():
         
         if not env.headless:
             raw_frame = env.render()
-            processed_frame_rgb = process_frame_for_pygame(raw_frame) # Process the frame
+            processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
             update_screen(screen, processed_frame_rgb, screen_width, screen_height)
             # pygame.display.flip() # update_screen handles this
 

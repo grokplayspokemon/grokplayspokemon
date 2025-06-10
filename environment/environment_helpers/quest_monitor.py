@@ -213,9 +213,9 @@ class QuestMonitor:
                 
                 time_since_progress = current_time - self.last_quest_progress[quest_id]
                 
-                # If quest has been stuck for too long, trigger alert
-                if time_since_progress > self.quest_stuck_threshold:
-                    self._trigger_quest_stuck_alert(quest_id, time_since_progress)
+                # # If quest has been stuck for too long, trigger alert
+                # if time_since_progress > self.quest_stuck_threshold:
+                #     self._trigger_quest_stuck_alert(quest_id, time_since_progress)
     
     def _check_trigger_failures(self):
         """Check for persistent trigger failures"""
@@ -262,6 +262,9 @@ class QuestMonitor:
     def _trigger_trigger_failure_alert(self, trigger_id: str, failure_count: int):
         """Trigger a trigger failure alert"""
         last_state = self.last_trigger_states.get(trigger_id, (False, 0))
+        
+        if failure_count > 1:
+            return
         
         failure_data = {
             'failure_count': failure_count,

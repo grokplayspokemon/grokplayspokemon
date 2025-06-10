@@ -1,3 +1,4 @@
+# environment.py
 import io
 import os
 import uuid
@@ -96,6 +97,7 @@ VALID_RELEASE_ACTIONS = [
 
 from environment.data.environment_data.item_handler import ItemHandler
 from environment.environment_helpers.tile_visualizer import overlay_on_screenshot
+from environment.data.environment_data.ram_addresses import RamAddress as RAM
 
 VALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start"]
 
@@ -119,99 +121,86 @@ sys.path.append('/puffertank/grok_plays_pokemon')
 from utils.logging_config import get_pokemon_logger
 
 
-# TODO: Make global map usage a configuration parameter
 class RedGymEnv(Env):
     env_id = shared_memory.SharedMemory(create=True, size=4)
     lock = Lock()
 
     def __init__(self, env_config: DictConfig | dict):
-        # Configuration verified; removed debug print to reduce log spam
         if isinstance(env_config, dict):
             env_config = DictConfig(env_config)
 
-        self.navigator = None # Initialize navigator attribute
+        self.navigator = None
         self.persisted_loaded_quest_statuses = None
         self.persisted_loaded_trigger_statuses = None
 
+        # Config-driven assignments
         self.video_dir = Path(env_config.video_dir)
         self.headless = env_config.headless
         self.emulator_delay = env_config.emulator_delay
         self.state_dir = Path(env_config.state_dir)
-        # Determine override or configured initial state
-        self.init_state = getattr(env_config, "override_init_state", None) or getattr(env_config, "init_state", None)
-        # Flag to load most recent ending state if no override is provided
-        self.init_from_last_ending_state = getattr(env_config, "init_from_last_ending_state", False)
-        # Determine full path for initial state: if provided as a .state file, use it directly
+
+        # Initial state logic
+        self.init_state = env_config.override_init_state or None
+        self.init_from_last_ending_state = env_config.init_from_last_ending_state
+        if not self.init_state and self.init_from_last_ending_state:
+            self.init_state = None  # will load last ending state
+
         if self.init_state:
-            init_path_candidate = Path(self.init_state)
-            if init_path_candidate.suffix == '.state':
-                self.init_state_path = init_path_candidate
-                self.init_state_name = init_path_candidate.stem
+            path = Path(self.init_state)
+            if path.suffix == '.state':
+                self.init_state_path = path
+                self.init_state_name = path.stem
             else:
                 self.init_state_name = self.init_state
                 self.init_state_path = self.state_dir / f"{self.init_state_name}.state"
         else:
             self.init_state_name = None
             self.init_state_path = None
+
         self.action_freq = env_config.action_freq
-        self.max_steps = env_config.max_steps
+        self.max_steps = False
         self.save_video = env_config.save_video
         self.fast_video = env_config.fast_video
-        if self.fast_video:
-            self.fps = 60
-        else:
-            self.fps = 6
+        self.fps = 60 if self.fast_video else 6
         self.n_record = env_config.n_record
         self.perfect_ivs = env_config.perfect_ivs
-        self.reduce_res = env_config.reduce_res
+        self.reduce_res = False
         self.gb_path = env_config.gb_path
-        self.log_frequency = env_config.log_frequency
-        self.two_bit = env_config.two_bit
+        self.log_frequency = False
+        self.two_bit = False
         self.auto_flash = env_config.auto_flash
-        # A mapping of event to completion rate across
-        # all environments in a run
-        self.required_rate = 1.0
-        self.required_tolerance = env_config.required_tolerance
-        if isinstance(env_config.disable_wild_encounters, bool):
-            self.disable_wild_encounters = env_config.disable_wild_encounters
-            self.disable_wild_encounters_maps = set([])
-        elif isinstance(env_config.disable_wild_encounters, ListConfig):
-            self.disable_wild_encounters = len(env_config.disable_wild_encounters) > 0
-            self.disable_wild_encounters_maps = {
-                MapIds[item].name for item in env_config.disable_wild_encounters
-            }
-        else:
-            self.disable_wild_encounters = False
-            self.disable_wild_encounters_maps = set([])
+        self.required_tolerance = False
 
-        self.disable_ai_actions = env_config.disable_ai_actions
+        # Encounter and automation flags
+        self.disable_wild_encounters = bool(env_config.disable_wild_encounters)
+        self.disable_wild_encounters_maps = set()
         self.auto_teach_cut = env_config.auto_teach_cut
         self.auto_teach_surf = env_config.auto_teach_surf
         self.auto_teach_strength = env_config.auto_teach_strength
         self.auto_use_cut = env_config.auto_use_cut
-        self.auto_use_strength = env_config.auto_use_strength
         self.auto_use_surf = env_config.auto_use_surf
+        self.auto_use_strength = env_config.auto_use_strength
         self.auto_solve_strength_puzzles = env_config.auto_solve_strength_puzzles
         self.auto_remove_all_nonuseful_items = env_config.auto_remove_all_nonuseful_items
         self.auto_pokeflute = env_config.auto_pokeflute
         self.auto_next_elevator_floor = env_config.auto_next_elevator_floor
         self.skip_safari_zone = env_config.skip_safari_zone
-        self.infinte_safari_steps = env_config.infinite_safari_steps
+        self.infinite_safari_steps = env_config.infinite_safari_steps
         self.insert_saffron_guard_drinks = env_config.insert_saffron_guard_drinks
         self.infinite_money = env_config.infinite_money
         self.infinite_health = env_config.infinite_health
-        self.use_global_map = env_config.use_global_map
-        self.save_state = env_config.save_state
+        self.use_global_map = False
+        self.save_state = False
         self.animate_scripts = env_config.animate_scripts
-        # Track previous map for trigger testing
-        # REMOVED: self.prev_map_id: int | None = None
-        # ADDED: Centralized map tracking system using deque with length 3
-        self.map_history = deque(maxlen=3)
-        # Initialize with current map when first available
-        self.exploration_inc = env_config.get("exploration_inc", 0.01)
-        self.exploration_max = env_config.get("exploration_max", 1.0)
-        self.max_steps_scaling = env_config.get("max_steps_scaling", 0.0)
-        self.map_id_scalefactor = env_config.get("map_id_scalefactor", 1.0)
+
+        # Exploration parameters (disabled)
+        self.map_history = deque(maxlen=10)
+        self.exploration_inc = False
+        self.exploration_max = False
+        self.max_steps_scaling = False
+        self.map_id_scalefactor = False
+
+        # Action space and state
         self.action_space = ACTION_SPACE
         self.door_warp = False
         self.on_a_warp_tile = False
@@ -219,47 +208,33 @@ class RedGymEnv(Env):
         self.action_taken = None
         self.last_dialog = ''
         self.current_dialog = ''
-        # REMOVED: self.environment_map_history = deque(maxlen=3)
-        # REMOVED: self.environment_map_history.append(-1)
 
-        # For saving replays - use RunManager for unified run management
+        # Replay recording
         self.current_run_info = None
-        self.current_run_dir = None  # Maintain backward compatibility
-        self.path_trace_data = {}
-        # Control whether to record new run directories and traces
+        self.current_run_dir = None
         try:
             self.record_replays = env_config.record_replays
         except Exception:
-            self.record_replays = True
+            self.record_replays = False
 
-        # Obs space-related. TODO: avoid hardcoding?
+        # Observation
+        self.screen_output_shape = (144, 160, 3)
         self.global_map_shape = GLOBAL_MAP_SHAPE
-        if self.reduce_res:
-            self.screen_output_shape = (72, 80, 1)
-        else:
-            self.screen_output_shape = (144, 160, 1)
-        if self.two_bit:
-            self.screen_output_shape = (
-                self.screen_output_shape[0],
-                self.screen_output_shape[1] // 4,
-                1,
-            )
-            self.global_map_shape = (self.global_map_shape[0], self.global_map_shape[1] // 4, 1)
         self.coords_pad = 12
         self.enc_freqs = 8
 
-        # NOTE: Used for saving video
-        if env_config.save_video:
+        # Video writers only if enabled
+        if self.save_video:
             self.instance_id = str(uuid.uuid4())[:8]
             self.video_dir.mkdir(exist_ok=True)
             self.full_frame_writer = None
             self.map_frame_writer = None
             self.screen_obs_frame_writer = None
             self.visited_mask_frame_writer = None
+
         self.reset_count = 0
         self.all_runs = []
 
-        # Set this in SOME subclasses
         self.metadata = {"render.modes": []}
         self.reward_range = (0, 15000)
 
@@ -337,6 +312,12 @@ class RedGymEnv(Env):
         self.navigator = InteractiveNavigator(self)
         self.stage_manager = StageManager(self)
         
+        # Initialize logging state tracking to reduce spam
+        self.prev_logged_location = None
+        self.prev_logged_action = None
+        self.prev_logged_dialog = None
+        self.prev_logged_battle_state = None
+        
         with RedGymEnv.lock:
             env_id = (
                 (int(RedGymEnv.env_id.buf[0]) << 24)
@@ -371,6 +352,9 @@ class RedGymEnv(Env):
         self.quest_visualizer = QuestPathVisualizer()
         self.show_quest_paths = True  # Enable quest path visualization by default
         self.quest_visualization_ids = [1, 2, 3, 4, 5]  # First 5 quests by default
+        
+        # Persisting action result from navigator
+        self.persisted_final_action = None
 
         self.init_mem()
 
@@ -379,42 +363,6 @@ class RedGymEnv(Env):
 
     def set_navigator(self, navigator):
         self.navigator = navigator
-
-    def _load_all_path_data(self):
-        print(f"QUEST_INIT: _load_all_path_data called")
-        # Use the corrected continuous coordinates file
-        continuous_coords_path = Path(__file__).parent.parent / "combined_quest_coordinates_continuous.json"
-        print(f"QUEST_INIT: Looking for coordinates at: {continuous_coords_path}")
-        
-        self.combined_path = []
-        try:
-            with open(continuous_coords_path, 'r') as f:
-                coords_data = json.load(f)
-            
-            # Extract coordinates from the continuous file
-            coordinates = coords_data.get("coordinates", [])
-            for coord_pair in coordinates:
-                if isinstance(coord_pair, list) and len(coord_pair) == 2:
-                    try:
-                        gy, gx = int(coord_pair[0]), int(coord_pair[1])
-                        self.combined_path.append((gy, gx))
-                    except Exception:
-                        print(f"Environment: Invalid coordinate values {coord_pair}")
-                else:
-                    print(f"Environment: Invalid coordinate format {coord_pair}")
-            
-            print(f"Loaded a total of {len(self.combined_path)} coordinates for path following from continuous file.")
-            
-            # Store quest start indices for reference
-            self.quest_start_indices = coords_data.get("quest_start_indices", {})
-            print(f"Quest start indices loaded: {len(self.quest_start_indices)} quests")
-
-        except FileNotFoundError:
-            print(f"Error: {continuous_coords_path} not found. Path data not loaded.")
-        except json.JSONDecodeError as e:
-            print(f"Error decoding JSON from {continuous_coords_path}: {e}. Path data not loaded.")
-        except Exception as e:
-            print(f"An unexpected error occurred during path loading: {e}. Path data not loaded.")
 
     def register_hooks(self):
         self.pyboy.hook_register(None, "DisplayStartMenu", self.start_menu_hook, None)
@@ -523,10 +471,10 @@ class RedGymEnv(Env):
                     print(f"State loaded successfully from {state_file_to_load}. Cleared persisted quest/trigger statuses.")
                 except FileNotFoundError:
                     print(f"environment.py: reset(): State file not found at {self.init_state_path}. Starting new game.")
-                    raise
+                    
                 except Exception as e: # Catch other errors like corrupted state
                     print(f"environment.py: reset(): Error loading state from {self.init_state_path}: {e}. Starting new game.")
-                    raise
+                    
             elif self.init_from_last_ending_state and not explicit_state_provided_this_call: # Only if no explicit state override in this call
                 try:
                     from .environment_helpers.saver import load_latest_run
@@ -635,7 +583,7 @@ class RedGymEnv(Env):
         # Initialize map_history with current map
         current_map_id = self.read_m("wCurMap")
         self.map_history.clear()
-        for i in range(3):
+        for i in range(10):
             self.map_history.append(current_map_id)
 
         self.update_pokedex()
@@ -694,6 +642,15 @@ class RedGymEnv(Env):
             print(f"environment.py: reset(): Using self.persisted_loaded_trigger_statuses for return info: {self.persisted_loaded_trigger_statuses}")
 
         self.first = False
+        
+        # Reset logging state trackers on reset
+        self.prev_logged_location = None
+        self.prev_logged_action = None
+        self.prev_logged_dialog = None
+        self.prev_logged_battle_state = None
+        if hasattr(self, '_path_follow_logged'):
+            self._path_follow_logged = False
+        
         # Apply infinite money and health on reset
         if self.infinite_money:
             _, wPlayerMoney = self.pyboy.symbol_lookup("wPlayerMoney")
@@ -774,15 +731,11 @@ class RedGymEnv(Env):
         self.use_ball_count = 0
 
     def render(self) -> npt.NDArray[np.uint8]:
-        return self.screen.ndarray[:, :, 1]
+        return self.screen.ndarray
 
     def screen_obs(self):
-        # (144, 160, 3)
-        game_pixels_render = np.expand_dims(self.screen.ndarray[:, :, 1], axis=-1)
-
-        if self.reduce_res:
-            game_pixels_render = game_pixels_render[::2, ::2, :]
-            # game_pixels_render = skimage.measure.block_reduce(game_pixels_render, (2, 2, 1), np.min)
+        # Return full RGB screen as numpy array
+        game_pixels_render = self.screen.ndarray
 
         """
         import cv2
@@ -894,44 +847,6 @@ class RedGymEnv(Env):
                 axis=-1,
             ).astype(np.uint8)
 
-        if self.two_bit:
-            game_pixels_render = (
-                (
-                    np.digitize(
-                        game_pixels_render.reshape((-1, 4)), PIXEL_VALUES, right=True
-                    ).astype(np.uint8)
-                    << np.array([6, 4, 2, 0], dtype=np.uint8)
-                )
-                .sum(axis=1, dtype=np.uint8)
-                .reshape((-1, game_pixels_render.shape[1] // 4, 1))
-            )
-            visited_mask = (
-                (
-                    np.digitize(
-                        visited_mask.reshape((-1, 4)),
-                        np.array([0, 64, 128, 255], dtype=np.uint8),
-                        right=True,
-                    ).astype(np.uint8)
-                    << np.array([6, 4, 2, 0], dtype=np.uint8)
-                )
-                .sum(axis=1, dtype=np.uint8)
-                .reshape(game_pixels_render.shape)
-                .astype(np.uint8)
-            )
-            if self.use_global_map:
-                global_map = (
-                    (
-                        np.digitize(
-                            global_map.reshape((-1, 4)),
-                            np.array([0, 64, 128, 255], dtype=np.uint8),
-                            right=True,
-                        ).astype(np.uint8)
-                        << np.array([6, 4, 2, 0], dtype=np.uint8)
-                    )
-                    .sum(axis=1, dtype=np.uint8)
-                    .reshape(self.global_map_shape)
-                )
-
         return {
             "screen": game_pixels_render,
             "visited_mask": visited_mask,
@@ -1038,8 +953,12 @@ class RedGymEnv(Env):
         warp_tiles = info['warp_tiles']
         self.door_warp = info['door_warp']
         
-        print(f"environment.py: is_next_to_warp_tile(): warp_tiles: {warp_tiles}")
-        print(f"environment.py: is_next_to_warp_tile(): door_warp: {self.door_warp}")
+        # Only log warp details when they change AND when an action is taken
+        action_taken = hasattr(self, 'step_count') and hasattr(self, '_last_logged_step') and getattr(self, 'step_count', 0) != getattr(self, '_last_logged_step', -1)
+        if action_taken and (not hasattr(self, '_last_logged_warp_info') or self._last_logged_warp_info != (cur_map, len(warp_tiles), self.door_warp)):
+            print(f"environment.py: is_next_to_warp_tile(): Map {cur_map} - {len(warp_tiles)} warp tiles, door_warp: {self.door_warp}")
+            self._last_logged_warp_info = (cur_map, len(warp_tiles), self.door_warp)
+            self._last_logged_step = getattr(self, 'step_count', 0)
         
         # now that we have all the warp tiles for this map:
         # for each warp tile, check if the player is 1 tile away from it.
@@ -1064,68 +983,22 @@ class RedGymEnv(Env):
         return False
 
     @property
-    def is_warping(self) -> bool:
-        """
-        Detect if the player is currently in a warp transition using multiple methods.
-        
-        Returns:
-            bool: True if currently warping, False otherwise
-        """
-        # Only log detailed diagnostics when state changes or every 100 calls
-        if not hasattr(self, '_warp_debug_call_count'):
-            self._warp_debug_call_count = 0
-        self._warp_debug_call_count += 1
-        
-        previous_state = self._is_warping
-        should_log = (self._warp_debug_call_count % 100 == 0) or (previous_state is None)
-        
+    def is_warping(self):
         if self._is_warping is None:
-            if should_log:
-                print(f"IS_WARPING: Cache miss, performing detection...")
-            try:
-                # FIXED: More conservative warp detection to prevent false positives
-                # Method 1: Check warp flag in memory (wd736, bit 2) - BUT with additional validation
-                try:
-                    wd736 = self.read_m(0xD736)
-                    bit_2_set = bool(wd736 & 0b00000100)
-                    
-                    # ENHANCED: Only consider it a warp if BOTH the bit is set AND we're in a transition state
-                    if bit_2_set:
-                        # Additional validation: check if we're actually transitioning
-                        try:
-                            # Check if map transition is actually happening by looking at multiple indicators
-                            in_battle = self.read_m("wIsInBattle") != 0
-                            has_dialog = bool(self.read_dialog().strip())
-                            movement_flags = self.read_m("wMovementFlags")
-                            
-                            # Only consider warping if we have transition indicators AND no other blocking states
-                            if not in_battle and not has_dialog and (movement_flags & 0b1000_0000):
-                                if should_log:
-                                    print(f"IS_WARPING: Method 1 TRIGGERED - validated warp transition (wd736=0x{wd736:02X})")
-                                self._is_warping = True
-                                return True
-                            else:
-                                if should_log:
-                                    print(f"IS_WARPING: Method 1 - bit set but no valid transition state (battle={in_battle}, dialog={has_dialog}, flags=0x{movement_flags:02X})")
-                        except Exception:
-                            # If we can't validate the transition state, be conservative
-                            if should_log:
-                                print(f"IS_WARPING: Method 1 - bit set but validation failed, being conservative")
-                except Exception:
-                    pass
-                
-                # No warp detected - be conservative
-                self._is_warping = False
-                
-            except Exception as e:
-                if should_log:
-                    print(f"IS_WARPING: ERROR in warp detection: {e}")
-                self._is_warping = False
-        
-        # Log state changes
-        if previous_state != self._is_warping:
-            print(f"IS_WARPING: State changed from {previous_state} to {self._is_warping}")
-        
+            hdst_map = self.read_m(0xFF8B)
+            if self.read_bit(0xd736, 2) == 1:
+                self._is_warping = hdst_map == 255 or self.read_m(0xd35e) == hdst_map
+            elif self.read_m(0xcd5b) == 1:
+                self._is_warping = True
+            else:
+                x, y = self.get_game_coords()[:2]
+                n_warps = self.read_m(0xd3ae)  # wNumberOfWarps
+                for i in range(n_warps):
+                    warp_addr = 0xd3af + i * 4
+                    if self.read_m(warp_addr + 0) == y and self.read_m(warp_addr + 1) == x:
+                        self._is_warping = hdst_map == 255 or self.read_m(0xD35E) == hdst_map
+                        break
+            # self._is_warping = self.read_bit(0xd736, 2) == 1 and self.read_m(0xFF8B) == self.read_m(0xD35E)
         return self._is_warping
 
     def get_warp_debug_info(self) -> dict:
@@ -1268,20 +1141,44 @@ class RedGymEnv(Env):
         """Clear warp-related cache to ensure fresh collision detection"""
         self._is_warping = None
         self._minimap_warp_obs = None
-    # REMOVED: handle_path_follow_action method that had early returns
-    # This logic has been moved to _convert_path_follow_to_movement_action method
-    # which returns a movement action instead of doing early returns
+
     
+    def update_map_history(self) -> None:        
+        if self.map_history[-1] != self.read_m("wCurMap"):
+            self.map_history.append(self.read_m("wCurMap"))
+            # Only log map history changes when an action is taken (during step execution)
+            action_taken = hasattr(self, 'step_count') and hasattr(self, '_last_map_history_logged_step') and getattr(self, 'step_count', 0) != getattr(self, '_last_map_history_logged_step', -1)
+            if action_taken:
+                print(f"environment.py: update_map_history(): MAP_TRACKING: Updated map_history: {list(self.map_history)}")
+                self._last_map_history_logged_step = getattr(self, 'step_count', 0)
+   
     def step(self, action):
         self.step_count += 1
         
-        # DEBUGGING: Force log every action at the start of step
-        print(f"\n=== STEP {self.step_count}: ACTION {action} START ===")
+        # ANTI-SPAM LOGGING: Only log when values actually change or significant events occur
+        # This prevents console spam while preserving important debugging information
+        
+        # Only log step start if action is different or significant
+        current_location = self.get_game_coords()
+        print(f"\n\n\n\nenvironment.py: step(): START OF STEP {self.step_count}; location: {self.get_game_coords()}")
+
+        if action != self.prev_logged_action or action == PATH_FOLLOW_ACTION:
+            print(f"\n=== STEP {self.step_count}: ACTION {action} START ===")
+            self.prev_logged_action = action
+        else:
+            print(f"STEP {self.step_count}: ACTION {action} CONTINUES")
+            
         if action == PATH_FOLLOW_ACTION:
             print(f"STEP {self.step_count}: PATH_FOLLOW_ACTION detected - will convert to movement action")
-        print(f"STEP {self.step_count}: Location: {self.get_game_coords()}")
+            
+        # Only log location if it has changed
+        if self.prev_logged_location == None:
+            self.prev_logged_location = current_location
+        if current_location != self.prev_logged_location:
+            print(f"STEP {self.step_count}: Location changed to: {current_location}")
+            self.prev_logged_location = current_location
         
-        # COMPLETELY DISABLED: All warp detection and blocking
+        # # COMPLETELY DISABLED: All warp detection and blocking
         # self.clear_warp_cache()
         # is_warping_result = self.is_warping
         # if is_warping_result:
@@ -1297,43 +1194,6 @@ class RedGymEnv(Env):
         # if raw_dialog.strip() and action == PATH_FOLLOW_ACTION:
         #     print("environment.py: step(): Navigation paused: dialog active, cannot move to next coordinate.")
         #     return self._get_obs(), 0.0, reset, False, {}
-
-        # MAP TRACKING UPDATE:
-        # update the map tracking system with the current map state
-        # This ensures coordinate-dependent logic runs with stable map state
-        cur_map_id = self.read_m("wCurMap")
-        if self.map_history[-2] != cur_map_id:
-            breakpoint()
-            print(f"MAP_TRACKING: Map changed to {cur_map_id} (from {self.map_history[-2] if self.map_history else 'None'})")
-            self.map_history.append(cur_map_id)
-            print(f"MAP_TRACKING: Updated map_history: {list(self.map_history)}")
-            
-            # Log the map change for debugging
-            if self.logger:
-                previous_map_ids = list(self.map_history)[:-1]  # All except the current (last) one
-                self.logger.log_environment_event("MAP_CHANGE", {
-                    'message': f'Map change detected: previous_map_ids={previous_map_ids}, current_map_id={cur_map_id}',
-                    'previous_map_ids': previous_map_ids,
-                    'current_map_id': cur_map_id,
-                    'step_count': self.step_count
-                })
-        else:
-            print(f"MAP_TRACKING: No map change detected, staying on map {cur_map_id}")
-
-        # Get previous map from history (always use map_history[-2])
-        player_x, player_y, _ = self.get_game_coords()
-        prev_map_id = self.map_history[-2] if len(self.map_history) >= 2 else cur_map_id
-
-        # Log internal map change event when we have enough history
-        if len(self.map_history) >= 2 and self.map_history[-2] != cur_map_id:
-            if self.logger:
-                self.logger.log_environment_event("INTERNAL_MAP_CHANGE", {
-                    'message': f'Internal map change detected from {prev_map_id} to {cur_map_id}',
-                    'from_map': prev_map_id,
-                    'to_map': cur_map_id,
-                    'coordinates': [player_x, player_y],
-                    'step_count': self.step_count
-                })
 
         if self.save_video and self.step_count == 0:
             self.start_video()
@@ -1360,25 +1220,69 @@ class RedGymEnv(Env):
         self.update_safari_zone()
 
         self.check_num_bag_items()
-
+        
         # UNIFIED ARCHITECTURE: Convert PATH_FOLLOW_ACTION to movement action BEFORE calling run_action_on_emulator
         # This ensures everything goes through the same action execution path
         final_action = action
         
-        if action == PATH_FOLLOW_ACTION:
-            print(f"STEP {self.step_count}: Converting PATH_FOLLOW_ACTION to movement action")
-            
-            # Get movement action from path following logic
-            converted_action = self._convert_path_follow_to_movement_action()
-            if converted_action is not None:
-                final_action = converted_action
-                print(f"STEP {self.step_count}: PATH_FOLLOW_ACTION converted to movement action {final_action}")
-            else:
-                print(f"STEP {self.step_count}: PATH_FOLLOW_ACTION conversion failed, using fallback UP action")
-                final_action = 3  # UP action as fallback
+        # Pre-conversion sync: ensure navigator index is up-to-date before path-follow conversion
+        if action == PATH_FOLLOW_ACTION and hasattr(self, 'navigator') and self.navigator:
+            try:
+                self.navigator.snap_to_nearest_coordinate()
+                print(f"environment.py: pre-conversion snap at step {self.step_count}; location: {self.get_game_coords()}")
+            except Exception as e:
+                print(f"environment.py: pre-conversion snap error: {e}")
         
-        # UNIFIED ARCHITECTURE: This is the ONLY place run_action_on_emulator should be called in step()
+        if action == PATH_FOLLOW_ACTION:
+            print(f"🎯🎯🎯 STEP {self.step_count}: PATH_FOLLOW_ACTION DETECTED! 🎯🎯🎯")
+            
+            # Get current player status for debugging
+            x, y, map_id = self.get_game_coords()
+            print(f"🎯 Current player: local=({x}, {y}), map={map_id}")
+            
+            # Check quest system status
+            if hasattr(self, 'quest_manager'):
+                current_quest = self.quest_manager.get_current_quest()
+                print(f"🎯 Current quest from quest_manager: {current_quest}")
+            else:
+                print(f"🎯 NO QUEST MANAGER!")
+                current_quest = None
+            
+            # Check navigator status
+            if hasattr(self, 'navigator') and self.navigator:
+                print(f"🎯 Navigator active_quest_id: {self.navigator.active_quest_id}")
+                print(f"🎯 Navigator coords loaded: {len(self.navigator.sequential_coordinates)}")
+                print(f"🎯 Navigator current_index: {self.navigator.current_coordinate_index}")
+                
+                # FORCE QUEST LOADING IF NEEDED
+                if current_quest and (not self.navigator.sequential_coordinates or self.navigator.active_quest_id != current_quest):
+                    print(f"🎯 FORCE LOADING quest {current_quest} into navigator")
+                    success = self.navigator.load_coordinate_path(current_quest)
+                    print(f"🎯 Force load result: {success}")
+                
+                print(f"🎯 Converting PATH_FOLLOW_ACTION via ConsolidatedNavigator")
+                converted_action = self.navigator.convert_path_follow_to_movement_action(PATH_FOLLOW_ACTION)
+                if converted_action is not None and converted_action != PATH_FOLLOW_ACTION:
+                    final_action = converted_action
+                    print(f"🎯 PATH_FOLLOW_ACTION converted to movement action {final_action}")
+                else:
+                    # raise Exception("🎯 environment.py: step(): PATH_FOLLOW_ACTION conversion failed, using fallback UP action")
+                    print(f"🎯 PATH_FOLLOW_ACTION conversion failed, using fallback B action")
+                    final_action = 5  # B action as fallback
+            else:
+                raise Exception("🎯 environment.py: step(): RAISE ERROR: NO CONSOLIDATED NAVIGATOR AVAILABLE - using fallback B action")
+                print(f"🎯 NO CONSOLIDATED NAVIGATOR AVAILABLE - using fallback B action")
+                final_action = 5  # B action as fallback
+        
+        # Apply stage-specific scripted movement overrides using the original action
+        if hasattr(self, 'stage_manager') and hasattr(self.stage_manager, 'scripted_stage_movement'):
+            overridden = self.stage_manager.scripted_stage_movement(action)
+            if overridden != final_action:
+                final_action = overridden
+                print(f"environment.py: step(): StageManager.scripted_stage_movement override to {final_action}")
+        print(f"environment.py: step(): step number is: {self.step_count} ACTION {final_action} running on emulator")
         self.run_action_on_emulator(final_action)
+        
         
         # Continue with all the normal game state updates that must happen after every action
         self.events = EventFlags(self.pyboy)
@@ -1443,7 +1347,7 @@ class RedGymEnv(Env):
         obs = self._get_obs()
         reward = 0
 
-        # Log important game state changes
+        # Log important game state changes (only when they actually change)
         if self.logger:
             try:
                 # Log significant events
@@ -1455,15 +1359,17 @@ class RedGymEnv(Env):
                         'step_count': self.step_count
                     })
                 
-                # Log battle events
-                if self.read_m("wIsInBattle") != 0:
+                # Log battle events only when battle state changes
+                current_battle_state = self.read_m("wIsInBattle") != 0
+                if current_battle_state != self.prev_logged_battle_state:
                     self.logger.log_environment_event("BATTLE_STATE", {
-                        'message': 'In battle',
-                        'battle_active': True,
+                        'message': 'Entered battle' if current_battle_state else 'Exited battle or battle status changed',
+                        'battle_active': current_battle_state,
                         'step_count': self.step_count
                     })
+                    self.prev_logged_battle_state = current_battle_state
                 
-                # Log dialog events
+                # Log dialog events only when dialog changes
                 dialog = self.read_dialog() or ''
                 if dialog.strip():
                     self.logger.log_environment_event("DIALOG_ACTIVE", {
@@ -1534,107 +1440,22 @@ class RedGymEnv(Env):
         self.current_dialog_lines = self.get_active_dialog()
         done = False
         truncated = False
-        print(f"=== STEP {self.step_count}: ACTION {action} (final: {final_action}) COMPLETE ===\n")
+        # Only log step completion for significant actions or when something important happened
+        if action == PATH_FOLLOW_ACTION or action != self.prev_logged_action or reward > 0:
+            print(f"=== STEP {self.step_count}: ACTION {action} (final: {final_action}) COMPLETE ===\n")
+        
+        self.update_map_history()
+        print(f"environment.py: step(): END OF STEP {self.step_count}; location: {self.get_game_coords()}\n\n\n\n")
 
         return obs, reward, done, truncated, info
 
-    def _convert_path_follow_to_movement_action(self) -> int | None:
-        """
-        Convert PATH_FOLLOW_ACTION to a movement action (0-3) without any early returns.
-        Returns None if conversion fails.
-        """
-        try:
-            print(f"PATH_FOLLOW: Converting PATH_FOLLOW_ACTION to movement")
-            
-            # Ensure we have path data loaded
-            if not hasattr(self, 'combined_path') or not self.combined_path:
-                current_quest = getattr(self, 'current_loaded_quest_id', None)
-                if current_quest is None and hasattr(self, 'navigator') and self.navigator and hasattr(self.navigator, 'active_quest_id'):
-                    current_quest = self.navigator.active_quest_id
-                if current_quest is None:
-                    current_quest = 1
-                
-                print(f"PATH_FOLLOW: Loading quest {current_quest}")
-                success = self.load_coordinate_path(current_quest)
-                if not success or not self.combined_path:
-                    print(f"PATH_FOLLOW: Failed to load quest {current_quest}")
-                    return None
-            
-            # Check if path is complete
-            if not hasattr(self, 'current_path_target_index'):
-                self.current_path_target_index = 0
-                
-            if self.current_path_target_index >= len(self.combined_path):
-                print(f"PATH_FOLLOW: Quest complete - all coordinates reached")
-                return None
-            
-            # Get current position and target
-            player_x, player_y, map_id = self.get_game_coords()
-            current_global = local_to_global(player_y, player_x, map_id)
-            target_coord = self.combined_path[self.current_path_target_index]
-            
-            print(f"PATH_FOLLOW: Current: {current_global}, Target: {target_coord}, Index: {self.current_path_target_index}/{len(self.combined_path)}")
-            
-            # Calculate distance and direction
-            dy = target_coord[0] - current_global[0]
-            dx = target_coord[1] - current_global[1]
-            distance = abs(dy) + abs(dx)
-            
-            print(f"PATH_FOLLOW: Distance = {distance}, dy = {dy}, dx = {dx}")
-            
-            # If at target, advance to next coordinate
-            if distance == 0:
-                print("PATH_FOLLOW: At target, advancing to next coordinate")
-                self.current_path_target_index += 1
-                
-                # Check if we've completed the path
-                if self.current_path_target_index >= len(self.combined_path):
-                    print(f"PATH_FOLLOW: Quest complete after advancing")
-                    return None
-                
-                # Get new target
-                target_coord = self.combined_path[self.current_path_target_index]
-                dy = target_coord[0] - current_global[0]
-                dx = target_coord[1] - current_global[1]
-                distance = abs(dy) + abs(dx)
-                
-                print(f"PATH_FOLLOW: New target: {target_coord}, distance = {distance}")
-                
-                # If new target is also at distance 0, no movement needed this step
-                if distance == 0:
-                    print("PATH_FOLLOW: New target also at distance 0")
-                    return None
-            
-            # Determine movement direction (prioritize larger delta)
-            # VALID_ACTIONS = [DOWN(0), LEFT(1), RIGHT(2), UP(3), A(4), B(5), PATH(6), START(7)]
-            if abs(dy) > abs(dx):
-                if dy > 0:
-                    movement_action = 0  # DOWN
-                    direction_name = "DOWN"
-                else:
-                    movement_action = 3  # UP
-                    direction_name = "UP"
-            elif dx != 0:
-                if dx > 0:
-                    movement_action = 2  # RIGHT
-                    direction_name = "RIGHT"
-                else:
-                    movement_action = 1  # LEFT
-                    direction_name = "LEFT"
-            else:
-                print("PATH_FOLLOW: No movement direction determined")
-                return None
-            
-            print(f"PATH_FOLLOW: Converted to {direction_name} (action {movement_action})")
-            return movement_action
-            
-        except Exception as e:
-            print(f"PATH_FOLLOW: Error during conversion: {e}")
-            return None
+
 
     def run_action_on_emulator(self, action):
         # PATH_FOLLOW_ACTION should never reach here directly - it's handled in step()
         # When navigator calls this with directional actions (0-3), those should execute normally
+        print(f"environment.py: run_action_on_emulator(): TOP OF run_action_on_emulator() - step number {self.step_count} - RUNNING ACTION {action} ON EMULATOR")
+        
         if action == PATH_FOLLOW_ACTION:
             print(f"*** WARNING: PATH_FOLLOW_ACTION reached run_action_on_emulator - this should be handled in step() ***")
             return
@@ -1699,6 +1520,7 @@ class RedGymEnv(Env):
 
         # One last tick just in case
         self.pyboy.tick(1, render=True)
+        print(f"environment.py: run_action_on_emulator(): BOTTOM OF run_action_on_emulator() - step number {self.step_count} - ACTION {action} COMPLETE")
 
     def party_has_cut_capable_mon(self):
         # find bulba and replace tackle (first skill) with cut
@@ -2343,7 +2165,7 @@ class RedGymEnv(Env):
         return {
             "env_ids": int(self.env_id),
             "stats": {
-                "step": self.step_count + self.reset_count * self.max_steps,
+                "step": self.step_count, # + self.reset_count * self.max_steps,
                 "max_map_progress": self.max_map_progress,
                 "last_action": action,
                 "party_count": self.read_m("wPartyCount"),
@@ -3149,128 +2971,6 @@ class RedGymEnv(Env):
             except Exception as e:
                 print(f"Error saving fallback ending game state: {e}")
 
-    def load_coordinate_path(self, quest_id: int) -> bool:
-        """Load coordinates from the same continuous file that Navigator uses"""
-        
-        print(f"ENV_QUEST_LOAD: load_coordinate_path called with quest_id = {quest_id}")
-        
-        # VALIDATION: Quest ID parameter verification
-        if not isinstance(quest_id, int) or quest_id < 1:
-            print(f"ENV_QUEST_LOAD: ERROR - Invalid quest ID: {quest_id}")
-            return False
-        
-        # USE SAME FILE AS NAVIGATOR: combined continuous coordinates
-        continuous_coords_path = Path(__file__).parent / "environment_helpers" / "quest_paths" / "combined_quest_coordinates_continuous.json"
-        
-        if not continuous_coords_path.exists():
-            print(f"ENV_QUEST_LOAD: ERROR - Continuous coords file not found: {continuous_coords_path}")
-            return False
-        
-        try:
-            with open(continuous_coords_path, 'r') as f:
-                coords_data = json.load(f)
-            
-            print(f"ENV_QUEST_LOAD: Successfully loaded continuous coordinates file")
-            
-            # GET QUEST START/END INDICES (same logic as Navigator)
-            quest_start_indices = coords_data.get("quest_start_indices", {})
-            quest_key = str(quest_id)
-            
-            if quest_key not in quest_start_indices:
-                print(f"ENV_QUEST_LOAD: ERROR - Quest {quest_id} not found in quest_start_indices")
-                return False
-            
-            start_idx = quest_start_indices[quest_key]
-            
-            # Calculate end index
-            all_quest_ids = sorted([int(k) for k in quest_start_indices.keys()])
-            current_quest_index = all_quest_ids.index(quest_id)
-            
-            if current_quest_index < len(all_quest_ids) - 1:
-                next_quest_id = all_quest_ids[current_quest_index + 1]
-                end_idx = quest_start_indices[str(next_quest_id)]
-            else:
-                # Last quest - use all remaining coordinates
-                total_coordinates = len(coords_data.get("coordinates", []))
-                end_idx = total_coordinates
-            
-            print(f"ENV_QUEST_LOAD: Quest {quest_id} indices: start={start_idx}, end={end_idx}")
-            
-            # EXTRACT COORDINATES for this quest
-            all_coordinates = coords_data.get("coordinates", [])
-            quest_coordinates = all_coordinates[start_idx:end_idx]
-            
-            if not quest_coordinates:
-                print(f"ENV_QUEST_LOAD: ERROR - No coordinates found for Quest {quest_id}")
-                return False
-            
-            # CONVERT TO TUPLE FORMAT
-            flattened_coordinates = []
-            for coord in quest_coordinates:
-                if isinstance(coord, list) and len(coord) == 2:
-                    flattened_coordinates.append(tuple(coord))
-                else:
-                    print(f"ENV_QUEST_LOAD: WARNING - Invalid coordinate format: {coord}")
-            
-            if not flattened_coordinates:
-                print(f"ENV_QUEST_LOAD: ERROR - No valid coordinates processed for Quest {quest_id}")
-                return False
-            
-            # ENVIRONMENT STATE SYNCHRONIZATION
-            self.combined_path = flattened_coordinates
-            
-            # Only reset index if loading a different quest
-            if not hasattr(self, 'current_loaded_quest_id') or self.current_loaded_quest_id != quest_id:
-                self.current_path_target_index = 0
-                print(f"ENV_QUEST_LOAD: Reset path index to 0 for new quest {quest_id}")
-            else:
-                print(f"ENV_QUEST_LOAD: Preserving path index {self.current_path_target_index} for same quest {quest_id}")
-                
-            self.current_loaded_quest_id = quest_id
-            
-            print(f"ENV_QUEST_LOAD: Quest {quest_id:03d} loaded - {len(flattened_coordinates)} coordinates from continuous file")
-            print(f"  First coordinate: {flattened_coordinates[0]}")
-            print(f"  Last coordinate: {flattened_coordinates[-1]}")
-            print(f"  Player currently at: {self.get_game_coords()}")
-            
-            return True
-            
-        except json.JSONDecodeError as e:
-            print(f"ENV_QUEST_LOAD: ERROR - JSON parsing failed: {e}")
-            return False
-        except Exception as e:
-            print(f"ENV_QUEST_LOAD: ERROR - Unexpected error: {e}")
-            return False
-
-    def _get_expected_map_for_current_path_index(self):
-        """
-        Get the expected map ID(s) for the current path index and nearby coordinates.
-        Returns a set of map IDs that the player should reasonably be on.
-        """
-        if not hasattr(self, 'combined_path') or not self.combined_path:
-            return None
-        
-        if not hasattr(self, 'current_path_target_index'):
-            return None
-        
-        # Check current target and nearby coordinates (±3 indices) to get expected maps
-        expected_maps = set()
-        start_idx = max(0, self.current_path_target_index - 3)
-        end_idx = min(len(self.combined_path), self.current_path_target_index + 4)
-        
-        for i in range(start_idx, end_idx):
-            try:
-                coord = self.combined_path[i]
-                # Try to find which map this coordinate belongs to by testing all known maps
-                for test_map_id in range(248):  # Test all valid map IDs
-                    result = global_to_local(coord[0], coord[1], test_map_id)
-                    if result is not None:
-                        expected_maps.add(test_map_id)
-                        break
-            except:
-                continue
-        
-        return expected_maps if expected_maps else None
 
     def read_game_time(self) -> tuple[int, int, int]:
         """Read game time as (hours, minutes, seconds)"""
@@ -4189,16 +3889,16 @@ class RedGymEnv(Env):
         # Present each field as a clear bullet for easier parsing by the LLM
         memory_str += f"- Player: {name}\n"
         # memory_str += f"- Rival: {rival_name}\n"
-        # memory_str += f"- Money: ${reader.read_money()}\n"
+        memory_str += f"- Money: ${self.item_handler.read_money()}\n"
         memory_str += f"- Current Environment: {self.read_location()}\n"
         memory_str += f"- Coordinates: {self.get_game_coords()}\n"
-        # (No longer exposing valid‑moves list directly; model must infer from screenshot.)
-        # memory_str += f"Badges: {', '.join(reader.read_badges())}\n"
+
+        memory_str += f"Badges: {', '.join(self.item_handler.get_badges())}\n"
 
         # Inventory
-        # memory_str += "Inventory:\n"
-        # for item, qty in reader.read_items():
-        #     memory_str += f"  {item} x{qty}\n"
+        memory_str += "Inventory:\n"
+        for item, qty in self.item_handler.get_items_quantity_in_bag():
+            memory_str += f"  {item} x{qty}\n"
 
         # Dialog
         dialog = self.read_dialog()
@@ -4273,3 +3973,64 @@ class RedGymEnv(Env):
         
         # Always call step() - no shortcuts, no exceptions
         return self.step(action)
+
+    def load_coordinate_path(self, quest_id: int) -> bool:
+        """
+        ENVIRONMENT COMPATIBILITY: Load quest coordinates via navigator and synchronize.
+        This method exists for backward compatibility with code that expects the environment
+        to have coordinate loading capability. All actual coordinate loading is done by the navigator.
+        
+        Args:
+            quest_id: Quest ID to load
+            
+        Returns:
+            bool: True if coordinates loaded successfully
+        """
+        print(f"Environment: Loading quest {quest_id} coordinates via navigator")
+        
+        # Delegate to navigator
+        if hasattr(self, 'navigator') and self.navigator:
+            success = self.navigator.load_coordinate_path(quest_id)
+            
+            if success:
+                # Synchronize environment attributes for backward compatibility
+                self.combined_path = self.navigator.sequential_coordinates.copy()
+                self.current_path_target_index = self.navigator.current_coordinate_index
+                self.current_loaded_quest_id = quest_id
+                
+                print(f"Environment: Synchronized {len(self.combined_path)} coordinates from navigator")
+                return True
+            else:
+                print(f"Environment: Navigator failed to load quest {quest_id}")
+                return False
+        else:
+            print(f"Environment: No navigator available to load quest {quest_id}")
+            return False
+
+    def get_screenshot_with_overlay(self, alpha=128):
+        """
+        Get the current screenshot with a tile overlay showing walkable/unwalkable areas.
+        
+        Args:
+            alpha (int): Transparency value for the overlay (0-255)
+            
+        Returns:
+            PIL.Image: Screenshot with tile overlay
+        """
+        try:
+            # FIXED: Clear cached warp data to ensure fresh collision detection
+            self.clear_warp_cache()
+            
+            screenshot = self.get_screenshot()
+            collision_map_str = self.get_collision_map()
+            
+            # Ensure we have valid data
+            if not collision_map_str or not isinstance(collision_map_str, str):
+                print(f"Environment: Warning - Invalid collision map data: {type(collision_map_str)}")
+                return screenshot
+            
+            return overlay_on_screenshot(screenshot, collision_map_str, alpha)
+        except Exception as e:
+            print(f"Environment: Error creating collision overlay: {e}")
+            # Return regular screenshot if overlay fails
+            return self.get_screenshot()

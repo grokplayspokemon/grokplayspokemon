@@ -27,6 +27,7 @@ class NavigationSystemMonitor:
         self.quest_manager = quest_manager
         self.quest_progression_engine = quest_progression_engine
         self.logger = logger
+        self.last_verification_results = None
         
         # Initialize Dear PyGui context for alerts
         try:
@@ -300,7 +301,16 @@ class NavigationSystemMonitor:
             "coordinate_mismatches": [],
             "issues": []
         }
+
+        if self.last_verification_results is None:
+            self.last_verification_results = verification_results
+            return verification_results
         
+        # return early if nothing has changed
+        if verification_results == self.last_verification_results:
+            return
+        
+        # Update the last verification results
         try:
             # Get current player position from env (ultimate truth)
             player_x, player_y, player_map = self.env.get_game_coords()
@@ -355,14 +365,14 @@ class NavigationSystemMonitor:
                         "expected_value": f"Player on one of {total_coords} total quest coordinates"
                     })
                     
-                    # Suggest pathfinding to get back on track
-                    verification_results["issues"].append({
-                        "type": "auto_pickup_path_needed",
-                        "file": "navigation logic",
-                        "function": "off-path recovery",
-                        "present_value": "Player needs path to quest coordinates",
-                        "expected_value": "Automatic pathfinding to quest route"
-                    })
+                    # # Suggest pathfinding to get back on track
+                    # verification_results["issues"].append({
+                    #     "type": "auto_pickup_path_needed",
+                    #     "file": "navigation logic",
+                    #     "function": "off-path recovery",
+                    #     "present_value": "Player needs path to quest coordinates",
+                    #     "expected_value": "Automatic pathfinding to quest route"
+                    # })
             
             # DETAILED NEXT TILE VERIFICATION WITH REASONING
             next_tile_verification = self.verify_next_tile_logic(player_x, player_y, player_map, nav_coords)
@@ -647,13 +657,8 @@ class NavigationSystemMonitor:
         }
         
         try:
-            # Find quest definition
-            quest_def = None
-            quests_list = getattr(self.quest_progression_engine, 'quests_definitions', [])
-            for q in quests_list:
-                if q.get('quest_id') == quest_id:
-                    quest_def = q
-                    break
+            # Find quest definition using QuestProgressionEngine helper
+            quest_def = self.quest_progression_engine.get_quest_data_by_id(quest_id)
             
             if not quest_def:
                 criteria_verification["issues"].append({
@@ -893,13 +898,13 @@ class NavigationSystemMonitor:
                     expected_value=issue.get("expected_value")
                 )
             
-            # Log summary
-            if complete_results["total_issues"] > 0:
-                self.logger.log_error("NAVIGATION_VERIFICATION", 
-                                    f"Found {complete_results['total_issues']} issues ({complete_results['critical_issues']} critical)",
-                                    complete_results)
-            elif force_detailed:
-                self.logger.log_system_event("Navigation verification passed", complete_results)
+            # # Log summary
+            # if complete_results["total_issues"] > 0:
+            #     self.logger.log_error("NAVIGATION_VERIFICATION", 
+            #                         f"Found {complete_results['total_issues']} issues ({complete_results['critical_issues']} critical)",
+            #                         complete_results)
+            # elif force_detailed:
+            #     self.logger.log_system_event("Navigation verification passed", complete_results)
                 
         except Exception as e:
             complete_results["verification_error"] = str(e)

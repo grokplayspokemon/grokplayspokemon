@@ -1,435 +1,388 @@
-# simple_agent.py
-import base64
-import copy
-import io
-import logging
-import os
-from datetime import datetime
+# agent/simple_agent.py
+"""
+Simple Agent for Grok Integration
+Provides autonomous Pokemon gameplay using Grok AI
+"""
+
 import json
-import re # For _compact_history (if still used, otherwise remove)
-import random # For introspection prompts
-import time # For run loop pause in main test
-from PIL import Image # For PIL Image processing
-
-# OpenAI SDK for xAI
+import logging
+from typing import Dict, List, Optional, Any, Tuple
+from dataclasses import asdict
+import time
 from openai import OpenAI
-from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageToolCall # For type hinting
+from utils.logging_config import get_pokemon_logger
 
-# Project-specific imports
-from agent.prompts import SYSTEM_PROMPT, SUMMARY_PROMPT, INTROSPECTION_PROMPTS # Assuming these are still relevant and INTROSPECTION_PROMPTS exists
-from agent.grok_tool_implementations import AVAILABLE_TOOLS_LIST
-from environment.environment import RedGymEnv, VALID_ACTIONS # Added VALID_ACTIONS import
-from environment.wrappers.env_wrapper import EnvWrapper # Kept for type hint, but usage will be optional
-from environment.environment_helpers.navigator import InteractiveNavigator
+from environment.environment import VALID_ACTIONS, VALID_ACTIONS_STR, PATH_FOLLOW_ACTION
+from environment.grok_integration import extract_structured_game_state, GameState
 from environment.environment_helpers.quest_manager import QuestManager
-# Corrected import for game state extraction and its type
-from environment.grok_integration import extract_structured_game_state, GameState 
-from dataclasses import asdict # For converting GameState to dict if needed
+from environment.environment_helpers.navigator import InteractiveNavigator
+from environment.wrappers.env_wrapper import EnvWrapper
+from environment.environment import RedGymEnv
+from pyboy.utils import WindowEvent
 
-# Typing
-from typing import Tuple, List, Dict, Any, Optional
+# Use the centralized PokemonLogger for agent logs
+agent_logger = get_pokemon_logger()
 
-# Helper to clean / deduplicate dialog strings for compact display
-def _clean_dialog(raw: str) -> str:
-    parts, seen = [], set()
-    arrow = False
-    for ln in raw.split("\n"): # Python's split, not regex \n
-        t = ln.strip()
-        if not t:
-            continue
-        if t == "▼":
-            arrow = True
-            continue
-        if t in seen:
-            continue
-        seen.add(t)
-        parts.append(t)
-    combined = " / ".join(parts)
-    if arrow and combined:
-        combined += " ▼"
-    return combined or raw.strip() or "None"
-
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# Utility for pretty‑printing message objects
-def _pretty_json(obj) -> str:
-    try:
-        text = json.dumps(obj, indent=2, ensure_ascii=False)
-        return text.replace("\\n", "\n") # Ensure JSON newlines are Python newlines for logging
-    except Exception:
-        return str(obj)
-
-# Convert PIL image to base64 string
-def get_screenshot_base64(screenshot_pil, upscale=1): # Assuming screenshot_pil is a PIL Image
-    if screenshot_pil is None:
-        logger.warning("get_screenshot_base64 received None image.")
-        return None # Return None if no image is provided
-    if upscale > 1:
-        new_size = (screenshot_pil.width * upscale, screenshot_pil.height * upscale)
-        screenshot_pil = screenshot_pil.resize(new_size)
-    buffered = io.BytesIO()
-    screenshot_pil.save(buffered, format="PNG")
-    return base64.standard_b64encode(buffered.getvalue()).decode()
-
-# Refactor SimpleAgent to be an action decision maker, not executor
-# SimpleAgent analyzes game state, might return PATH_FOLLOW_ACTION (6)
 class SimpleAgent:
-    def _update_sidebar(self, line: str):
-        raw = line.strip()
-        if not raw or raw.startswith("##"): return
-        norm = raw.lower()
-        if norm == getattr(self, "_prev_sidebar_norm", None): return
-        self.last_message = raw # For UI
-        self._prev_sidebar_norm = norm
-
-    def _trim_history(self):
-        # Ensure system prompt is always first if present
-        has_system_prompt = self.message_history and self.message_history[0]["role"] == "system"
-        
-        # Calculate how many messages to keep, accounting for system prompt
-        effective_max_history = self.max_history_len
-        if has_system_prompt:
-            # max_history_len is the total, so if system is 1, others are max_history_len - 1
-            # However, we want to keep `max_history_len` *including* the system prompt if present.
-            # So, if system prompt is there, we can have `max_history_len - 1` other messages.
-            # The number of messages *to keep* (excluding system) is `max_history_len - 1`
-            # If total messages are `max_history_len`, and one is system, then `max_history_len-1` are non-system.
-            # This means we check `current_non_system_messages_count` against `max_history_len -1`.
-            
-            # Let actual_max_non_system_messages = self.max_history_len - 1 (if system prompt exists)
-            # else actual_max_non_system_messages = self.max_history_len
-            limit_non_system = self.max_history_len - (1 if has_system_prompt else 0)
-            if limit_non_system < 0: limit_non_system = 0 # Should not happen if max_history_len >= 1
-
-        current_non_system_messages_count = len(self.message_history) - (1 if has_system_prompt else 0)
-
-        if current_non_system_messages_count > limit_non_system:
-            overflow = current_non_system_messages_count - limit_non_system
-            start_delete_index = 1 if has_system_prompt else 0 # Deleting after system prompt, or from start
-            del self.message_history[start_delete_index : start_delete_index + overflow]
-            logger.debug(f"Trimmed {overflow} messages from history. Current non-system: {len(self.message_history) - (1 if has_system_prompt else 0)}. Total: {len(self.message_history)}")
-
-
-    def _get_current_system_prompt_content(self) -> str:
-        prompt_parts = [self.base_system_prompt]
-        if self.history_summary:
-            prompt_parts.append("\n\nCONVERSATION SUMMARY:\n" + self.history_summary)
-        return "\n\n".join(prompt_parts)
-
-    def __init__(
-        self,
-        reader: RedGymEnv, # Changed order, reader is primary
-        quest_manager: QuestManager,
-        navigator: InteractiveNavigator,
-        env_wrapper: EnvWrapper = None, # Made optional, won't be used for execution
-        xai_api_key: Optional[str] = None,
-        xai_base_url: str = "https://api.x.ai/v1",
-        model_name: str = "grok-3-mini",
-        reasoning_effort: str = "low",
-        temperature: float = 0.7,
-        max_tokens_completion: int = 1024,
-        max_history_len: int = 20,
-        grok_enabled: bool = False,
-        app=None
-    ):
-        assert reader is not None, "RedGymEnv (reader) must be provided"
-        assert quest_manager is not None, "QuestManager must be provided"
-        assert navigator is not None, "InteractiveNavigator must be provided"
-
-        self.grok_enabled = grok_enabled
-        self.env_wrapper = env_wrapper # Store for state reading only
+    """Simple agent that uses Grok to make decisions about Pokemon gameplay"""
+    
+    def __init__(self, reader: RedGymEnv, quest_manager: QuestManager, 
+                 navigator: InteractiveNavigator, env_wrapper: EnvWrapper,
+                 xai_api_key: str):
         self.reader = reader
+        # Setup file-based logger for Grok agent events
+        self.agent_file_logger = logging.getLogger('agent_file_logger')
+        if not any(isinstance(h, logging.FileHandler) and h.baseFilename.endswith('agent.log') for h in self.agent_file_logger.handlers):
+            fh = logging.FileHandler('agent.log')
+            fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+            self.agent_file_logger.addHandler(fh)
+            self.agent_file_logger.setLevel(logging.INFO)
         self.quest_manager = quest_manager
         self.navigator = navigator
+        self.env_wrapper = env_wrapper
         
-        # Only initialize grok-related components if grok is enabled
-        if self.grok_enabled:
-            self.xai_api_key = xai_api_key or os.environ.get("XAI_API_KEY")
-            if not self.xai_api_key:
-                raise ValueError("xAI API key not provided and not found in XAI_API_KEY environment variable.")
-            
-            self.client = OpenAI(api_key=self.xai_api_key, base_url=xai_base_url)
-            self.model_name = model_name
-            # Validate reasoning_effort for grok-3-mini models
-            if "grok-3-mini" in self.model_name:
-                if reasoning_effort not in ["low", "medium", "high"]:
-                    logger.warning(f"Invalid reasoning_effort '{reasoning_effort}' for {self.model_name}. Defaulting to 'medium'.")
-                    self.reasoning_effort = "medium"
-                else:
-                    self.reasoning_effort = reasoning_effort
-            else:
-                self.reasoning_effort = None # Not applicable for other models
-                logger.info(f"Reasoning effort not applicable for model {self.model_name}.")
-
-            self.temperature = temperature
-            self.max_tokens_completion = max_tokens_completion
-            
-            # Tools definition for OpenAI API
-            self.tools_definition = []
-            for tool_data in AVAILABLE_TOOLS_LIST:
-                if tool_data.get('declaration'):
-                    self.tools_definition.append(tool_data['declaration'])
-                else:
-                    logger.warning(f"Tool '{tool_data.get('name', 'Unknown')}' is missing a 'declaration' and will not be available.")
-            
-            self.base_system_prompt = SYSTEM_PROMPT # From agent.prompts
-            self.message_history: List[Dict[str, Any]] = [
-                {"role": "system", "content": self._get_current_system_prompt_content()}
-            ]
-            # Max history_len includes the system prompt. So if max_history_len is 20, it's 1 system + 19 user/assistant/tool turns.
-            self.max_history_len = max_history_len if max_history_len >=1 else 1
-            self.history_summary = "" # Stores the latest summary text
-            
-            logger.info(f"SimpleAgent initialized for xAI. Model: {self.model_name}, Temp: {self.temperature}" +
-                        (f", Reasoning: {self.reasoning_effort}" if self.reasoning_effort else ""))
-            logger.info(f"Tools loaded: {[tool['function']['name'] for tool in self.tools_definition]}") # Corrected to use function name
-        else:
-            # Initialize minimal components for non-grok mode
-            self.client = None
-            self.model_name = "none"
-            self.reasoning_effort = None
-            self.temperature = 0.0
-            self.max_tokens_completion = 0
-            self.tools_definition = []
-            self.base_system_prompt = ""
-            self.message_history = []
-            self.max_history_len = 1
-            self.history_summary = ""
-            logger.info("SimpleAgent initialized in non-grok mode for testing and data integration.")
+        # Initialize Grok client
+        self.client = OpenAI(
+            api_key=xai_api_key,
+            base_url="https://api.x.ai/v1"
+        )
         
-        self.latest_game_state_text = "" # Stores text about last action & current state for the next user prompt
-
-        self.app = app
-        self.last_message = "" # For UI sidebar
-        self._prev_sidebar_norm = ""
-        self._step_count = 0 # Internal step counter
-        self._initial_summary_done = False
-        self._summary_every_n_steps = 15 # Configurable: summarize every N steps
-
-        self.running = True # Agent control flag for the run loop
-        self._last_assistant_message = ""  # Track last assistant message for get_last_message()
-
-        # Simple action selection state for non-grok mode
-        self._action_cycle_index = 0
-        self._simple_actions = [0, 1, 2, 3, 4, 5]  # Basic movement and A/B button actions
-        self._last_location = None
-        self._stuck_counter = 0
-
-    def get_frame_bytes(self) -> Optional[bytes]:
-        screenshot_pil = self.reader.get_screenshot()
-        if screenshot_pil:
-            buffered = io.BytesIO()
-            screenshot_pil.save(buffered, format="PNG")
-            return buffered.getvalue()
-        logger.warning("Could not get frame bytes, screenshot was None.")
-        return None
-    
-    def get_last_message(self) -> str:
-        """Return the last assistant message for agent_runner integration."""
-        return self._last_assistant_message
-
-    def _construct_user_message_content(self, text_prompt: str, image_base64: Optional[str]) -> List[Dict[str, Any]]:
-        content: List[Dict[str, Any]] = [] # Ensure content is always a list
-        if image_base64:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{image_base64}", "detail": "low"} # detail low for faster processing
-            })
-        content.append({"type": "text", "text": text_prompt})
-        return content
-
-
-    def process_tool_call(self, tool_name: str, tool_input: dict) -> Tuple[str, Dict[str, Any]]:
-        """
-        Process a tool function call.
-        Note: This method is part of the old architecture where agent executed actions.
-        In the new architecture, this should rarely be used since agent only decides actions.
-        """
-        logger.info(f"Attempting to execute tool: '{tool_name}' with input: {_pretty_json(tool_input)}")
+        # Track last prompt and response for UI
+        self.last_prompt = ""
+        self.last_response = ""
+        self.last_thinking = ""
         
-        # Get the tool function implementation
-        tool_function = next((tool_impl['function'] for tool_impl in AVAILABLE_TOOLS_LIST if tool_impl['function'].__name__ == tool_name), None)
-        if not callable(tool_function):
-            error_msg = f"Tool '{tool_name}' not found or its 'function' is not callable."
-            logger.error(error_msg)
-            self.latest_game_state_text = f"ERROR: Tool '{tool_name}' is not configured correctly."
-            return error_msg, {"status": "error", "message": error_msg}
-
-        human_readable_summary_from_tool: str
-        structured_output_for_llm: Dict[str, Any]
-
-        try:
-            common_args = {
-                'reader': self.reader,
-                'quest_manager': self.quest_manager,
-                'navigator': self.navigator,
-                'env_wrapper': self.env_wrapper # Pass along if tools expect it
-            }
-            kwargs = {**common_args, **tool_input}
-            
-            human_readable_summary_from_tool, structured_output_for_llm = tool_function(**kwargs)
-            logger.info(f"Tool '{tool_name}' executed. Human summary: '{human_readable_summary_from_tool}'. Structured output: {_pretty_json(structured_output_for_llm)}")
-
-        except Exception as e:
-            logger.error(f"Exception during execution of tool '{tool_name}': {e}", exc_info=True)
-            error_msg = f"Error while running tool {tool_name}: {str(e)}"
-            human_readable_summary_from_tool = error_msg # Pass the error as human summary
-            structured_output_for_llm = {"status": "error", "message": error_msg}
+        # Action history for context
+        self.action_history = []
+        self.max_history = 10
         
-        # Update latest game state text for UI (simplified, no direct reader calls)
-        try:
-            self.latest_game_state_text = (
-                f"Last Action: {tool_name}({json.dumps(tool_input)})\n"
-                f"Action Result: {human_readable_summary_from_tool}\n"
-                f"Note: State details available from environment on next decision cycle."
-            )
-            logger.info(f"Updated self.latest_game_state_text based on '{tool_name}' outcome.")
-        except Exception as e_state:
-            logger.error(f"Failed to update latest_game_state_text after tool '{tool_name}': {e_state}", exc_info=True)
-            self.latest_game_state_text = f"Error updating game state text after {tool_name}: {e_state}"
-
-        # Return the direct results from the tool function call
-        return human_readable_summary_from_tool, structured_output_for_llm
-
+        # Cooldown to prevent API spam
+        self.last_api_call = 0
+        self.api_cooldown = 3.0  # seconds
+        
     def get_action(self, game_state: GameState) -> Optional[int]:
-        """
-        Get next action from Grok based on current game state.
-        This is the main entry point for the agent - it only decides what to do,
-        doesn't execute actions.
+        """Get next action from Grok based on current game state"""
         
-        Args:
-            game_state: Current structured game state
-            
-        Returns:
-            Action ID (0-7) or None if no action should be taken
-        """
-        if not self.grok_enabled:
-            return None  # Let human control
+        # Log that Grok action is being requested with context
+        agent_logger.log_system_event("GROK_GET_ACTION_START", {"location": game_state.location, "quest_id": game_state.quest_id})
+        # Also log start event to agent.log
+        self.agent_file_logger.info(f"GROK_GET_ACTION_START: {json.dumps({'location': game_state.location, 'quest_id': game_state.quest_id})}")
+        
+        # Check cooldown
+        current_time = time.time()
+        if current_time - self.last_api_call < self.api_cooldown:
+            agent_logger.info(f"Grok cooldown active: {self.api_cooldown - (current_time - self.last_api_call):.1f}s remaining")
+            # Return None to let quest system take over
+            return None
             
         try:
-            # Get current frame for visual context
-            frame_bytes = None
-            if self.env_wrapper:
-                frame_array = self.env_wrapper.render()
-                if frame_array is not None:
-                    from PIL import Image
-                    import io
-                    frame_pil = Image.fromarray(frame_array)
-                    img_byte_arr = io.BytesIO()
-                    frame_pil.save(img_byte_arr, format='PNG')
-                    frame_bytes = img_byte_arr.getvalue()
+            # Build the prompt
+            prompt = self._build_prompt(game_state)
+            self.last_prompt = prompt
+            # Log the exact prompt payload sent to Grok
+            agent_logger.log_system_event("GROK_PROMPT_SENT", {"prompt": prompt})
+            # Also log to agent.log
+            self.agent_file_logger.info(f"GROK_PROMPT_SENT: {prompt}")
             
-            # Use existing decision logic from step() method
-            action = self._make_action_decision(frame_bytes, game_state)
+            # Call Grok API
+            response = self._call_grok(prompt)
+            agent_logger.log_system_event("GROK_API_RESPONSE", {"response": response})
+            # Also log API response to agent.log
+            self.agent_file_logger.info(f"GROK_API_RESPONSE: {response}")
             
-            # Update latest message for UI
-            self.latest_game_state_text = f"Decided on action: {action}"
+            # Parse response to get action
+            action = self._parse_response(response)
             
+            # Record action in history
+            if action is not None:
+                self.action_history.append({
+                    'action': action,
+                    'location': game_state.location,
+                    'time': current_time
+                })
+                # Trim history
+                if len(self.action_history) > self.max_history:
+                    self.action_history.pop(0)
+            
+            self.last_api_call = current_time
+            # Log the final action chosen by Grok (including reasoning)
+            agent_logger.log_system_event("GROK_GET_ACTION_RESULT", {"action": action, "response": self.last_response})
+            # Also log final action to agent.log
+            self.agent_file_logger.info(f"GROK_FINAL_ACTION: action={action} response={self.last_response}")
             return action
             
         except Exception as e:
-            logger.error(f"Error getting action from Grok: {e}")
-            self.latest_game_state_text = f"Error in decision making: {e}"
+            agent_logger.log_error("GROK_GET_ACTION_ERROR", f"Error getting Grok action: {e}")
+            self.last_response = f"Error: {str(e)}"
             return None
-
-    def _make_action_decision(self, frame_bytes, structured_state) -> Optional[int]:
-        """
-        Internal method that contains the actual grok decision logic.
-        """
-        if not self.grok_enabled:
-            return None # Let human control
+    
+    def _build_prompt(self, game_state: GameState) -> str:
+        """Build a comprehensive prompt for Grok"""
         
-        try:
-            # Build comprehensive game context for Grok
-            context_parts = []
-            
-            # Add current game state information
-            if structured_state:
-                state_dict = asdict(structured_state)
-                context_parts.append(f"Current Location: {state_dict.get('location', 'Unknown')}")
-                context_parts.append(f"Coordinates: {state_dict.get('coords', [0,0,0])}")
-                context_parts.append(f"Dialog: {state_dict.get('dialog', 'None')}")
-                context_parts.append(f"HP: {state_dict.get('hp_fraction', 1.0)*100:.0f}%")
-                context_parts.append(f"Badges: {state_dict.get('badges', 0)}")
-                context_parts.append(f"Money: ${state_dict.get('money', 0)}")
-                
-                if state_dict.get('current_quest'):
-                    context_parts.append(f"Current Quest: {state_dict['current_quest']}")
-            
-            # Build user prompt
-            user_prompt = f"""
-Pokemon Game State:
-{chr(10).join(context_parts)}
+        # Convert game state to dict for easier formatting
+        state_dict = asdict(game_state)
+        
+        # Build context about current situation
+        context_parts = []
+        
+        # Location context
+        loc = game_state.location
+        context_parts.append(f"You are at {loc['map_name']} (map {loc['map_id']}) at position ({loc['x']}, {loc['y']})")
+        
+        # Quest context
+        if game_state.quest_id:
+            context_parts.append(f"Current quest: {game_state.quest_id}")
+            # Add quest description if available
+            if self.quest_manager:
+                quest_data = self.quest_manager.quest_progression_engine.get_quest_data_by_id(game_state.quest_id)
+                if quest_data:
+                    context_parts.append(f"Quest objective: {quest_data.get('description', 'Unknown')}")
+        
+        # Party status
+        if game_state.party:
+            alive_pokemon = [p for p in game_state.party if p['hp'] > 0]
+            context_parts.append(f"Party: {len(alive_pokemon)}/{len(game_state.party)} Pokemon alive")
+            if alive_pokemon:
+                lead = alive_pokemon[0]
+                context_parts.append(f"Lead Pokemon: {lead['species']} Lv.{lead['level']} ({lead['hp']}/{lead['maxHp']} HP)")
+        
+        # Battle context
+        if game_state.in_battle:
+            context_parts.append("Currently in battle!")
+        
+        # Dialog context
+        if game_state.dialog:
+            context_parts.append(f"Dialog active: {game_state.dialog[:50]}...")
+        
+        # Recent actions
+        if self.action_history:
+            recent = self.action_history[-3:]
+            action_str = ", ".join([VALID_ACTIONS_STR[a['action']] for a in recent if a['action'] < len(VALID_ACTIONS_STR)])
+            context_parts.append(f"Recent actions: {action_str}")
+        
+        # Conditional prompt for game start
+        if game_state.location['map_id'] == 0 and loc['x'] == 0 and loc['y'] == 0 or game_state.location['map_id'] == 38 and loc['x'] == 3 and loc['y'] == 6 and game_state.dialog != "":
+            prompt_start = "Make sure you pick entertaining names for yourself and your rival!"
+        else:
+            prompt_start = ""
 
-Recent Action History:
-{self.latest_game_state_text}
+        # Build the full prompt
+        prompt = f"""{prompt_start}
+You are playing Pokemon Red. Your goal is to progress through the game efficiently.
 
-Analyze the current situation and decide the best action to take. Consider:
-- If there's dialog, you should usually press A to continue
-- For exploration, move strategically (UP/DOWN/LEFT/RIGHT)
-- Use A to interact with NPCs, items, or confirmations
-- Use B to cancel or go back
-- Use START for the menu when needed
-- Consider the current quest objective if available
+Current situation:
+{chr(10).join('- ' + part for part in context_parts)}
 
-What action should I take next?
+Game stats:
+- Money: ${game_state.money}
+- Badges: {game_state.badges}
+- Pokedex: {game_state.pokedex_seen} seen, {game_state.pokedex_caught} caught
+- Items: {', '.join(game_state.items[:5])}{'...' if len(game_state.items) > 5 else ''}
+
+Available actions:
+0: down
+1: left  
+2: right
+3: up
+4: a (interact/confirm)
+5: b (cancel/back)
+6: path (follow quest path)
+7: start (menu)
+
+Think step by step about what to do next, then call the 'choose_action' tool with your chosen action number.
+
 """
 
-            # # Encode image if available
-            # images = []
-            # if frame_bytes:
-            #     img_b64 = base64.b64encode(frame_bytes).decode('utf-8')
-            #     images.append({
-            #         "type": "image_url",
-            #         "image_url": {"url": f"data:image/png;base64,{img_b64}"}
-            #     })
-
-            # Call Grok with the current state
-            messages = [
-                {"role": "system", "content": self.base_system_prompt},
-                {
-                    "role": "user", 
-                    "content": [
-                        {"type": "text", "text": user_prompt}
-                    ] # + images
-                }
+        return prompt
+    
+    def _call_grok(self, prompt: str) -> str:
+        """Call Grok API with optimized prompts based on context"""
+        
+        # Detect special game contexts
+        is_naming_screen = "NAME?" in prompt
+        
+        # Optimize prompt for specific contexts
+        if is_naming_screen:
+            # Much simpler prompt for naming screen to avoid reasoning overload
+            optimized_messages = [
+                {"role": "user", "content": "You're at the Pokemon character naming screen. After the '\n' the name you are picking displays. '\u25ba' represents your cursor position."}
             ]
-
-            # Make API call to Grok
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-                tools=self.tools_definition,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens_completion
-            )
-
-            # Process response and extract action
-            if response.choices[0].message.tool_calls:
-                for tool_call in response.choices[0].message.tool_calls:
-                    tool_name = tool_call.function.name
-                    tool_args = json.loads(tool_call.function.arguments)
+            max_tokens = 2000  # Less tokens needed for simple response
+            reasoning_effort = None  # No reasoning needed for simple action
+        else:
+            # Regular prompt for other situations
+            optimized_messages = [
+                {"role": "system", "content": "You are an expert Pokemon player. After the '\n' the name you are picking displays. '\u25ba' represents your cursor position."},
+                {"role": "user", "content": prompt}
+            ]
+            max_tokens = 2000  # More tokens for complex situations
+            reasoning_effort = "low"  # Enable reasoning for complex decisions
+        
+        tools = [{
+            "type": "function",
+            "function": {
+                "name": "choose_action",
+                "description": "Choose the next action to take in the game",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "integer", "description": "The action number to execute (0-7)", "minimum": 0, "maximum": 7},
+                        "reasoning": {"type": "string", "description": "Brief explanation of why this action was chosen"}
+                    },
+                    "required": ["action", "reasoning"]
+                }
+            }
+        }]
+        
+        # Log what we're doing
+        agent_logger.log_system_event("GROK_API_CALL", {
+            "is_naming_screen": is_naming_screen,
+            "max_tokens": max_tokens,
+            "reasoning_effort": reasoning_effort,
+            "prompt_length": len(prompt)
+        })
+        
+        try:
+            # Build kwargs dynamically
+            api_kwargs = {
+                "model": "grok-3-mini",
+                "messages": optimized_messages,
+                "tools": tools,
+                "tool_choice": "auto",
+                "temperature": 0.7,
+                "max_tokens": max_tokens
+            }
+            
+            # Only add reasoning_effort if not None
+            if reasoning_effort:
+                api_kwargs["reasoning_effort"] = reasoning_effort
+            
+            # Make the API call
+            completion = self.client.chat.completions.create(**api_kwargs)
+            
+            # Log token usage
+            usage = getattr(completion, 'usage', None)
+            if usage:
+                details = getattr(usage, 'completion_tokens_details', None)
+                reasoning_tokens = getattr(details, 'reasoning_tokens', 0) if details else 0
+                
+                agent_logger.log_system_event("GROK_TOKEN_USAGE", {
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "reasoning_tokens": reasoning_tokens,
+                    "total_tokens": usage.total_tokens,
+                    "finish_reason": completion.choices[0].finish_reason
+                })
+            
+            # Get the message
+            message = completion.choices[0].message
+            
+            # Capture reasoning if present
+            if hasattr(message, 'reasoning_content') and message.reasoning_content:
+                self.last_thinking = message.reasoning_content
+                # Send to UI via status queue
+                if hasattr(self, 'status_queue'):
+                    self.status_queue.put(('__grok_thinking__', self.last_thinking))
+            
+            # Check for tool calls
+            if hasattr(message, 'tool_calls') and message.tool_calls:
+                tool_call = message.tool_calls[0]
+                args = json.loads(tool_call.function.arguments)
+                
+                # Update last response for UI
+                self.last_response = f"Action {args.get('action', '?')}: {args.get('reasoning', '')}"
+                
+                agent_logger.log_system_event("GROK_SUCCESS", {
+                    "action": args.get('action'),
+                    "reasoning": args.get('reasoning', '')[:100],  # First 100 chars
+                    "context": "naming_screen" if is_naming_screen else "general"
+                })
+                
+                return json.dumps({
+                    "tool_call": tool_call.function.name,
+                    "arguments": args
+                })
+            
+            # Check finish reason
+            finish_reason = completion.choices[0].finish_reason
+            if finish_reason == "length":
+                agent_logger.log_error("GROK_LENGTH_LIMIT", 
+                    f"Hit token limit with {max_tokens} max_tokens", {})
+                
+                # Retry with more tokens
+                if max_tokens < 3000:
+                    agent_logger.log_system_event("GROK_RETRY", {"new_max_tokens": 3000})
+                    api_kwargs["max_tokens"] = 3000
+                    retry_completion = self.client.chat.completions.create(**api_kwargs)
                     
-                    # Convert tool call to action index
-                    if tool_name == "press_button":
-                        button = tool_args.get("button", "A")
-                        action_index = self.quest_manager.action_to_index(button)
-                        logger.info(f"Grok chose button: {button} (action {action_index})")
-                        return action_index
-                    elif tool_name == "press_next":
-                        # Use PATH_FOLLOW_ACTION for quest progression
-                        from environment.environment import PATH_FOLLOW_ACTION
-                        logger.info(f"Grok chose path follow (action {PATH_FOLLOW_ACTION})")
-                        return PATH_FOLLOW_ACTION
+                    retry_message = retry_completion.choices[0].message
+                    if hasattr(retry_message, 'tool_calls') and retry_message.tool_calls:
+                        tool_call = retry_message.tool_calls[0]
+                        args = json.loads(tool_call.function.arguments)
+                        return json.dumps({
+                            "tool_call": tool_call.function.name,
+                            "arguments": args
+                        })
             
-            # Fallback if no tool call
-            logger.warning("Grok response had no tool calls, defaulting to A button")
-            return self.quest_manager.action_to_index("A")
+            # No tool call generated
+            agent_logger.log_error("GROK_NO_TOOL_CALL", "No tool call in response", {
+                "finish_reason": finish_reason,
+                "has_content": bool(getattr(message, 'content', None))
+            })
             
+            # Provide sensible defaults
+            if is_naming_screen:
+                return json.dumps({
+                    "tool_call": "choose_action",
+                    "arguments": {"action": 4, "reasoning": "Selecting letter A at naming screen"}
+                })
+            else:
+                return json.dumps({"error": "No tool call generated"})
+                
         except Exception as e:
-            logger.error(f"Error in Grok decision making: {e}")
-            # Simple fallback without direct reader calls
-            return self.quest_manager.action_to_index("A")
-
+            logger.error(f"Grok API error: {e}")
+            
+            # # Provide fallback for naming screen
+            # if is_naming_screen:
+            #     return json.dumps({
+            #         "tool_call": "choose_action",
+            #         "arguments": {"action": 4, "reasoning": "Error fallback: pressing A"}
+            #     })
+            
+            return json.dumps({"error": str(e)})
+    
+    def _parse_response(self, response: str) -> Optional[int]:
+        """Parse Grok's response to extract the action"""
+        
+        try:
+            data = json.loads(response)
+            
+            if "error" in data:
+                logger.error(f"Grok error: {data['error']}")
+                return None
+            
+            if data.get("tool_call") == "choose_action":
+                args = data.get("arguments", {})
+                action = args.get("action")
+                reasoning = args.get("reasoning", "")
+                
+                # Update last response with reasoning
+                self.last_response = f"Action {action}: {reasoning}"
+                
+                # Validate action
+                if action is not None and 0 <= action < len(VALID_ACTIONS):
+                    return action
+                else:
+                    logger.error(f"Invalid action from Grok: {action}")
+                    return None
+            
+            return None
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Grok response: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error parsing response: {e}")
+            return None

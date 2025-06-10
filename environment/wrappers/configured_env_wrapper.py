@@ -1,6 +1,5 @@
 # grok_plays_pokemon/environment/wrappers/configured_env_wrapper.py
 # C
-import yaml
 from pathlib import Path
 from omegaconf import OmegaConf, DictConfig
 from .env_wrapper import EnvWrapper

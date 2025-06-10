@@ -71,7 +71,6 @@ def get_default_config(rom_path, initial_state_path):
         "auto_flash": False,
         "required_tolerance": None,
         "disable_wild_encounters": False,
-        "disable_ai_actions": True,
         "auto_teach_cut": False,
         "auto_teach_surf": False,
         "auto_teach_strength": False,

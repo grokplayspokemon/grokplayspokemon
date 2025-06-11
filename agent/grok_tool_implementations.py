@@ -1,3 +1,4 @@
+# grok_plays_pokemon/agent/grok_tool_implementations.py
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, Dict, Any, Tuple
 
@@ -9,6 +10,7 @@ from environment.environment_helpers.navigator import InteractiveNavigator
 from pyboy.utils import WindowEvent # For button presses
 import logging
 import json # For serializing dicts if necessary for human-readable part
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -52,44 +54,17 @@ class AskFriendRequest(BaseModel):
     question: str = Field(description="Question to ask an unaffiliated helper Grok agent for high-level advice or stuck situations.")
 ask_friend_schema = AskFriendRequest.model_json_schema()
 
-# Define the available tools using the generated schemas
-AVAILABLE_TOOLS = [
-    {
-        "name": "press_buttons",
-        "type": "function",
-        "description": "Press a sequence of buttons on the Game Boy emulator.",
-        "input_schema": press_buttons_schema,
-    },
-    {
-        "name": "navigate_to",
-        "type": "function",
-        "description": "Move to a specific walkable coordinate by (glob_y, glob_x) or by direction (up to 4 spaces): direction parameter.",
-        "input_schema": navigate_to_schema,
-    },
-    {
-        "name": "exit_menu",
-        "type": "function",
-        "description": "Exit any active menu, dialog, or battle sequence by pressing B repeatedly. Use this when stuck in menus or dialog sequences.",
-        "input_schema": empty_schema,
-    },
-    {
-        "name": "ask_friend",
-        "type": "function",
-        "description": "Ask an unaffiliated helper Grok any question with game state data, where to go next, etc.",
-        "input_schema": ask_friend_schema,
-    },
-]
 
 # Optional: Define the actual function implementations
 def press_buttons(
-    reader: RedGymEnv,
+    env: RedGymEnv,
     quest_manager: QuestManager,
     navigator: InteractiveNavigator,
     env_wrapper: EnvWrapper,
     buttons: List[Literal["a", "b", "start", "select", "up", "down", "left", "right"]],
     wait_frames: Optional[int] = 5
 ) -> Tuple[str, Dict[str, Any]]:
-    assert reader is not None, "RedGymEnv (reader) not provided to press_buttons"
+    assert env is not None, "RedGymEnv (env) not provided to press_buttons"
     assert buttons, "Button list cannot be empty for press_buttons"
     assert wait_frames >= 0, "wait_frames cannot be negative"
 
@@ -98,24 +73,24 @@ def press_buttons(
         "up": WindowEvent.PRESS_ARROW_UP, "down": WindowEvent.PRESS_ARROW_DOWN,
         "left": WindowEvent.PRESS_ARROW_LEFT, "right": WindowEvent.PRESS_ARROW_RIGHT,
         "a": WindowEvent.PRESS_BUTTON_A, "b": WindowEvent.PRESS_BUTTON_B,
-        "start": WindowEvent.PRESS_BUTTON_START, "select": WindowEvent.PRESS_BUTTON_SELECT,
+        "start": WindowEvent.PRESS_BUTTON_START,
     }
     release_map = {
         "up": WindowEvent.RELEASE_ARROW_UP, "down": WindowEvent.RELEASE_ARROW_DOWN,
         "left": WindowEvent.RELEASE_ARROW_LEFT, "right": WindowEvent.RELEASE_ARROW_RIGHT,
         "a": WindowEvent.RELEASE_BUTTON_A, "b": WindowEvent.RELEASE_BUTTON_B,
-        "start": WindowEvent.RELEASE_BUTTON_START, "select": WindowEvent.RELEASE_BUTTON_SELECT,
+        "start": WindowEvent.RELEASE_BUTTON_START,
     }
 
     pressed_sequence = []
     try:
-        # Prioritize reader.pyboy if available
-        pyboy_instance = reader.pyboy
+        # Prioritize env.pyboy if available
+        pyboy_instance = env.pyboy
         if not pyboy_instance and env_wrapper:
-            pyboy_instance = env_wrapper.pyboy # Fallback to env_wrapper if reader doesn't expose it directly (it should)
+            pyboy_instance = env_wrapper.pyboy # Fallback to env_wrapper if env doesn't expose it directly (it should)
         
         if not pyboy_instance:
-            error_msg = "PyBoy instance not available via reader or env_wrapper."
+            error_msg = "PyBoy instance not available via env or env_wrapper."
             logger.error(error_msg)
             return error_msg, {"status": "error", "message": error_msg}
 
@@ -145,7 +120,7 @@ def press_buttons(
         return error_msg, {"status": "error", "message": error_msg, "buttons_attempted": pressed_sequence}
 
 def navigate_to(
-    reader: RedGymEnv,
+    env: RedGymEnv,
     quest_manager: QuestManager,
     navigator: InteractiveNavigator,
     env_wrapper: EnvWrapper,
@@ -154,7 +129,7 @@ def navigate_to(
     direction: Optional[Literal["n", "e", "s", "w", "up", "down", "left", "right"]] = None,
     max_steps: Optional[int] = 100
 ) -> Tuple[str, Dict[str, Any]]:
-    assert reader is not None, "RedGymEnv (reader) not provided to navigate_to"
+    assert env is not None, "RedGymEnv (env) not provided to navigate_to"
     assert navigator is not None, "InteractiveNavigator not provided to navigate_to"
     assert max_steps > 0, "max_steps must be positive"
     assert (target_y is not None and target_x is not None) or direction is not None, "Either (target_y, target_x) or direction must be specified for navigate_to"
@@ -197,22 +172,22 @@ def navigate_to(
         return error_msg, {"status": "error", "message": error_msg}
 
 def exit_menu(
-    reader: RedGymEnv,
+    env: RedGymEnv,
     quest_manager: QuestManager,
     navigator: InteractiveNavigator,
     env_wrapper: EnvWrapper
 ) -> Tuple[str, Dict[str, Any]]:
-    assert reader is not None, "RedGymEnv (reader) not provided to exit_menu"
+    assert env is not None, "RedGymEnv (env) not provided to exit_menu"
     logger.info("Executing exit_menu")
     try:
         # Using the press_buttons tool for consistency might be too much overhead here.
         # Direct pyboy interaction for a fixed sequence is fine.
-        pyboy_instance = reader.pyboy
+        pyboy_instance = env.pyboy
         if not pyboy_instance and env_wrapper:
             pyboy_instance = env_wrapper.pyboy
         
         if not pyboy_instance:
-            error_msg = "PyBoy instance not available via reader or env_wrapper for exit_menu."
+            error_msg = "PyBoy instance not available via env or env_wrapper for exit_menu."
             logger.error(error_msg)
             return error_msg, {"status": "error", "message": error_msg}
 
@@ -225,9 +200,9 @@ def exit_menu(
             pyboy_instance.send_input(b_release)
             for _f in range(3): pyboy_instance.tick()
             press_count +=1
-            # Potentially add a check here using `reader` if we can determine if out of menu
-            # current_dialog = reader.get_current_dialog()
-            # if not reader.is_in_menu_prompt_dialog(): break # Fictional reader method
+            # Potentially add a check here using `env` if we can determine if out of menu
+            # current_dialog = env.get_current_dialog()
+            # if not env.is_in_menu_prompt_dialog(): break # Fictional env method
         
         human_summary = f"Attempted to exit menu by pressing B {press_count} times."
         structured_output = {"status": "success", "message": human_summary, "b_presses": press_count}
@@ -238,20 +213,20 @@ def exit_menu(
         return error_msg, {"status": "error", "message": error_msg}
 
 def ask_friend(
-    reader: RedGymEnv,
+    env: RedGymEnv,
     quest_manager: QuestManager,
     navigator: InteractiveNavigator,
     env_wrapper: EnvWrapper,
     question: str
 ) -> Tuple[str, Dict[str, Any]]:
-    assert reader is not None, "RedGymEnv (reader) not provided to ask_friend"
+    assert env is not None, "RedGymEnv (env) not provided to ask_friend"
     assert question, "Question cannot be empty for ask_friend"
     logger.info(f"Executing ask_friend: {question}")
     
     current_location = "Unknown"
     try:
-        _, _, map_id = reader.get_game_coords()
-        current_location = reader.get_map_name_by_id(map_id)
+        _, _, map_id = env.get_game_coords()
+        current_location = env.get_map_name_by_id(map_id)
     except Exception as e_loc:
         logger.warning(f"Could not get current location for ask_friend: {e_loc}")
 
@@ -268,6 +243,268 @@ def ask_friend(
         "note": "The agent will process the friend's answer in a separate step."
     }
     return human_summary, structured_output
+
+# def handle_battle(
+#     env: RedGymEnv,
+#     quest_manager: QuestManager,
+#     navigator: InteractiveNavigator,
+#     env_wrapper: EnvWrapper
+# ) -> Tuple[str, Dict[str, Any]]:
+#     """
+#     Automatically handle a battle by selecting the best move.
+#     """
+
+#     env.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)  
+#     env.pyboy.tick(10)
+#     env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
+#     env.pyboy.tick(10)
+#     env.pyboy.send_input(WindowEvent.PRESS_BUTTON_UP)
+#     env.pyboy.tick(10)
+#     env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_UP)
+#     env.pyboy.tick(10)
+#     # 1. CAPTURE INITIAL STATE
+#     dialog_before = env.get_active_dialog() or ""
+#     status_text = dialog_before.strip().replace("\n", " ") if dialog_before else "(Battle dialog cleared)"
+    
+#     env.pyboy.tick(24)
+#     time.sleep(0.5)
+
+#     # 3. BATTLE MENU VERIFICATION
+#     battle_menu_visible = "►FIGHT" in dialog_before
+#     logger.info(f"[BattleAI] Battle menu state: {'Active' if battle_menu_visible else 'Not detected'}")
+    
+#         # Ensure battle menu is visible, clearing any initial dialogs
+#     dialog = env.get_active_dialog() or ""
+#     if "►FIGHT" not in dialog:
+#         # Clear blocking dialog (e.g., 'running from a trainer battle') until the fight menu appears
+#         for _ in range(6):
+#             print("doing what o4-mini suggested..")
+#             env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+#             env.pyboy.tick()
+#             env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+#             env.pyboy.tick()
+#             time.sleep(0.1)
+#             dialog = env.get_active_dialog() or ""
+#             if "►FIGHT" in dialog:
+#                 break
+#     print("done doing what o4-mini suggested..")
+    
+#     # Press B to exit unwanted dialogs
+#     while not battle_menu_visible:
+#         print(f"battle_menu_visible={battle_menu_visible}")
+#         for _ in range(4):
+#             env.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)
+#             env.pyboy.tick(10)
+#             env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
+#             env.pyboy.tick(10)
+#             env.pyboy.send_input(WindowEvent.PRESS_BUTTON_UP)
+#             env.pyboy.tick(10)
+#             env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_UP)
+#             env.pyboy.tick(10)
+#             env.pyboy.send_input(WindowEvent.PRESS_BUTTON_LEFT)
+#             env.pyboy.tick(10)
+#             env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_LEFT)
+#             env.pyboy.tick(10)
+#             time.sleep(0.5)
+#             battle_menu_visible = "►FIGHT" in dialog_before
+                
+#     # Cursor should be on FIGHT menu now    
+#     # Open fight menu
+#     print("Opening fight menu...")
+#     env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+#     env.pyboy.tick(10)
+#     env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+#     env.pyboy.tick(10)
+#     time.sleep(0.5)
+    
+#     # Determine best move
+#     print("determining best move..")
+#     try:
+#         best_idx = env.choose_best_battle_move()
+#     except Exception:
+#         best_idx = 0
+    
+#     print(f"best_idx={best_idx}")
+        
+#     # Reset cursor to top
+#     for _ in range(4):
+#         print("resetting cursor to top...")
+#         env.pyboy.send_input(WindowEvent.PRESS_ARROW_UP)
+#         env.pyboy.tick(10)
+#         env.pyboy.send_input(WindowEvent.RELEASE_ARROW_UP)
+#         env.pyboy.tick(10)
+#         time.sleep(0.2)
+        
+        
+#     # Move cursor down to selected move
+#     for _ in range(best_idx):
+#         print("moving cursor down to selected move..")
+#         env.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
+#         env.pyboy.tick(10)
+#         env.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
+#         env.pyboy.tick(10)
+#         time.sleep(0.4)
+        
+#     # Select move
+#     print("selecing move...")
+#     env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+#     env.pyboy.tick(5)
+#     env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+#     env.pyboy.tick(5)
+#     time.sleep(0.4)
+    
+#     # Summary
+#     human_summary = f"Selected battle move {move_name} index {best_idx}."
+#     structured = {"status": "success", "move_index": best_idx}
+#     return human_summary, structured
+
+def handle_battle(
+    env: RedGymEnv,
+    quest_manager: QuestManager,
+    navigator: InteractiveNavigator,
+    env_wrapper: EnvWrapper
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Automatically handle a battle by selecting the best move.
+    """
+    logger.info("Executing handle_battle tool")
+    
+    try:
+        # Get current dialog to understand battle state
+        dialog = env.get_active_dialog() or ""
+        print(f"dialog={dialog}")
+        
+        # Clear any blocking dialogs to see what menu we're in
+        attempts = 0
+        while "FIGHT" not in dialog and attempts < 10:
+            print("pressing B to advance dialog...dialog=", dialog)
+            # Press B to advance dialog
+            env.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)
+            env.pyboy.tick(9)
+            env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
+            env.pyboy.tick(15)
+            
+            dialog = env.get_active_dialog() or ""
+            attempts += 1
+
+        # Move cursor to FIGHT option
+        print("moving cursor to FIGHT option...dialog=", dialog)
+        for _ in range(4):
+            env.pyboy.send_input(WindowEvent.PRESS_ARROW_UP)
+            env.pyboy.tick(9)
+            env.pyboy.send_input(WindowEvent.RELEASE_ARROW_UP)
+            env.pyboy.tick(15)
+            time.sleep(0.5)
+            env.pyboy.send_input(WindowEvent.PRESS_ARROW_LEFT)
+            env.pyboy.tick(9)
+            env.pyboy.send_input(WindowEvent.RELEASE_ARROW_LEFT)
+            env.pyboy.tick(15)
+            time.sleep(0.5)
+        
+        
+        # Select FIGHT option
+        print("selecting FIGHT option...dialog=", dialog)
+        env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+        env.pyboy.tick(9)
+        env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+        env.pyboy.tick(15)
+        time.sleep(0.5)
+        
+        # Use the AI to choose best move
+        try:
+            best_move_idx = env.choose_best_battle_move()
+        except Exception as e:
+            logger.warning(f"Error choosing best move: {e}, defaulting to first move")
+            best_move_idx = 0
+        
+        print(f"best_move_idx={best_move_idx}")
+        
+        # Navigate to the selected move
+        # First go to top of move list
+        print("going to top of move list...dialog=", dialog)
+        for _ in range(4):
+            env.pyboy.send_input(WindowEvent.PRESS_ARROW_UP)
+            env.pyboy.tick(9)
+            env.pyboy.send_input(WindowEvent.RELEASE_ARROW_UP)
+            env.pyboy.tick(15)
+        
+        # Then go down to selected move
+        print("going down to selected move...dialog=", dialog)
+        for _ in range(best_move_idx):
+            env.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
+            env.pyboy.tick(9)
+            env.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
+            env.pyboy.tick(15)
+        
+        # Select the move
+        print("selecting the move...dialog=", dialog)
+        env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+        env.pyboy.tick(9)
+        env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+        env.pyboy.tick(15)
+        
+        # Get move name if possible
+        try:
+            party = env.read_party_pokemon()
+            if party and best_move_idx < len(party[0].moves):
+                move_name = party[0].moves[best_move_idx]
+            else:
+                move_name = f"Move {best_move_idx + 1}"
+        except:
+            move_name = f"Move {best_move_idx + 1}"
+        
+        human_summary = f"Selected {move_name} (slot {best_move_idx + 1}) in battle"
+        structured_output = {
+            "status": "success",
+            "move_selected": move_name,
+            "move_index": best_move_idx
+        }
+        
+        return human_summary, structured_output
+        
+    except Exception as e:
+        logger.error(f"Error in handle_battle: {e}", exc_info=True)
+        error_msg = f"Battle handling failed: {str(e)}"
+        return error_msg, {"status": "error", "message": error_msg}
+
+
+# Define the available tools using the generated schemas
+AVAILABLE_TOOLS = [
+    {
+        "name": "press_buttons",
+        "type": "function",
+        "description": "Press a sequence of buttons on the Game Boy emulator.",
+        "input_schema": press_buttons_schema,
+    },
+    {
+        "name": "navigate_to",
+        "type": "function",
+        "description": "Move to a specific walkable coordinate by (glob_y, glob_x) or by direction (up to 4 spaces): direction parameter.",
+        "input_schema": navigate_to_schema,
+    },
+    {
+        "name": "exit_menu",
+        "type": "function",
+        "description": "Exit any active menu, dialog, or battle sequence by pressing B repeatedly. Use this when stuck in menus or dialog sequences.",
+        "input_schema": empty_schema,
+    },
+    {
+        "name": "ask_friend",
+        "type": "function",
+        "description": "Ask an unaffiliated helper Grok any question with game state data, where to go next, etc.",
+        "input_schema": ask_friend_schema,
+    },
+    {
+        "name": "handle_battle",
+        "function": handle_battle,
+        "declaration": {
+            "name": "handle_battle",
+            "description": "Fully handles battling.",
+            "parameters": empty_schema
+        }
+    }
+]
+
 
 # Define the available tools LIST for SimpleAgent processing
 # Each item's 'declaration' will be used for OpenAI's tool format.
@@ -308,7 +545,19 @@ AVAILABLE_TOOLS_LIST = [
             "parameters": ask_friend_schema
         }
     },
+    {
+        "name": "handle_battle",
+        "function": handle_battle,
+        "declartion": {
+            "name": "handle_battle",
+            "description": "Fully handles battling.",
+            "parameters": empty_schema
+        }
+    }
 ]
+
+
+
 
 # For SimpleAgent to quickly map name to function if needed, though it iterates AVAILABLE_TOOLS_LIST
 # TOOLS_MAP = {tool["name"]: tool["function"] for tool in AVAILABLE_TOOLS_LIST}

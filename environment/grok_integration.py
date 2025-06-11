@@ -28,7 +28,8 @@ from environment.data.recorder_data.global_map import local_to_global # For glob
 class GameState:
     """Structured game state for UI updates"""
     location: Dict[str, Any]
-    quest_id: Optional[int] 
+    quest_id: Optional[int]
+    collision_map: Optional[str]
     party: List[Dict[str, Any]]
     dialog: Optional[str]
     in_battle: bool 
@@ -39,6 +40,8 @@ class GameState:
     pokedex_caught: int
     steps: int 
     items: List[str]
+    # Detailed battle prompt generated on battle start
+    battle_prompt: Optional[str] = None
 
 # Helper functions for type conversion if needed, but RedGymEnv might provide direct strings/enums
 def _convert_pokemon_type_to_str(type_enum: Optional[EnvPokemonType]) -> Optional[str]:
@@ -108,6 +111,14 @@ def extract_structured_game_state(env_wrapper: EnvWrapper, reader: RedGymEnv, qu
                 "status": _get_status_string_from_env(pokemon.Status)
             })
 
+        # Collision Map: use the formatted string returned by reader.get_collision_map()
+        collision_map = reader.get_collision_map()
+        if collision_map is not None:
+            collision_map_str = collision_map
+        else:
+            collision_map_str = "No collision map available"
+        
+        
         # Money - RedGymEnv stores money in BCD. Need to convert.
         # wPlayerMoney is at 0xD347 for Red/Blue
         money = 0
@@ -161,6 +172,7 @@ def extract_structured_game_state(env_wrapper: EnvWrapper, reader: RedGymEnv, qu
         return GameState(
             location=location_data,
             quest_id=quest_id_to_report, 
+            collision_map=collision_map_str,
             party=party_data,
             dialog=dialog,
             in_battle=in_battle, 
@@ -170,7 +182,8 @@ def extract_structured_game_state(env_wrapper: EnvWrapper, reader: RedGymEnv, qu
             pokedex_seen=pokedex_seen,
             pokedex_caught=pokedex_caught,
             steps=steps, 
-            items=items_list
+            items=items_list,
+            battle_prompt=getattr(env_wrapper, 'battle_prompt', None)
         )
     except Exception as e:
         logging.error(f"Error extracting structured game state from RedGymEnv: {e}", exc_info=True)
@@ -179,7 +192,8 @@ def extract_structured_game_state(env_wrapper: EnvWrapper, reader: RedGymEnv, qu
             location={"x": 0, "y": 0, "gx": 0, "gy": 0, "map_id": 0, "map_name": "Unknown"},
             quest_id=None, party=[], dialog=None, in_battle=False,
             hp_fraction=1.0, money=0, badges=0, pokedex_seen=0,
-            pokedex_caught=0, steps=0, items=[]
+            pokedex_caught=0, steps=0, items=[],
+            battle_prompt=None
         )
 
 # Removed GrokIntegration class, FastAPI app, routes, SSE, Grok client, threading, queues, etc.

@@ -4,6 +4,8 @@ from environment.environment import RedGymEnv
 class EnvWrapper(RedGymEnv):
     def __init__(self, config):
         super().__init__(config)
+        # Initialize battle prompt storage
+        self.battle_prompt = None
 
     """
     A drop-in wrapper ensuring:
@@ -25,5 +27,8 @@ class EnvWrapper(RedGymEnv):
 
         # Also include dialog in info
         info['dialog'] = fresh_dialog
+        # Store battle prompt for integration if provided (preserve existing until new prompt arrives)
+        if 'battle_prompt' in info:
+            self.battle_prompt = info['battle_prompt']
 
         return fresh_obs, reward, reset, done, info 

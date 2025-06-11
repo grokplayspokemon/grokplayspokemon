@@ -49,6 +49,7 @@ game_state = {
     'collision_overlay': None,
     'grok_thinking': '',
     'grok_response': '',
+    'grok_cost': {},
     'last_update': time.time()
 }
 
@@ -189,6 +190,10 @@ def handle_status_update(item_id, data):
     elif item_id == '__grok_response__':
         game_state['grok_response'] = data
         broadcast_update('grok_response', data)
+
+    elif item_id == '__grok_cost__':
+        game_state['grok_cost'] = data
+        broadcast_update('grok_cost', data)
         
     elif item_id == '__action__':
         broadcast_update('action', data)
@@ -284,10 +289,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-family: 'JetBrains Mono', monospace;
         }
 
-        /* Main layout */
+        /* Main layout with 3 columns */
         .stream-container {
             display: grid;
-            grid-template-columns: 2fr 1fr 300px;
+            grid-template-columns: 280px 1fr 300px;
             grid-template-rows: auto 1fr auto;
             height: 100vh;
             background-color: #1a1a1a;
@@ -339,23 +344,125 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             animation: pulse 1s ease-in-out infinite;
         }
 
-        /* Main content area */
-        .main-content {
-            display: grid;
-            grid-template-columns: 2fr 1fr; /* Two-column layout */
-            grid-template-rows: auto 1fr; /* Let rows size naturally */
-            height: calc(100vh - 140px); /* Account for header and footer */
-            overflow: hidden;
-            gap: 1px;
-            grid-column: 1 / -1; /* Span all columns of parent */
+        /* Left sidebar - Grok's Actions */
+        .left-sidebar {
+            grid-column: 1;
             grid-row: 2;
+            background: #0a0a0a;
+            padding: 20px;
+            overflow-y: auto;
+            border-right: 1px solid #1a1a1a;
         }
 
-        /* Game area */
-        .game-area {
-            grid-column: 1;
-            grid-row: 1 / span 2; /* Span both rows */
+        .actions-header {
+            font-size: 18px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #999;
+            margin-bottom: 20px;
+        }
+
+        .action-log {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .action-entry {
+            background: #111;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 12px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .action-time {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        .action-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .action-icon {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #2a2a2a;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        /* Action type specific colors */
+        .action-up { border-color: #3b82f6; }
+        .action-up .action-icon { background: #3b82f6; color: #fff; }
+        
+        .action-down { border-color: #8b5cf6; }
+        .action-down .action-icon { background: #8b5cf6; color: #fff; }
+        
+        .action-left { border-color: #ec4899; }
+        .action-left .action-icon { background: #ec4899; color: #fff; }
+        
+        .action-right { border-color: #10b981; }
+        .action-right .action-icon { background: #10b981; color: #fff; }
+        
+        .action-a { border-color: #f59e0b; }
+        .action-a .action-icon { background: #f59e0b; color: #000; }
+        
+        .action-b { border-color: #ef4444; }
+        .action-b .action-icon { background: #ef4444; color: #fff; }
+        
+        .action-start { border-color: #6366f1; }
+        .action-start .action-icon { background: #6366f1; color: #fff; }
+        
+        .action-path { border-color: #14b8a6; }
+        .action-path .action-icon { background: #14b8a6; color: #fff; }
+
+        .action-reason {
+            font-size: 12px;
+            color: #999;
+            line-height: 1.4;
+        }
+
+        /* Center content area */
+        .center-content {
+            grid-column: 2;
+            grid-row: 2;
+            display: flex;
+            flex-direction: column;
             padding: 20px;
+            gap: 20px;
+            overflow: hidden;
+        }
+
+        /* Game screen area */
+        .game-area {
+            flex: 1;
             display: flex;
             flex-direction: column;
             position: relative;
@@ -371,6 +478,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 8px;
             overflow: hidden;
             position: relative;
+            max-width: 800px;
+            margin: 0 auto;
+            width: 100%;
         }
 
         #gameScreen {
@@ -392,7 +502,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             position: absolute;
             top: 20px;
             right: 20px;
-            max-width: 650px;
+            max-width: 400px;
             z-index: 1000;
             pointer-events: none;
         }
@@ -407,7 +517,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transform: scale(0.8) translateY(-20px);
             transition: all 0.3s ease;
             position: relative;
-            max-width: 650px;
         }
 
         .speech-bubble.show {
@@ -444,12 +553,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: #006400;
         }
 
-        /* Enhanced Sidebar */
-        .sidebar-and-map {
-            grid-column: 2;
-            grid-row: 1 / span 2; /* Span both rows */
+        /* Right sidebar */
+        .right-sidebar {
+            grid-column: 3;
+            grid-row: 2;
             display: flex;
             flex-direction: column;
+            width: fit;
             gap: 1px;
             background: #1a1a1a;
             overflow: hidden;
@@ -461,12 +571,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow-y: auto;
             display: flex;
             flex-direction: column;
+            width: fit;
             gap: 20px;
             flex-grow: 1;
         }
 
         .section-title {
-            font-size: 31px;
+            font-size: 16px;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 1px;
@@ -474,17 +585,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             margin-bottom: 12px;
         }
 
-        /* Global Map Container for fixed viewport */
+        /* Global Map Container */
         .global-map-container {
-            height: 550px;
+            height: 300px;
             overflow: hidden;
-            position: relative; /* Needed for centering the player sprite */
+            position: relative;
             background: #0a0a0a;
             padding: 20px;
             border-top: 1px solid #1a1a1a;
         }
 
-        /* Global Map Section - Fixed to show world map */
         .global-map-section {
             background: #111;
             border: 2px solid #333;
@@ -495,19 +605,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         .map-canvas {
             width: 100%;
-            height: 90%;
+            height: 85%;
             background: #0a0a0a;
             border: 1px solid #222;
             border-radius: 4px;
             position: relative;
-            overflow: hidden; /* This crops the map */
+            overflow: hidden;
             margin-bottom: 10px;
         }
 
         #globalMapImage {
             position: absolute;
             image-rendering: pixelated;
-            display: none; /* Hide until positioned */
+            display: none;
             transition: transform 0.1s linear;
         }
 
@@ -519,7 +629,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border: 1px solid #fff;
             border-radius: 50%;
             z-index: 10;
-            /* Center the sprite in the container */
             left: 50%;
             top: 50%;
             transform: translate(-50%, -50%);
@@ -535,7 +644,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .map-info {
             display: flex;
             justify-content: space-between;
-            font-size: 12px;
+            font-size: 11px;
             color: #999;
         }
 
@@ -550,7 +659,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .quest-description {
             color: #ccc;
             margin-bottom: 15px;
-            font-size: 14px;
+            font-size: 13px;
             line-height: 1.5;
         }
 
@@ -561,29 +670,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .quest-item {
-            margin-bottom: 8px;
+            margin-bottom: 10px;
             color: #999;
-            font-size: 13px;
+            font-size: 12px;
             display: flex;
             align-items: flex-start;
             gap: 10px;
+            padding: 8px 12px;
+            background: #0a0a0a;
+            border-radius: 6px;
+            transition: all 0.3s ease;
         }
 
         .quest-item::before {
-            content: '□';
-            font-size: 16px;
+            content: '○';
+            font-size: 14px;
             color: #666;
             flex-shrink: 0;
+            margin-top: -2px;
         }
 
         .quest-item.completed {
             color: #10b981;
             text-decoration: line-through;
             text-decoration-color: #666;
+            background: rgba(16, 185, 129, 0.1);
         }
 
         .quest-item.completed::before {
-            content: '☑';
+            content: '●';
             color: #10b981;
         }
 
@@ -616,13 +731,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             padding: 8px 12px;
             background: #1a1a1a;
             border-radius: 4px;
-            font-size: 13px;
+            font-size: 12px;
             line-height: 1.4;
         }
 
         .grok-thinking {
+            background-color: rgba(100, 100, 100, 0.1);
             border-left: 3px solid #f59e0b;
-            height: 100%;
+            font-style: italic;
+            padding: 10px;
         }
 
         .grok-response {
@@ -631,28 +748,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         /* Team section styling */
-        # /*.team-display-area {
-        #     padding: 20px;
-        #     background: #0a0a0a;
-        #     border-top: 1px solid #1a1a1a;
-        # }*/
-        
         .team-display-area {
-            grid-column: 1;
-            grid-row: 3;
             padding: 20px;
-            border-top: 1px solid #1a1a1a;
             background: #0a0a0a;
-            /* ADDED: Prevent content from overflowing/pushing */
+            border-top: 1px solid #1a1a1a;
             overflow: hidden;
         }
 
         /* Team section */
-                /* Team section */
         .team-grid {
             display: grid;
             grid-template-columns: repeat(6, 1fr);
-            gap: 16px;
+            gap: 12px;
             width: 100%;
         }
 
@@ -660,20 +767,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: #111;
             border: 1px solid #2a2a2a;
             border-radius: 8px;
-            padding: 12px;
+            padding: 10px;
             transition: all 0.2s ease;
             cursor: pointer;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: space-between;
-            min-height: 320px;
+            min-height: 200px;
         }
 
         .pokemon-card:hover {
             background: #181818;
             border-color: #444;
-            transform: translateY(-4px);
+            transform: translateY(-2px);
         }
 
         .pokemon-sprite-container {
@@ -685,18 +792,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
 
         .pokemon-sprite {
             width: 100%;
             height: 100%;
-            max-width: 396px;
-            max-height: 396px;
+            max-width: 64px;
+            max-height: 64px;
             image-rendering: pixelated;
             filter: brightness(1.1) contrast(1.1);
             object-fit: contain;
-            animation: bounce 1ms ease-in-out infinite;
         }
 
         .pokemon-card-info-wrapper {
@@ -713,7 +819,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             justify-content: space-between;
             align-items: flex-start;
             width: 100%;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
 
         .pokemon-card-left {
@@ -731,7 +837,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .pokemon-name {
-            font-size: 32px;
+            font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
             color: #e0e0e0;
@@ -739,7 +845,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .pokemon-species-name {
-            font-size: 26px;
+            font-size: 10px;
             font-weight: 500;
             color: #bbb;
             text-transform: capitalize;
@@ -748,7 +854,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .pokemon-level {
-            font-size: 38px;
+            font-size: 11px;
             color: #e0e0e0;
             font-weight: 600;
             line-height: 1.1;
@@ -757,20 +863,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .pokemon-types-row {
             width: 100%;
             display: flex;
-            justify-content: flex-end;
-            margin-bottom: 8px;
-            min-height: 50px;
+            justify-content: center;
+            margin-bottom: 6px;
+            min-height: 20px;
         }
 
         .pokemon-types {
             display: flex;
-            flex-direction: column;
             gap: 4px;
-            align-items: flex-end;
+            align-items: center;
         }
 
         .type-badge {
-            font-size: 22px;
+            font-size: 9px;
             padding: 2px 6px;
             border-radius: 4px;
             text-transform: uppercase;
@@ -784,12 +889,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .hp-bar {
-            height: 22px;
+            height: 8px;
             background: #2a2a2a;
             border-radius: 3px;
             overflow: hidden;
             width: 100%;
-            margin-bottom: 6px;
+            margin-bottom: 4px;
         }
 
         .hp-fill {
@@ -811,113 +916,73 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             justify-content: space-between;
             align-items: center;
             width: 100%;
+            margin-bottom: 6px;
         }
 
         .hp-text {
-            font-size: 26px;
+            font-size: 10px;
             color: #aaa;
             font-variant-numeric: tabular-nums;
             line-height: 1.1;
         }
 
         .pokemon-status {
-            font-size: 26px;
+            font-size: 10px;
             font-weight: 600;
             color: #aaa;
             text-transform: uppercase;
             line-height: 1.1;
         }
 
+        /* Status colors */
+        .pokemon-status.PSN { color: #A040A0; }
+        .pokemon-status.BRN { color: #F08030; }
+        .pokemon-status.FRZ { color: #98D8D8; }
+        .pokemon-status.PAR { color: #F8D030; }
+        .pokemon-status.SLP { color: #9d9d9a; }
+
+        /* EXP Bar styling */
+        .exp-bar {
+            height: 4px;
+            background: #2a2a2a;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 4px;
+            width: 100%;
+        }
+
+        .exp-fill {
+            height: 100%;
+            background: #3b82f6;
+            transition: width 0.3s ease;
+        }
+
+        .exp-text {
+            font-size: 9px;
+            color: #999;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+
         /* Type colors */
-        .type-normal {
-            background: #9d9d9a;
-            color: #000;
-        }
-
-        .type-fire {
-            background: #F08030;
-            color: #000;
-        }
-
-        .type-water {
-            background: #6890F0;
-            color: #fff;
-        }
-
-        .type-electric {
-            background: #F8D030;
-            color: #000;
-        }
-
-        .type-grass {
-            background: #78C850;
-            color: #000;
-        }
-
-        .type-ice {
-            background: #98D8D8;
-            color: #000;
-        }
-
-        .type-fighting {
-            background: #C03028;
-            color: #fff;
-        }
-
-        .type-poison {
-            background: #A040A0;
-            color: #fff;
-        }
-
-        .type-ground {
-            background: #E0C068;
-            color: #000;
-        }
-
-        .type-flying {
-            background: #A890F0;
-            color: #000;
-        }
-
-        .type-psychic {
-            background: #F85888;
-            color: #fff;
-        }
-
-        .type-bug {
-            background: #A8B820;
-            color: #000;
-        }
-
-        .type-rock {
-            background: #B8A038;
-            color: #000;
-        }
-
-        .type-ghost {
-            background: #705898;
-            color: #fff;
-        }
-
-        .type-dragon {
-            background: #7038F8;
-            color: #fff;
-        }
-
-        .type-dark {
-            background: #705848;
-            color: #fff;
-        }
-
-        .type-steel {
-            background: #B8B8D0;
-            color: #000;
-        }
-
-        .type-fairy {
-            background: #EE99AC;
-            color: #000;
-        }
+        .type-normal { background: #9d9d9a; color: #000; }
+        .type-fire { background: #F08030; color: #000; }
+        .type-water { background: #6890F0; color: #fff; }
+        .type-electric { background: #F8D030; color: #000; }
+        .type-grass { background: #78C850; color: #000; }
+        .type-ice { background: #98D8D8; color: #000; }
+        .type-fighting { background: #C03028; color: #fff; }
+        .type-poison { background: #A040A0; color: #fff; }
+        .type-ground { background: #E0C068; color: #000; }
+        .type-flying { background: #A890F0; color: #000; }
+        .type-psychic { background: #F85888; color: #fff; }
+        .type-bug { background: #A8B820; color: #000; }
+        .type-rock { background: #B8A038; color: #000; }
+        .type-ghost { background: #705898; color: #fff; }
+        .type-dragon { background: #7038F8; color: #fff; }
+        .type-dark { background: #705848; color: #fff; }
+        .type-steel { background: #B8B8D0; color: #000; }
+        .type-fairy { background: #EE99AC; color: #000; }
 
         /* Empty slot */
         .empty-slot {
@@ -927,8 +992,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             justify-content: center;
             color: #333;
-            font-size: 24px;
-            min-height: 320px;
+            font-size: 18px;
+            min-height: 200px;
         }
 
         /* Bottom stats bar */
@@ -940,112 +1005,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: flex;
             justify-content: space-between;
             align-items: center;
-            grid-row: 4;
+            grid-row: 3;
             flex-wrap: wrap;
-            /* Allow wrapping if footer gets crowded */
         }
 
         .bottom-stats {
             display: flex;
-            gap: 25px;
-            /* MODIFIED: Slightly reduced gap */
-            flex-wrap: wrap;
-            /* Allow wrapping */
-            align-items: baseline;
-        }
-
-        .bottom-stat {
-            display: flex;
-            align-items: baseline;
-            gap: 12px;
-        }
-
-        .bottom-stat-label {
-            font-size: 22px;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .bottom-stat-value {
-            font-size: 26px;
-            font-weight: 500;
-            font-variant-numeric: tabular-nums;
-        }
-        
-        
-        
-        
-        /* OLD TEAM SECTION
-        .team-grid-container {
-            padding: 20px;
-            background: #0a0a0a;
-            border-top: 1px solid #1a1a1a;
-        }
-
-        .team-grid {
-            display: grid;
-            grid-template-columns: repeat(6, 1fr);
-            gap: 12px;
-        }
-
-        .pokemon-card {
-            background: #111;
-            border: 1px solid #2a2a2a;
-            border-radius: 6px;
-            padding: 10px;
-            text-align: center;
-        }
-
-        .pokemon-sprite {
-            width: 64px;
-            height: 64px;
-            image-rendering: pixelated;
-            margin: 0 auto 8px;
-        }
-
-        .pokemon-name {
-            font-size: 12px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-
-        .pokemon-level {
-            font-size: 11px;
-            color: #999;
-        }
-
-        .hp-bar {
-            height: 4px;
-            background: #2a2a2a;
-            border-radius: 2px;
-            margin-top: 6px;
-            overflow: hidden;
-        }
-
-        .hp-fill {
-            height: 100%;
-            background: #10b981;
-            transition: width 0.3s ease;
-        }
-
-        .hp-fill.medium { background: #f59e0b; }
-        .hp-fill.low { background: #ef4444; }
-
-        /* Bottom stats - Complete footer */
-        .bottom-bar {
-            grid-column: 1 / -1;
-            background: #0a0a0a;
-            border-top: 1px solid #1a1a1a;
-            padding: 16px 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .bottom-stats {
-            display: flex;
-            gap: 25px;
+            gap: 20px;
             flex-wrap: wrap;
             align-items: baseline;
             flex: 1;
@@ -1054,18 +1020,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .bottom-stat {
             display: flex;
             align-items: baseline;
-            gap: 8px;
+            gap: 6px;
         }
 
         .bottom-stat-label {
-            font-size: 12px;
+            font-size: 11px;
             color: #666;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
         .bottom-stat-value {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
             font-variant-numeric: tabular-nums;
         }
@@ -1073,7 +1039,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .bottom-stat-value.cost {
             color: #2ecc71;
             font-weight: 600;
-        } */
+        }
 
         /* Input visualization */
         .input-viz {
@@ -1157,12 +1123,51 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             0%, 100% { opacity: 1; }
             50% { opacity: 0.6; }
         }
+
+        .grok-cost {
+            background-color: rgba(100, 100, 100, 0.1);
+            border-left: 3px solid #3b82f6;
+            font-size: 0.8rem;
+            padding: 10px;
+            margin-top: 10px;
+        }
+
+        .grok-cost-header {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .grok-cost-info {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .grok-cost-metric {
+            display: flex;
+            flex-direction: column;
+            min-width: 80px;
+        }
+
+        .grok-cost-label {
+            font-size: 0.7rem;
+            color: #9ca3af;
+        }
+
+        .grok-cost-value {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .pricing-info {
+            margin-top: 8px;
+            font-size: 0.7rem;
+            color: #9ca3af;
+        }
     </style>
-    <!-- Inserted CONFIG for UI scripts -->
     <script>
         const CONFIG = {{ CONFIG | tojson }};
     </script>
-    <!-- End CONFIG injection -->
 </head>
 
 <body>
@@ -1194,8 +1199,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
         </header>
 
-        <div class="main-content">
-            <!-- Game Screen and Team Area -->
+        <!-- Left sidebar - Grok's Actions -->
+        <div class="left-sidebar">
+            <h2 class="actions-header">Grok's Actions</h2>
+            <div class="action-log" id="actionLog">
+                <!-- Actions will be populated here -->
+            </div>
+        </div>
+
+        <!-- Center content with game and team -->
+        <div class="center-content">
             <div class="game-area">
                 <div class="game-screen-container">
                     <img id="gameScreen" alt="Game Screen" style="display: none;">
@@ -1205,68 +1218,84 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <!-- Speech Bubble Overlay -->
                     <div class="speech-bubble-overlay" id="speechBubbleOverlay"></div>
                 </div>
-                
-                <!-- Pokemon Team -->                
-                <section class="panel team-display-area">
-                    <h2 class="section-title"
-                        style="text-align: center; margin-bottom: 20px; font-size: 36px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #bbb;">
-                        Active Team</h2>
-                    <div class="team-grid" id="pokemon-team" style="max-width: 100%; margin: 0 auto;">
-                        <div class="pokemon-card empty-slot">
-                            <div class="loading"></div>
-                        </div>
-                    </div>
-                </section>
-                
-                <!-- OLD TEAM SECTION
-                <div class="team-grid-container">
-                    <h2 class="section-title" style="text-align: center; margin-bottom: 16px;">Active Team</h2>
-                    <div class="team-grid" id="pokemonTeam"></div>
+            </div>
+            
+            <!-- Pokemon Team -->                
+            <section class="team-display-area">
+                <h2 class="section-title" style="text-align: center; margin-bottom: 16px;">Active Team</h2>
+                <div class="team-grid" id="pokemon-team">
+                    <div class="pokemon-card empty-slot">—</div>
+                    <div class="pokemon-card empty-slot">—</div>
+                    <div class="pokemon-card empty-slot">—</div>
+                    <div class="pokemon-card empty-slot">—</div>
+                    <div class="pokemon-card empty-slot">—</div>
+                    <div class="pokemon-card empty-slot">—</div>
                 </div>
-                -->
+            </section>
+        </div>
+
+        <!-- Right sidebar -->
+        <div class="right-sidebar">
+            <!-- Enhanced Sidebar with all sections -->
+            <div class="sidebar-section">
+                <!-- Quest Progress -->
+                <div class="quest-section" id="questSection" style="display: none;">
+                    <h2 class="section-title" id="questTitle">Current Quest</h2>
+                    <div class="quest-description" id="questDescription"></div>
+                    <ul class="quest-list" id="questTriggers"></ul>
+                    <div class="quest-progress-bar">
+                        <div class="quest-progress-fill" id="questProgress" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Grok Status -->
+                <div class="grok-status-section">
+                    <h2 class="section-title">Grok Status</h2>
+                    <div id="grokStatus">
+                        <div id="grokThinking" class="grok-message grok-thinking" style="display: none;"></div>
+                        <div id="grokResponse" class="grok-message grok-response" style="display: none;"></div>
+                        <div id="grokCost" class="grok-cost" style="display: none;">
+                            <div class="grok-cost-header">Token Usage</div>
+                            <div class="grok-cost-info">
+                                <div class="grok-cost-metric">
+                                    <span class="grok-cost-label">API Calls</span>
+                                    <span class="grok-cost-value" id="apiCallsCount">0</span>
+                                </div>
+                                <div class="grok-cost-metric">
+                                    <span class="grok-cost-label">Total Tokens</span>
+                                    <span class="grok-cost-value" id="totalTokens">0</span>
+                                </div>
+                                <div class="grok-cost-metric">
+                                    <span class="grok-cost-label">Last Cost</span>
+                                    <span class="grok-cost-value" id="callCost">$0.00</span>
+                                </div>
+                                <div class="grok-cost-metric">
+                                    <span class="grok-cost-label">Total Cost</span>
+                                    <span class="grok-cost-value" id="totalCost">$0.00</span>
+                                </div>
+                            </div>
+                            <div class="pricing-info">grok-3-mini pricing</div>
+                        </div>
+                        <div style="color: #666; font-size: 12px;" id="grokWaiting">Waiting for Grok to think...</div>
+                    </div>
+                </div>
             </div>
 
-            <!-- Sidebar and Map Column -->
-            <div class="sidebar-and-map">
-                <!-- Enhanced Sidebar with all sections -->
-                <div class="sidebar-section">
-                    <!-- Quest Progress -->
-                    <div class="quest-section" id="questSection" style="display: none;">
-                        <h2 class="section-title" id="questTitle">Current Quest</h2>
-                        <div class="quest-description" id="questDescription"></div>
-                        <ul class="quest-list" id="questTriggers"></ul>
-                        <div class="quest-progress-bar">
-                            <div class="quest-progress-fill" id="questProgress" style="width: 0%"></div>
+            <!-- Global Map -->
+            <div class="global-map-container">
+                <div class="global-map-section">
+                    <h2 class="section-title">Global Map</h2>
+                    <div class="map-canvas" id="globalMap">
+                        <div class="map-placeholder">
+                            <div>Kanto region map</div>
+                            <div style="font-size: 11px; margin-top: 8px;">Player position will be shown here</div>
                         </div>
+                        <img id="globalMapImage" src="/static/images/kanto_map.png" alt="Kanto Map">
+                        <div class="player-sprite" id="playerSprite" style="display: none;"></div>
                     </div>
-
-                    <!-- Grok Status -->
-                    <div class="grok-status-section">
-                        <h2 class="section-title">Grok Status</h2>
-                        <div id="grokStatus">
-                            <div id="grokThinking" class="grok-message grok-thinking" style="display: none;"></div>
-                            <div id="grokResponse" class="grok-message grok-response" style="display: none;"></div>
-                            <div style="color: #666; font-size: 13px;" id="grokWaiting">Waiting for Grok to think...</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Global Map inside its own container -->
-                <div class="global-map-container">
-                    <div class="global-map-section">
-                        <h2 class="section-title">Global Map</h2>
-                        <div class="map-canvas" id="globalMap">
-                            <div class="map-placeholder">
-                                <div>Kanto region map</div>
-                                <div style="font-size: 12px; margin-top: 8px;">Player position will be shown here</div>
-                            </div>
-                            <img id="globalMapImage" src="/static/images/kanto_map.png" alt="Kanto Map">
-                            <div class="player-sprite" id="playerSprite" style="display: none;"></div>
-                        </div>
-                        <div class="map-info">
-                            <span>Position: <span id="mapPosition">(0, 0)</span></span>
-                            <span>Map: <span id="currentMapName">Unknown</span></span>
-                        </div>
+                    <div class="map-info">
+                        <span>Position: <span id="mapPosition">(0, 0)</span></span>
+                        <span>Map: <span id="currentMapName">Unknown</span></span>
                     </div>
                 </div>
             </div>
@@ -1284,11 +1313,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <span class="bottom-stat-value mono" id="statMapId">0</span>
                 </div>
                 <div class="bottom-stat">
-                    <span class="bottom-stat-label">(Y,X) Local</span>
+                    <span class="bottom-stat-label">(Y,X)</span>
                     <span class="bottom-stat-value mono" id="statLocal">(0,0)</span>
                 </div>
                 <div class="bottom-stat">
-                    <span class="bottom-stat-label">(Y,X) Global</span>
+                    <span class="bottom-stat-label">Global</span>
                     <span class="bottom-stat-value mono" id="statGlobal">(0,0)</span>
                 </div>
                 <div class="bottom-stat">
@@ -1296,11 +1325,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <span class="bottom-stat-value mono" id="statMoney">₽0</span>
                 </div>
                 <div class="bottom-stat">
-                    <span class="bottom-stat-label">Seen</span>
+                    <span class="bottom-stat-label">Seen Pokemon</span>
                     <span class="bottom-stat-value" id="statSeen">0</span>
                 </div>
                 <div class="bottom-stat">
-                    <span class="bottom-stat-label">Caught</span>
+                    <span class="bottom-stat-label">Caught Pokemon</span>
                     <span class="bottom-stat-value" id="statCaught">0</span>
                 </div>
                 <div class="bottom-stat">
@@ -1312,23 +1341,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <span class="bottom-stat-value mono" id="statSteps">0</span>
                 </div>
                 <div class="bottom-stat">
-                    <span class="bottom-stat-label">Tokens</span>
-                    <span class="bottom-stat-value mono" id="statLifetimeTokens">0</span>
+                    <span class="bottom-stat-label">Call Cost</span>
+                    <span class="bottom-stat-value mono cost" id="statCallCost">$0.00</span>
                 </div>
                 <div class="bottom-stat">
-                    <span class="bottom-stat-label">Input</span>
-                    <span class="bottom-stat-value mono" id="statInputTokens">0</span>
-                </div>
-                <div class="bottom-stat">
-                    <span class="bottom-stat-label">Output</span>
-                    <span class="bottom-stat-value mono" id="statOutputTokens">0</span>
-                </div>
-                <div class="bottom-stat">
-                    <span class="bottom-stat-label">Step Cost</span>
-                    <span class="bottom-stat-value mono cost" id="statStepCost">$0.00</span>
-                </div>
-                <div class="bottom-stat">
-                    <span class="bottom-stat-label">Total Cost</span>
+                    <span class="bottom-stat-label">Lifetime Cost</span>
                     <span class="bottom-stat-value mono cost" id="statLifetimeCost">$0.00</span>
                 </div>
             </div>
@@ -1346,12 +1363,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             startTime: Date.now(),
             totalInputTokens: 0,
             totalOutputTokens: 0,
-            lifetimeCost: 0
+            lifetimeCost: 0,
+            actionHistory: []
         };
 
-        // World map coordinates mapping (adjust these based on your actual map)
-        const WORLD_MAP_SCALE = 1; // Scale factor for world map
-        const WORLD_MAP_OFFSET = { x: 0, y: 0 }; // Offset for positioning
+        // Action mappings
+        const ACTION_NAMES = ["down", "left", "right", "up", "a", "b", "path", "start"];
+        const ACTION_ICONS = {
+            "down": "↓",
+            "left": "←",
+            "right": "→",
+            "up": "↑",
+            "a": "A",
+            "b": "B",
+            "path": "◈",
+            "start": "▶"
+        };
 
         // Update uptime
         setInterval(() => {
@@ -1362,6 +1389,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             document.getElementById('uptime').textContent = 
                 `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }, 1000);
+
+        // Add action to log
+        function addActionToLog(action, reasoning) {
+            const actionLog = document.getElementById('actionLog');
+            const entry = document.createElement('div');
+            entry.className = 'action-entry';
+            
+            const time = new Date().toLocaleTimeString();
+            const actionName = ACTION_NAMES[action] || `action_${action}`;
+            const icon = ACTION_ICONS[actionName] || "?";
+            
+            entry.innerHTML = `
+                <div class="action-time">${time}</div>
+                <div class="action-button action-${actionName}">
+                    <span class="action-icon">${icon}</span>
+                    <span>${actionName.toUpperCase()}</span>
+                </div>
+                <div class="action-reason">${reasoning || 'No reasoning provided'}</div>
+            `;
+            
+            actionLog.insertBefore(entry, actionLog.firstChild);
+            
+            // Keep only last 10 actions
+            while (actionLog.children.length > 10) {
+                actionLog.removeChild(actionLog.lastChild);
+            }
+        }
 
         // Load quest definitions
         async function loadQuestDefinitions() {
@@ -1386,30 +1440,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const mapPlaceholder = document.querySelector('.map-placeholder');
 
             if (!mapImage.complete || mapImage.naturalWidth === 0) {
-                // If map image is not ready, try again shortly.
                 setTimeout(() => updatePlayerPosition(gx, gy), 100);
                 return;
             }
 
-            // Hide placeholder and show map/player
             if (mapPlaceholder) mapPlaceholder.style.display = 'none';
             mapImage.style.display = 'block';
             playerSprite.style.display = 'block';
             
-            // The environment sends coordinates based on a system that includes extra padding.
-            // The rendering logic from the original UI expects coordinates without this extra padding.
-            // We adjust for this difference here. The padding value (PAD) is 20, so the difference is 40.
             const render_gx = gx - 40;
             const render_gy = gy - 40;
 
-            // Pan the map so the player's adjusted render position is in the center
             const canvasWidth = mapCanvas.offsetWidth;
             const canvasHeight = mapCanvas.offsetHeight;
             const mapLeft = (canvasWidth / 2) - render_gx;
             const mapTop = (canvasHeight / 2) - render_gy;
             mapImage.style.transform = `translate(${mapLeft}px, ${mapTop}px)`;
 
-            // Update position display with original coordinates from the game environment
             document.getElementById('mapPosition').textContent = `(${gx}, ${gy})`;
         }
 
@@ -1417,11 +1464,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         function showSpeechBubble(text, type = 'quest_start', duration = 4000) {
             const overlay = document.getElementById('speechBubbleOverlay');
             
-            // Clear existing bubble
             clearTimeout(gameState.speechBubbleTimer);
             overlay.innerHTML = '';
             
-            // Create bubble
             const bubble = document.createElement('div');
             bubble.className = `speech-bubble ${type === 'quest_complete' ? 'quest-complete' : ''}`;
             
@@ -1432,10 +1477,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             bubble.appendChild(textEl);
             overlay.appendChild(bubble);
             
-            // Animate in
             setTimeout(() => bubble.classList.add('show'), 50);
             
-            // Auto-hide
             if (duration > 0) {
                 gameState.speechBubbleTimer = setTimeout(() => {
                     bubble.classList.remove('show');
@@ -1454,7 +1497,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return;
             }
             
-            // Find quest
             const quest = gameState.questDefinitions.find(q => 
                 parseInt(q.quest_id) === parseInt(questId)
             );
@@ -1468,40 +1510,41 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             console.log(`Displaying quest ${questId}:`, quest);
             section.style.display = 'block';
             
-            // Update title and description
             document.getElementById('questTitle').textContent = 
-                `Quest ${quest.quest_id}: ${quest.quest_name || ''}`;
+                `QUEST ${quest.quest_id}:`;
             document.getElementById('questDescription').textContent = 
                 quest.begin_quest_text || '';
             
-            // Update triggers/objectives
+            // Update triggers/objectives using subquest_list
             const triggersEl = document.getElementById('questTriggers');
             triggersEl.innerHTML = '';
             
+            const subquests = quest.subquest_list || [];
             const triggers = quest.event_triggers || [];
             let completedCount = 0;
             
-            triggers.forEach(trigger => {
+            // Use subquest_list for display, triggers for completion tracking
+            subquests.forEach((subquest, idx) => {
                 const li = document.createElement('li');
-                li.className = 'quest-item mono';
-                li.textContent = trigger.description || `Trigger ${trigger.id}`;
+                li.className = 'quest-item';
+                li.textContent = subquest;
                 
-                // Check completion status
-                if (gameState.questData.triggers && gameState.questData.triggers[trigger.id]) {
-                    li.classList.add('completed');
-                    completedCount++;
+                // Check if corresponding trigger is completed
+                if (idx < triggers.length) {
+                    const triggerId = `${questId}_${idx}`;
+                    if (gameState.questData.triggers && gameState.questData.triggers[triggerId]) {
+                        li.classList.add('completed');
+                        completedCount++;
+                    }
                 }
                 
                 triggersEl.appendChild(li);
             });
             
-            // Update progress bar
-            const progress = triggers.length > 0 ? (completedCount / triggers.length) * 100 : 0;
+            const progress = subquests.length > 0 ? (completedCount / subquests.length) * 100 : 0;
             document.getElementById('questProgress').style.width = `${progress}%`;
             
-            // Check for quest completion
             if (progress === 100 && gameState.questData.quests && !gameState.questData.quests[questId]) {
-                // Mark quest as complete and show completion message
                 if (!gameState.questData.quests) gameState.questData.quests = {};
                 gameState.questData.quests[questId] = true;
                 
@@ -1538,25 +1581,64 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }
         }
 
+        // Calculate experience for level
+        function calculateExpForLevel(level, growthRate = 'medium_slow') {
+            // Pokemon Red uses different growth rates, defaulting to Medium Slow
+            if (growthRate === 'medium_slow') {
+                return Math.floor((6/5) * Math.pow(level, 3) - 15 * Math.pow(level, 2) + 100 * level - 140);
+            }
+            return 0;
+        }
+
+        // Get Pokemon types from game data
+        function getPokemonTypes(speciesName) {
+            // Type mapping for common Pokemon
+            const typeMap = {
+                'charmander': ['fire'],
+                'charmeleon': ['fire'],
+                'charizard': ['fire', 'flying'],
+                'squirtle': ['water'],
+                'wartortle': ['water'],
+                'blastoise': ['water'],
+                'bulbasaur': ['grass', 'poison'],
+                'ivysaur': ['grass', 'poison'],
+                'venusaur': ['grass', 'poison'],
+                'pikachu': ['electric'],
+                'raichu': ['electric'],
+                'pidgey': ['normal', 'flying'],
+                'pidgeotto': ['normal', 'flying'],
+                'pidgeot': ['normal', 'flying'],
+                'rattata': ['normal'],
+                'raticate': ['normal'],
+                'spearow': ['normal', 'flying'],
+                'fearow': ['normal', 'flying'],
+                'caterpie': ['bug'],
+                'metapod': ['bug'],
+                'butterfree': ['bug', 'flying'],
+                'weedle': ['bug', 'poison'],
+                'kakuna': ['bug', 'poison'],
+                'beedrill': ['bug', 'poison']
+            };
+            
+            const lower = speciesName.toLowerCase();
+            return typeMap[lower] || ['normal'];
+        }
+
         // Update Pokemon team
         async function updatePokemonTeam(partyData) {
             const teamContainer = document.getElementById('pokemon-team');
-            teamContainer.innerHTML = ''; // Clear existing
+            teamContainer.innerHTML = '';
 
-            // Fetch sprites from PokeAPI and render each Pokemon
             for (const pokemon of partyData) {
                 try {
-                    // Cache check
-                    let spriteUrl = localStorage.getItem(`pokemon_sprite_${pokemon.id}`);
-
+                    const key = pokemon.speciesName.toLowerCase();
+                    let spriteUrl = localStorage.getItem(`pokemon_sprite_${key}`);
                     if (!spriteUrl) {
-                        // Fetch from PokeAPI
-                        const response = await fetch(`https://pokeapi.co/api/v2/pokemon/${pokemon.id}`);
+                        const response = await fetch(`https://pokeapi.co/api/v2/pokemon/${key}`);
                         if (response.ok) {
                             const data = await response.json();
                             spriteUrl = data.sprites.front_default;
-                            // Cache for future use
-                            localStorage.setItem(`pokemon_sprite_${pokemon.id}`, spriteUrl);
+                            localStorage.setItem(`pokemon_sprite_${key}`, spriteUrl);
                         }
                     }
 
@@ -1570,7 +1652,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }
             }
 
-            // Fill empty slots
             for (let i = partyData.length; i < 6; i++) {
                 teamContainer.appendChild(createEmptySlot());
             }
@@ -1585,28 +1666,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (hpPercent <= 20) hpClass = 'low';
             else if (hpPercent <= 50) hpClass = 'medium';
 
-            // Get species name from ID mapping (simplified)
-            const speciesNames = {
-                1: 'Bulbasaur', 4: 'Charmander', 7: 'Squirtle',
-                16: 'Pidgey', 19: 'Rattata', 25: 'Pikachu',
-                29: 'Nidoran♀', 32: 'Nidoran♂', 129: 'Magikarp'
-                // Add more as needed
-            };
+            // Experience percentage calculation
+            const curLevel = pokemon.level;
+            const curExp = pokemon.experience || 0;
+            const prevExp = calculateExpForLevel(curLevel);
+            const nextExp = calculateExpForLevel(curLevel + 1);
+            const expPercent = nextExp > prevExp ? Math.max(0, Math.min(100, ((curExp - prevExp) / (nextExp - prevExp)) * 100)) : 0;
+            const expToNext = Math.max(0, nextExp - curExp);
 
-            const speciesName = speciesNames[pokemon.id] || `Pokemon #${pokemon.id}`;
+            const speciesName = pokemon.speciesName || `Pokemon #${pokemon.id}`;
+            const nickname = pokemon.nickname || speciesName;
+
+            // Get types for this Pokemon
+            const types = pokemon.types || getPokemonTypes(speciesName);
+            const typesHtml = types.map(type =>
+                `<span class="type-badge type-${type.toLowerCase()}">${type.toUpperCase()}</span>`
+            ).join('');
+
+            // Get status
+            const status = pokemon.status || 'OK';
+            const statusClass = status !== 'OK' ? ` ${status}` : '';
 
             card.innerHTML = `
                 <div class="pokemon-sprite-container">
-                    <img src="${spriteUrl || 'https://placehold.co/96x96/333333/666666?text=No+Sprite'}" 
+                    <img src="${spriteUrl || 'https://placehold.co/64x64/333333/666666?text=No+Sprite'}" 
                         alt="${speciesName}" 
                         class="pokemon-sprite" 
-                        onerror="this.src='https://placehold.co/96x96/333333/666666?text=Error'; this.onerror=null;">
+                        onerror="this.src='https://placehold.co/64x64/333333/666666?text=Error'; this.onerror=null;">
                 </div>
                 
                 <div class="pokemon-card-info-wrapper">
                     <div class="pokemon-card-main-info">
                         <div class="pokemon-card-left">
-                            <div class="pokemon-name">${pokemon.nickname || speciesName}</div>
+                            <div class="pokemon-name">${nickname}</div>
                             <div class="pokemon-species-name">${speciesName}</div>
                         </div>
                         <div class="pokemon-card-right">
@@ -1616,9 +1708,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
                     <div class="pokemon-types-row">
                         <div class="pokemon-types">
-                            ${pokemon.types.map(type =>
-                `<span class="type-badge type-${type.toLowerCase()}">${type.toUpperCase()}</span>`
-            ).join('')}
+                            ${typesHtml}
                         </div>
                     </div>
                 </div>
@@ -1629,8 +1719,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </div>
                     <div class="pokemon-card-bottom-details">
                         <div class="hp-text">HP: ${pokemon.hp}/${pokemon.maxHp}</div>
-                        <div class="pokemon-status">${pokemon.status}</div>
+                        <div class="pokemon-status${statusClass}">${status}</div>
                     </div>
+                    <div class="exp-bar">
+                        <div class="exp-fill" style="width: ${expPercent}%"></div>
+                    </div>
+                    <div class="exp-text mono">EXP: ${curExp.toLocaleString()} / Next: ${expToNext.toLocaleString()}</div>
                 </div>
             `;
 
@@ -1644,21 +1738,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return slot;
         }
 
-        async function handleFullGameState(state) {
-            // Update all components with full state
-            if (state.location) updateLocation(state.location);
-            if (state.quest_id) updateQuest(`Quest ${String(state.quest_id).padStart(3, '0')}`);
-            if (state.party) await updatePokemonTeam(state.party);
-            if (state.money !== undefined) {
-                updateStats({
-                    money: state.money,
-                    badges: state.badges,
-                    pokedex: `${state.pokedex_caught}/${state.pokedex_seen}`,
-                    steps: state.steps
-                });
-            }
-        }
-
         // Initialize with placeholder while waiting for real data
         document.addEventListener('DOMContentLoaded', () => {
             const teamContainer = document.getElementById('pokemon-team');
@@ -1667,62 +1746,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 teamContainer.appendChild(createEmptySlot());
             }
         });
-        
-        
-        /* OLD TEAM UI JAVASCRIPT SECTION
-        async function updatePokemonTeam(teamData) {
-            const container = document.getElementById('pokemonTeam');
-            container.innerHTML = '';
-            
-            // Create cards for each Pokemon
-            for (let i = 0; i < 6; i++) {
-                const pokemon = teamData[i];
-                const card = document.createElement('div');
-                card.className = 'pokemon-card';
-                
-                if (pokemon) {
-                    const hpPercent = pokemon.maxHp > 0 ? (pokemon.hp / pokemon.maxHp) * 100 : 0;
-                    const hpClass = hpPercent <= 20 ? 'low' : (hpPercent <= 50 ? 'medium' : '');
-                    
-                    card.innerHTML = `
-                        <img class="pokemon-sprite" src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${pokemon.id}.png" 
-                             onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
-                        <div class="pokemon-name">${pokemon.nickname || 'Pokemon'}</div>
-                        <div class="pokemon-level">Lv. ${pokemon.level}</div>
-                        <div class="hp-bar">
-                            <div class="hp-fill ${hpClass}" style="width: ${hpPercent}%"></div>
-                        </div>
-                    `;
-                } else {
-                    card.innerHTML = '<div style="color: #333; font-size: 24px;">—</div>';
-                    card.style.opacity = '0.3';
-                }
-                
-                container.appendChild(card);
-            }
-        }
-        */
-
-        // Update LLM usage
-        function updateLLMUsage(data) {
-            if (data.input_tokens) {
-                gameState.totalInputTokens += data.input_tokens;
-                document.getElementById('statInputTokens').textContent = gameState.totalInputTokens;
-            }
-            if (data.output_tokens) {
-                gameState.totalOutputTokens += data.output_tokens;
-                document.getElementById('statOutputTokens').textContent = gameState.totalOutputTokens;
-            }
-            document.getElementById('statLifetimeTokens').textContent = 
-                gameState.totalInputTokens + gameState.totalOutputTokens;
-            
-            if (data.input_cost !== undefined && data.output_cost !== undefined) {
-                const stepCost = data.input_cost + data.output_cost;
-                gameState.lifetimeCost += stepCost;
-                document.getElementById('statStepCost').textContent = `$${stepCost.toFixed(2)}`;
-                document.getElementById('statLifetimeCost').textContent = `$${gameState.lifetimeCost.toFixed(2)}`;
-            }
-        }
 
         // Render action
         function renderAction(action) {
@@ -1747,14 +1770,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 
                 switch(msg.type) {
                     case 'location':
-                        // Update all location displays
                         document.getElementById('statLocation').textContent = msg.data.map_name || 'Unknown';
                         document.getElementById('currentMapName').textContent = msg.data.map_name || 'Unknown';
                         document.getElementById('statMapId').textContent = msg.data.map_id || '0';
                         document.getElementById('statLocal').textContent = `(${msg.data.y || 0},${msg.data.x || 0})`;
                         document.getElementById('statGlobal').textContent = `(${msg.data.gy || 0},${msg.data.gx || 0})`;
                         
-                        // Update player position on world map
                         if (msg.data.gx !== undefined && msg.data.gy !== undefined) {
                             updatePlayerPosition(msg.data.gx, msg.data.gy);
                         }
@@ -1765,7 +1786,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         gameState.currentQuest = msg.data;
                         await updateQuestDisplay(msg.data);
                         
-                        // Show quest start bubble if quest changed
                         if (msg.data && msg.data !== oldQuest && gameState.questDefinitions) {
                             const quest = gameState.questDefinitions.find(q => 
                                 parseInt(q.quest_id) === parseInt(msg.data)
@@ -1829,14 +1849,36 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         
                     case 'grok_response':
                         updateGrokStatus(null, msg.data);
+                        // Parse action from response
+                        const match = msg.data.match(/Action (\d+): (.+)/);
+                        if (match) {
+                            const actionNum = parseInt(match[1]);
+                            const reasoning = match[2];
+                            addActionToLog(actionNum, reasoning);
+                        }
+                        break;
+                        
+                    case 'grok_cost':
+                        const costEl = document.getElementById('grokCost');
+                        if (msg.data) {
+                            document.getElementById('apiCallsCount').textContent = msg.data.api_calls_count || 0;
+                            document.getElementById('totalTokens').textContent = msg.data.total_tokens ? 
+                                msg.data.total_tokens.toLocaleString() : 0;
+                            document.getElementById('callCost').textContent = msg.data.call_cost ? 
+                                `$${msg.data.call_cost.toFixed(4)}` : '$0.00';
+                            document.getElementById('totalCost').textContent = msg.data.total_cost ? 
+                                `$${msg.data.total_cost.toFixed(4)}` : '$0.00';
+                            costEl.style.display = 'block';
+                            document.getElementById('statCallCost').textContent = msg.data.call_cost ? `$${msg.data.call_cost.toFixed(4)}` : '$0.00';
+                            document.getElementById('statLifetimeCost').textContent = msg.data.total_cost ? 
+                                `$${msg.data.total_cost.toFixed(2)}` : '$0.00';
+                        } else {
+                            costEl.style.display = 'none';
+                        }
                         break;
                         
                     case 'action':
                         renderAction(msg.data);
-                        break;
-                        
-                    case 'llm_usage':
-                        updateLLMUsage(msg.data);
                         break;
                         
                     case 'grok_enabled':
@@ -1869,12 +1911,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 
                 const response = await fetch('/start', { method: 'POST' });
                 
-                // Check if response is ok before trying to parse JSON
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
-                // Check content type
                 const contentType = response.headers.get("content-type");
                 if (!contentType || !contentType.includes("application/json")) {
                     throw new TypeError("Response was not JSON");
@@ -1955,7 +1995,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         });
     </script>
 </body>
-</html>'''
+</html>
+'''
 
 @app.route('/grok_test', methods=['GET'])
 def test_grok():
@@ -2143,6 +2184,34 @@ def get_grok_status():
         return jsonify({'enabled': grok_enabled.is_set()})
     except Exception as e:
         return jsonify({'enabled': False, 'error': str(e)}), 500
+
+@app.route('/grok_usage', methods=['GET'])
+def get_grok_usage():
+    """Get Grok token usage and cost statistics"""
+    try:
+        # Get stats from game_state if available
+        cost_stats = game_state.get('grok_cost', {})
+        
+        # If not in game_state, try to get directly from the agent
+        import sys
+        play_module = sys.modules.get('__main__')
+        if not cost_stats and play_module and hasattr(play_module, 'grok_agent'):
+            grok_agent = play_module.grok_agent
+            if grok_agent and hasattr(grok_agent, 'get_token_usage_stats'):
+                cost_stats = grok_agent.get_token_usage_stats()
+        
+        # Add pricing information
+        cost_stats['pricing'] = {
+            'input_rate': '0.30 per 131,072 tokens',
+            'cached_input_rate': '0.075 per 131,072 tokens',
+            'completion_rate': '0.50 per 131,072 tokens',
+            'model': 'grok-3-mini'
+        }
+        
+        return jsonify(cost_stats)
+    except Exception as e:
+        logger.error(f"Error retrieving Grok usage stats: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/is_started', methods=['GET'])
 def is_started():

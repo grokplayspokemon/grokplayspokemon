@@ -1,6 +1,7 @@
 # environment.py
 import io
 import os
+import time
 import uuid
 import json # Added for saving path trace data
 from abc import abstractmethod
@@ -98,6 +99,22 @@ VALID_RELEASE_ACTIONS = [
 from environment.data.environment_data.item_handler import ItemHandler
 from environment.environment_helpers.tile_visualizer import overlay_on_screenshot
 from environment.data.environment_data.ram_addresses import RamAddress as RAM
+from environment.data.environment_data.battle import (
+    PokemonData,
+    StatusCondition,
+    ENEMY_PARTY_COUNT, 
+    ENEMY_PARTY_SPECIES, 
+    ENEMYS_POKEMON_TYPES, 
+    POKEMON_MATCH_TYPES,
+    PLAYERS_MOVE_POWER,
+    PLAYERS_MOVE_TYPE,
+    PLAYERS_MOVE_PP,
+    PLAYERS_MOVE_NUM,
+)
+
+from environment.data.environment_data.species import Species
+from environment.data.environment_data.constants import MOVES_INFO_DICT, ID_TO_SPECIES
+
 
 VALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start"]
 
@@ -1368,7 +1385,10 @@ class RedGymEnv(Env):
                         'step_count': self.step_count
                     })
                     self.prev_logged_battle_state = current_battle_state
-                
+                    if current_battle_state:
+                        # Automatically generate a battle prompt for Grok when battle starts
+                        info["battle_prompt"] = self.format_battle_state()
+        
                 # Log dialog events only when dialog changes
                 dialog = self.read_dialog() or ''
                 if dialog.strip():
@@ -1378,8 +1398,8 @@ class RedGymEnv(Env):
                         'step_count': self.step_count
                     })
                     
-            except Exception:
-                pass  # Don't let logging errors break the game
+            except Exception as e:
+                import traceback; traceback.print_exc()
 
         # Note: step_count was already incremented at the beginning of step method
         # print(f"environment.py: step(): self.step_count=={self.step_count}\n")
@@ -1447,6 +1467,9 @@ class RedGymEnv(Env):
         self.update_map_history()
         print(f"environment.py: step(): END OF STEP {self.step_count}; location: {self.get_game_coords()}\n\n\n\n")
 
+        # Print collision map to terminal for debugging formatting
+        collision_map_str = self.get_collision_map()
+        print(f"Collision Map:\n{collision_map_str}")
         return obs, reward, done, truncated, info
 
 
@@ -3872,7 +3895,6 @@ class RedGymEnv(Env):
         """
         Reads the game state from memory and returns a string representation of it.
         """
-        reader = self.memory
         memory_str = "# Current Game State\n\nThis information is direct from the emulator at the present moment along with your screenshot. Use the information below to make decisions about what to do and where to go next.\n\n"
 
         name = self.read_player_name()
@@ -3925,15 +3947,15 @@ class RedGymEnv(Env):
                     memory_str += f"- Door / warp at ({x}, {y})\n"
 
         # Party Pokemon
-        # memory_str += "\nPokemon Party:\n"
-        # for pokemon in reader.read_party_pokemon():
-        #     memory_str += f"\n{pokemon.nickname} ({pokemon.species_name}):\n"
-        #     memory_str += f"Level {pokemon.level} - HP: {pokemon.current_hp}/{pokemon.max_hp}\n"
-        #     memory_str += f"Types: {pokemon.type1.name}{', ' + pokemon.type2.name if pokemon.type2 else ''}\n"
-        #     for move, pp in zip(pokemon.moves, pokemon.move_pp, strict=True):
-        #         memory_str += f"- {move} (PP: {pp})\n"
-        #     if pokemon.status != StatusCondition.NONE:
-        #         memory_str += f"Status: {pokemon.status.get_status_name()}\n"
+        memory_str += "\nPokemon Party:\n"
+        for pokemon in self.read_party_pokemon():
+            memory_str += f"\n{pokemon.nickname} ({pokemon.species_name}):\n"
+            memory_str += f"Level {pokemon.level} - HP: {pokemon.current_hp}/{pokemon.max_hp}\n"
+            memory_str += f"Types: {pokemon.type1.name}{', ' + pokemon.type2.name if pokemon.type2 else ''}\n"
+            for move, pp in zip(pokemon.moves, pokemon.move_pp, strict=True):
+                memory_str += f"- {move} (PP: {pp})\n"
+            if pokemon.status != StatusCondition.NONE:
+                memory_str += f"Status: {pokemon.status.get_status_name()}\n"
 
         return memory_str
 
@@ -4034,3 +4056,492 @@ class RedGymEnv(Env):
             print(f"Environment: Error creating collision overlay: {e}")
             # Return regular screenshot if overlay fails
             return self.get_screenshot()
+        
+    # def format_battle_state(self) -> str:
+    #     """
+    #     Format battle-specific state with comprehensive metrics for LLM processing.
+    #     Ensures all battle actions and inventory information is properly communicated.
+    #     """
+    #     # Wild battle 1, trainer battle 2, -1 lost a battle, 0 not in battle
+    #     is_wild = self.read_m(0xD057) == 1
+    #     is_trainer = self.read_m(0xD057) == 2
+    #     is_lost = self.read_m(0xD057) == -1
+    #     is_not_in_battle = self.read_m(0xD057) == 0
+        
+    #     print(f"is_wild={is_wild}, is_trainer={is_trainer}, is_lost={is_lost}, is_not_in_battle={is_not_in_battle}")
+        
+    #     state_parts = ["## CURRENT BATTLE STATE ##"]
+        
+    #     # CRITICAL: Capture and prominently display the current dialog text
+    #     if getattr(self, 'battle_just_finished', False):
+    #         state_parts.append("BATTLE JUST FINISHED. YOU ARE NOW IN THE OVERWORLD.")
+    #         return "\n".join(state_parts)
+        
+    #     # Include active dialog with high visibility
+    #     dialog = self.read_dialog()
+    #     if dialog:
+    #         dialog_text = dialog.replace('\n', ' ')[:500] if dialog else ""
+    #         state_parts.append(f"BATTLE DIALOG: {dialog_text}")
+    #     else:
+    #         state_parts.append("BATTLE DIALOG: None visible")
+        
+    #     # Add standard game state information
+    #     state_parts.append("\nBATTLE STATUS:")
+    #     state_parts.append(f"- Current Location: {self.get_game_coords()}")
+        
+    #     # Add party information with comprehensive move PP status
+    #     try:
+    #         party_data = self.read_party_pokemon()
+    #         if party_data and len(party_data) > 0:
+    #             active_pokemon = party_data[0]  # First Pokemon is active
+    #             # Use ID_TO_SPECIES mapping for species name
+    #             species_name = ID_TO_SPECIES.get(active_pokemon.species_id, active_pokemon.species_name)
+    #             state_parts.append(f"- Active Pokémon: {species_name}, Level {active_pokemon.level}")
+    #             state_parts.append(f"- HP: {active_pokemon.current_hp}/{active_pokemon.max_hp}")
+                
+    #             print(f"active_pokemon: {active_pokemon}")
+                
+    #             # Display available moves with PP
+    #             state_parts.append("\nAVAILABLE MOVES:")
+    #             for i, move_name in enumerate(active_pokemon.moves):
+    #                 if i < len(active_pokemon.move_pp):
+    #                     pp = active_pokemon.move_pp[i]
+    #                     max_pp = getattr(active_pokemon, 'move_max_pp', [25, 25, 25, 25])[i] if hasattr(active_pokemon, 'move_max_pp') else 25
+    #                     state_parts.append(f"- {move_name}: {pp}/{max_pp} PP")
+    #                     print(f"move_name, pp, max_pp, pp/max_pp: {move_name, pp, max_pp, pp/max_pp}")
+    #                 else:
+    #                     raise
+    #                     state_parts.append(f"- {move_name}: PP unknown")
+                
+    #             # Identify and list damaging moves with their PP
+    #             state_parts.append("\nDAMAGING MOVES:")
+    #             # Dynamically build move power map from constants
+    #             move_power_map = {}
+    #             for mi in MOVES_INFO_DICT.values():
+    #                 name = mi.get("name", "")
+    #                 power = mi.get("power", 0)
+    #                 # Map both underscore and space variants
+    #                 readable_name = name.replace("_", " ")
+    #                 move_power_map[readable_name] = power
+    #                 move_power_map[name] = power
+                
+    #             # Track if any damaging moves were found and their PP
+    #             found_damaging_moves = False
+    #             damaging_moves_with_pp = []
+                
+    #             for mv, bp in move_power_map.items():
+    #                 if bp > 0:
+    #                     try:
+    #                         idx = active_pokemon.moves.index(mv)
+    #                         pp_left = active_pokemon.move_pp[idx]
+    #                         max_pp = getattr(active_pokemon, 'move_max_pp', [25, 25, 25, 25])[idx] if hasattr(active_pokemon, 'move_max_pp') else 25
+    #                         state_parts.append(f"- {mv}: {pp_left}/{max_pp} PP")
+    #                         found_damaging_moves = True
+    #                         if pp_left > 0:
+    #                             damaging_moves_with_pp.append(mv)
+    #                         print(f"damaging moves: move_power_map.items(): {move_power_map.items()}, found_damaging_moves: {found_damaging_moves}, damaging_moves_with_pp: {damaging_moves_with_pp}")
+    #                     except ValueError:
+    #                         continue
+                
+    #             if not found_damaging_moves:
+    #                 state_parts.append("- No recognized damaging moves available")
+    #                 # Use BattleAI to recommend best move
+    #                 try:
+    #                     best_idx = self.choose_best_battle_move()
+    #                     if best_idx < len(active_pokemon.moves):
+    #                         best_move = active_pokemon.moves[best_idx]
+    #                         state_parts.append(f"\n[BattleAI] Recommended move: {best_move} (index {best_idx})")
+    #                 except Exception:
+    #                     pass
+
+    #             # Check if any moves have PP remaining
+    #             has_any_pp = False
+    #             has_damaging_pp = False
+                
+    #             for i, move_name in enumerate(active_pokemon.moves):
+    #                 if i < len(active_pokemon.move_pp):
+    #                     pp = active_pokemon.move_pp[i]
+    #                     if pp > 0:
+    #                         has_any_pp = True
+    #                         if move_name in [key for key in move_power_map]:
+    #                             has_damaging_pp = True                
+                
+    #             # Add critical alerts for no PP scenarios
+    #             if not has_any_pp or not has_damaging_pp:
+                                        
+    #                 # Check for other Pokémon with PP
+    #                 other_pokemon_with_pp = False
+    #                 for i in range(1, len(party_data)):
+    #                     if any(pp > 0 for pp in party_data[i].move_pp):
+    #                         other_pokemon_with_pp = True
+    #                         break
+                    
+    #                 if other_pokemon_with_pp:
+    #                     state_parts.append("- Switch to another Pokémon with PP remaining")
+    #                 else:
+    #                     state_parts.append("- No other Pokémon have PP for damaging moves")
+    #                     state_parts.append("\nCRITICAL: NO PP REMAINING FOR ANY MOVES FOR ANY POKEMON!!")
+                    
+    #                     # If wild battle, choose RUN action for grok
+    #                     if is_wild:
+    #                         state_parts.append("\nNo PP on any damage moves. Cheese it!\n")
+    #                         self.run_action_on_emulator(VALID_ACTIONS[5])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[5])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[5])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[5]) # xtra just in case
+    #                         self.run_action_on_emulator(VALID_ACTIONS[2])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[0])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[4])
+    #                         state_parts.append("\nSuccessfully escaped from the wild battle.\n")
+    #                         for i in range(3):
+    #                             self.run_action_on_emulator(VALID_ACTIONS[5])
+    #                         return "\n".join(state_parts)
+    #                     else:
+    #                         # Help grok use struggle, cuz can't flee from a trainer battle
+    #                         state_parts.append("\nGrok casts Struggle Bug! It's super cringe!\n")
+    #                         self.run_action_on_emulator(VALID_ACTIONS[5])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[5])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[5])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[5]) # xtra just in case
+    #                         self.run_action_on_emulator(VALID_ACTIONS[1])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[3])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[4])
+    #                         self.run_action_on_emulator(VALID_ACTIONS[4])
+    #                         state_parts.append("\nSuccessfully escaped from the wild battle.\n")
+    #                         for i in range(3):
+    #                             self.run_action_on_emulator(VALID_ACTIONS[5])
+    #                         return "\n".join(state_parts)
+            
+    #     except Exception as e:
+    #         import traceback
+    #         state_parts.append(f"- Error reading party data: {e}")
+    #         traceback.print_exc()
+        
+    #     # Include cursor position information
+    #     try:
+    #         if dialog and "►" in dialog:
+    #             cursor_line = next((line for line in dialog.split('\n') if "►" in line), "")
+    #             state_parts.append(f"\nCURSOR POSITION: \n{cursor_line}")
+    #     except Exception:
+    #         pass
+        
+    #     # INVENTORY SUMMARY - Comprehensive details
+    #     state_parts.append("\nINVENTORY SUMMARY:\n")
+        
+    #     # Get healing items with detailed listing
+    #     healing_items = getattr(self, 'battle_bag_healing_items', [])
+    #     if healing_items:
+    #         healing_list = ", ".join(f"{name} ×{qty}" for name, qty in healing_items)
+    #         state_parts.append(f"- Healing Items: \n{healing_list}")
+    #     else:
+    #         state_parts.append("- Healing Items: \nNone available")
+        
+    #     # Get Poké Balls with detailed listing
+    #     ball_items = getattr(self, 'battle_bag_balls', [])
+    #     if ball_items:
+    #         ball_list = ", ".join(f"{name} ×{qty}" for name, qty in ball_items)
+    #         state_parts.append(f"- Poké Balls: {ball_list}")
+    #     else:
+    #         state_parts.append("- Poké Balls: None available")
+        
+    #     # EXPLICIT TOTAL COUNTS
+    #     healing_total = getattr(self, 'battle_bag_healing_items_total', 0)
+    #     balls_total = getattr(self, 'battle_bag_balls_total', 0)
+    #     state_parts.append(f"- TOTAL HEALING ITEMS: \n{healing_total}")
+    #     state_parts.append(f"- TOTAL POKÉ BALLS: \n{balls_total}")
+        
+    #     # COMPREHENSIVE BATTLE METRICS
+    #     state_parts.append("\nBATTLE ACTION METRICS:\n")
+    #     state_parts.append(f"- Moves Used in Battle: {getattr(self, 'battle_turn_count', 0)}")
+        
+    #     # Menu operations - comprehensive counts (default to 0 if attributes missing)
+    #     state_parts.append("\nMENU OPERATIONS:\n")
+    #     state_parts.append(f"- Menu Opens: FIGHT={getattr(self, 'battle_fight_menu_opens', 0)}, PKMN={getattr(self, 'battle_poke_menu_opens', 0)}, ITEM={getattr(self, 'battle_item_menu_opens', 0)}, RUN={getattr(self, 'battle_run_menu_opens', 0)}")
+    #     state_parts.append(f"- Menu Closes: FIGHT={getattr(self, 'battle_fight_menu_closes', 0)}, PKMN={getattr(self, 'battle_poke_menu_closes', 0)}, ITEM={getattr(self, 'battle_item_menu_closes', 0)}, RUN={getattr(self, 'battle_run_menu_closes', 0)}")
+    #     state_parts.append(f"- Menu Accesses: FIGHT={getattr(self, 'battle_fight_accesses', 0)}, PKMN={getattr(self, 'battle_pokemon_accesses', 0)}, ITEM={getattr(self, 'battle_items_accesses', 0)}, RUN={getattr(self, 'battle_run_accesses', 0)}")
+    #     state_parts.append(f"- Menu Selections: MOVES={getattr(self, 'battle_move_selection_count', 0)}, ITEMS={getattr(self, 'battle_item_selection_count', 0)}")
+        
+    #     # Additional metrics with default fallbacks
+    #     state_parts.append(f"- Run Attempts: {getattr(self, 'battle_run_attempts', 0)}")
+    #     state_parts.append(f"- Zero PP Failures: {getattr(self, 'battle_pp_failures', 0)}")
+    #     state_parts.append(f"- Non-Damaging Move Uses: {getattr(self, 'battle_non_damage_uses', 0)}")
+        
+    #     return "\n".join(state_parts)
+    
+
+    def format_battle_state(self) -> str:
+        """
+        Format battle-specific state with comprehensive metrics for LLM processing.
+        Only observes and reports state - does NOT execute any actions.
+        """
+        state_parts = ["## CURRENT BATTLE STATE ##"]
+        
+        # Check if battle just finished
+        if getattr(self, 'battle_just_finished', False):
+            state_parts.append("BATTLE JUST FINISHED. YOU ARE NOW IN THE OVERWORLD.")
+            return "\n".join(state_parts)
+        
+        # Battle type detection
+        battle_status = self.read_m(0xD057)
+        is_wild = battle_status == 1
+        is_trainer = battle_status == 2
+        
+        # Include active dialog
+        dialog = self.read_dialog()
+        if dialog:
+            dialog_text = dialog.replace('\n', ' ')[:500]
+            state_parts.append(f"BATTLE DIALOG: {dialog_text}")
+        else:
+            state_parts.append("BATTLE DIALOG: None visible")
+        
+        # Battle type
+        if is_wild:
+            state_parts.append("BATTLE TYPE: Wild Pokémon")
+        elif is_trainer:
+            state_parts.append("BATTLE TYPE: Trainer Battle")
+        
+        # Location and basic status
+        state_parts.append(f"\nCurrent Location: {self.get_game_coords()}")
+        
+        # Party information
+        try:
+            party_data = self.read_party_pokemon()
+            if party_data and len(party_data) > 0:
+                active_pokemon = party_data[0]
+                species_name = ID_TO_SPECIES.get(active_pokemon.species_id, f"Species_{active_pokemon.species_id}")
+                
+                state_parts.append(f"\nACTIVE POKÉMON:")
+                state_parts.append(f"- {species_name}, Level {active_pokemon.level}")
+                state_parts.append(f"- HP: {active_pokemon.current_hp}/{active_pokemon.max_hp}")
+                state_parts.append(f"- Status: {active_pokemon.status.name if hasattr(active_pokemon.status, 'name') else 'OK'}")
+                
+                # Moves with PP
+                state_parts.append("\nMOVES:")
+                has_any_pp = False
+                has_damaging_pp = False
+                
+                for i, move_name in enumerate(active_pokemon.moves):
+                    if i < len(active_pokemon.move_pp):
+                        pp = active_pokemon.move_pp[i]
+                        max_pp = 25  # Default max PP
+                        state_parts.append(f"- Move {i+1}: {move_name} ({pp}/{max_pp} PP)")
+                        
+                        if pp > 0:
+                            has_any_pp = True
+                            # Check if it's a damaging move
+                            move_info = MOVES_INFO_DICT.get(move_name.replace(" ", "_").upper(), {})
+                            if move_info.get("power", 0) > 0:
+                                has_damaging_pp = True
+                
+                # PP warnings
+                if not has_any_pp:
+                    state_parts.append("\n⚠️ WARNING: No PP remaining on any moves!")
+                    if is_wild:
+                        state_parts.append("Recommendation: Run from battle")
+                    else:
+                        state_parts.append("Recommendation: Use Struggle (will damage self)")
+                elif not has_damaging_pp:
+                    state_parts.append("\n⚠️ WARNING: No PP on damaging moves!")
+                
+                # Check other party members
+                if len(party_data) > 1:
+                    healthy_pokemon = sum(1 for p in party_data[1:] if p.current_hp > 0)
+                    if healthy_pokemon > 0:
+                        state_parts.append(f"\nOther Pokémon available: {healthy_pokemon}")
+                
+        except Exception as e:
+            state_parts.append(f"\nError reading party data: {e}")
+        
+        # Enemy Pokémon info (if available)
+        try:
+            enemy_types = self.read_enemy_current_pokemon_types()
+            if enemy_types[0]:
+                state_parts.append(f"\nENEMY POKÉMON:")
+                state_parts.append(f"- Type: {enemy_types[0].name}{f'/{enemy_types[1].name}' if enemy_types[1] else ''}")
+        except:
+            pass
+        
+        # Inventory summary
+        state_parts.append("\nINVENTORY:")
+        healing_items = getattr(self, 'battle_bag_healing_items', [])
+        ball_items = getattr(self, 'battle_bag_balls', [])
+        
+        if healing_items:
+            state_parts.append(f"- Healing: {', '.join(f'{name} x{qty}' for name, qty in healing_items[:3])}")
+        if ball_items and is_wild:
+            state_parts.append(f"- Poké Balls: {', '.join(f'{name} x{qty}' for name, qty in ball_items[:3])}")
+        
+        # Battle statistics
+        state_parts.append(f"\nBattle Turn Count: {getattr(self, 'battle_turn_count', 0)}")
+        
+        # Menu position hint
+        if dialog and "►" in dialog:
+            if "►FIGHT" in dialog:
+                state_parts.append("\nMENU: Main battle menu (FIGHT selected)")
+            elif any(marker in dialog for marker in ["►POTION", "►POKÉBALL", "►ITEM"]):
+                state_parts.append("\nMENU: Item selection menu")
+            elif "PP" in dialog and "/" in dialog:
+                state_parts.append("\nMENU: Move selection menu")
+        
+        return "\n".join(state_parts)
+
+
+
+    def read_enemy_current_pokemon_types(self) -> tuple[PokemonType, PokemonType | None]:
+        """Read primary and secondary types of the current battling enemy Pokemon"""
+        type1_val = self.memory[ENEMYS_POKEMON_TYPES[0]]
+        type2_val = self.memory[ENEMYS_POKEMON_TYPES[1]]
+        type1 = PokemonType(type1_val)
+        type2 = PokemonType(type2_val)
+        if type1 == type2:
+            type2 = None
+        return type1, type2
+    
+    def read_enemy_current_pokemon_types(self) -> tuple[PokemonType, PokemonType | None]:
+        """Read primary and secondary types of the current battling enemy Pokemon"""
+        type1_val = self.memory[ENEMYS_POKEMON_TYPES[0]]
+        type2_val = self.memory[ENEMYS_POKEMON_TYPES[1]]
+        type1 = PokemonType(type1_val)
+        type2 = PokemonType(type2_val)
+        if type1 == type2:
+            type2 = None
+        return type1, type2
+    
+    def choose_best_battle_move(self):
+        """Determine the best move using actual move data from memory for any Pokémon.
+        IMPORTANT: THE FIGHT BATTLE MENU MUST HAVE ALREADY BEEN SELECTED BEFORE CALLING THIS FUNCTION"""
+        logger.info("choose_best_battle_move: calculating move effectiveness generically")
+        if "TYPE/" not in self.get_active_dialog():
+            logger.info("environment.py: choose_best_battle_move: no TYPE/ in dialog; not in FIGHT menu!")
+            attempts = 0
+            dialog = self.get_active_dialog()
+            while "FIGHT" not in dialog and attempts < 10:
+                print("pressing B to advance dialog...dialog=", dialog)
+                # Press B to advance dialog
+                self.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)
+                self.pyboy.tick(9)
+                self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
+                self.pyboy.tick(15)
+                
+                dialog = self.get_active_dialog() or ""
+                attempts += 1
+
+            # Move cursor to FIGHT option
+            print("moving cursor to FIGHT option...dialog=", dialog)
+            for _ in range(4):
+                self.pyboy.send_input(WindowEvent.PRESS_ARROW_UP)
+                self.pyboy.tick(9)
+                self.pyboy.send_input(WindowEvent.RELEASE_ARROW_UP)
+                self.pyboy.tick(15)
+                time.sleep(0.5)
+                self.pyboy.send_input(WindowEvent.PRESS_ARROW_LEFT)
+                self.pyboy.tick(9)
+                self.pyboy.send_input(WindowEvent.RELEASE_ARROW_LEFT)
+                self.pyboy.tick(15)
+                time.sleep(0.5)
+            
+            
+            # Select FIGHT option
+            # print("selecting FIGHT option...dialog=", dialog)
+            self.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+            self.pyboy.tick(9)
+            self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+            self.pyboy.tick(15)
+            time.sleep(0.5)            
+        
+        # Read enemy types
+        try:
+            primary_type, secondary_type = self.read_enemy_current_pokemon_types()
+            primary_val = primary_type.value if isinstance(primary_type, PokemonType) else primary_type
+            secondary_val = secondary_type.value if secondary_type else None
+            logger.info(f"[BattleAI] Enemy types: primary={primary_val}, secondary={secondary_val}")
+        except Exception as e:
+            logger.error(f"[BattleAI] Failed to read enemy types: {e}")
+            return 0
+        # Get active Pokémon data
+        party = self.read_party_pokemon()
+        if not party:
+            logger.error("[BattleAI] No party data available")
+            return 0
+        active = party[0]
+        num_moves = len(active.moves)
+        # print(f"num_moves={num_moves}")
+        if num_moves == 0:
+            return 0
+        # Reset cursor to first move (up arrow)
+        # print(f"resetting cursor to first move...num_moves={num_moves}")
+        # dialog = self.get_active_dialog()
+
+        best_index = 0
+        best_score = -1.0
+        # Evaluate each move
+        for idx in range(num_moves):
+            if idx > 0:
+                self.run_action_on_emulator(VALID_ACTIONS[0])  # down
+                self.pyboy.tick(9)
+                time.sleep(0.5)
+            power = self.read_m(PLAYERS_MOVE_POWER)
+            mtype = self.read_m(PLAYERS_MOVE_TYPE)
+            # Skip non-damaging or no PP
+            if power <= 0 or (idx < len(active.move_pp) and active.move_pp[idx] <= 0):
+                continue
+            m1 = POKEMON_MATCH_TYPES.get((mtype, primary_val), 1.0)
+            m2 = POKEMON_MATCH_TYPES.get((mtype, secondary_val), 1.0) if secondary_val is not None else 1.0
+            score = power * m1 * m2
+            logger.info(f"[BattleAI] Move {idx}: power={power}, type={mtype}, score={score}")
+            if score > best_score:
+                best_score = score
+                best_index = idx
+        print(f"[BattleAI] Selected move index: {best_index} with score {best_score}")
+        # store best move in instance variable
+        self.best_battle_move = best_index
+        # select the move: diff = (N-1) – best_index, then move in opposite direction diff times
+        print(f"[BattleAI] Selecting move {best_index}...")
+        for _ in range(best_index):
+            self.run_action_on_emulator(VALID_ACTIONS[3])  # up
+            self.pyboy.tick(9)
+            time.sleep(3.5) 
+        
+        # self.run_action_on_emulator(VALID_ACTIONS[4])  # a
+        
+        return best_index
+
+    def read_party_size(self) -> int:
+        """Read number of Pokemon in party"""
+        return self.memory[0xD163]
+
+    def read_party_pokemon(self) -> list[PokemonData]:
+        """Read all Pokemon currently in the party with full data"""
+        # Use the PartyMons struct loaded in reset for reliable offsets
+        party_list: list[PokemonData] = []
+        for struct in self.party.party[: self.party_size]:
+            # Extract raw moves and PP from the struct
+            moves = [Move(mid).name.replace("_", " ") for mid in struct.Moves if mid != 0]
+            move_pp = list(struct.PP[: len(moves)])
+
+            # Assemble PokemonData from struct fields
+            experience = (struct.Exp[0] << 16) + (struct.Exp[1] << 8) + struct.Exp[2]
+            species_id = struct.Species
+            species_name = Species(species_id).name.replace("_", " ")
+            status_val = struct.Status
+            type1 = PokemonType(struct.Type1)
+            type2 = PokemonType(struct.Type2)
+            if type1 == type2:
+                type2 = None
+            pokemon = PokemonData(
+                species_id=species_id,
+                species_name=species_name,
+                current_hp=struct.HP,
+                max_hp=struct.MaxHP,
+                level=struct.Level,
+                status=StatusCondition(status_val),
+                type1=type1,
+                type2=type2,
+                moves=moves,
+                move_pp=move_pp,
+                trainer_id=struct.OTID,
+                nickname="",
+                experience=experience,
+            )
+            party_list.append(pokemon)
+        return party_list

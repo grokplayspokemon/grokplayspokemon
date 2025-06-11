@@ -33,13 +33,15 @@ from environment.data.recorder_data.global_map import local_to_global
 from environment.environment_helpers.navigator import InteractiveNavigator
 from environment.environment_helpers.saver import save_initial_state, save_loop_state, save_final_state, load_latest_run, create_new_run
 from environment.environment_helpers.warp_tracker import record_warp_step, backtrack_warp_sequence
-from environment.environment_helpers.quest_manager import QuestManager, verify_quest_system_integrity, determine_starting_quest
+from environment.environment_helpers.quest_manager import QuestManager, verify_quest_system_integrity, determine_starting_quest, describe_trigger
 from ui.quest_ui import start_quest_ui
 from environment.environment_helpers.trigger_evaluator import TriggerEvaluator
 from environment.grok_integration import extract_structured_game_state
 from agent.simple_agent import SimpleAgent
 from environment.data.environment_data.item_handler import ItemHandler
 from shared import game_started, grok_enabled
+from environment.data.environment_data.species import Species
+from environment.data.environment_data.battle import StatusCondition
 VALID_ACTIONS_STRVALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start"]
 
 # Load quest definitions
@@ -686,15 +688,29 @@ def main():
                 party_data = []
                 party_size = env.read_m("wPartyCount")
                 for i in range(party_size):
-                    base_addr = 0xD164 + (i * 44)
-                    species = env.read_m(base_addr)
-                    if species == 0: continue
+                    species = env.read_m(f"wPartyMon{i+1}Species")
+                    if species == 0:
+                        continue
+                    # Map memory code to human-friendly name
+                    species_name = Species(species).name.title()
+                    # Status condition
+                    status_code = env.read_m(f"wPartyMon{i+1}Status")
+                    status_name = StatusCondition(status_code).get_status_name()
+                    # Experience (3-byte field)
+                    bank, exp_addr = env.pyboy.symbol_lookup(f"wPartyMon{i+1}Exp")
+                    exp0 = env.read_m(exp_addr)
+                    exp1 = env.read_m(exp_addr + 1)
+                    exp2 = env.read_m(exp_addr + 2)
+                    exp_val = exp0 + (exp1 << 8) + (exp2 << 16)
                     party_data.append({
                         'slot': i,
                         'id': species,
-                        'level': env.read_m(base_addr + 33),
-                        'hp': env.read_m(base_addr + 1) + (env.read_m(base_addr + 2) << 8),
-                        'maxHp': env.read_m(base_addr + 34) + (env.read_m(base_addr + 35) << 8),
+                        'speciesName': species_name,
+                        'status': status_name,
+                        'experience': exp_val,
+                        'level': env.read_m(f"wPartyMon{i+1}Level"),
+                        'hp': env.read_short(f"wPartyMon{i+1}HP"),
+                        'maxHp': env.read_short(f"wPartyMon{i+1}MaxHP"),
                     })
                 status_queue.put(('__pokemon_team__', party_data))
             except Exception as e:
@@ -875,7 +891,8 @@ def main():
                     quest_manager=quest_manager,
                     navigator=navigator,
                     env_wrapper=env,
-                    xai_api_key=api_key
+                    xai_api_key=api_key,
+                    status_queue=status_queue
                 )
                 grok_enabled.set()  # Activate AI control based on config
                 print("🤖 Grok agent initialized and enabled")
@@ -969,6 +986,23 @@ def main():
 
     # Grok toggle control: when True Grok runs each tick, when False disabled
     grok_active = False
+    # Initialize non-blocking Grok action fetch
+    grok_thread = None
+    grok_action = None
+    def start_grok_thread():
+        nonlocal grok_thread, grok_action
+        if grok_agent is None:
+            return
+        def fetch_action():
+            nonlocal grok_action
+            try:
+                state = extract_structured_game_state(env_wrapper=env, reader=env, quest_manager=quest_manager)
+                grok_action = grok_agent.get_action(state)
+            except Exception as e:
+                print(f"Error fetching Grok action: {e}")
+                grok_action = None
+        grok_thread = threading.Thread(target=fetch_action, daemon=True)
+        grok_thread.start()
 
     while running:
         # Wait until user clicks Start before stepping the environment or running quest progression
@@ -1104,10 +1138,11 @@ def main():
                                 print("Navigator: Manual warp failed")
                             last_key_pressed = None  # Don't repeat warp action
                             continue
-                        # Spacebar: toggle Grok on/off
                         elif event.key == pygame.K_SPACE and args.interactive_mode and grok_enabled.is_set():
                             grok_active = not grok_active
                             print(f"Grok {'enabled' if grok_active else 'disabled'} by toggle")
+                            if grok_active:
+                                start_grok_thread()
                             continue
                         else:
                             # Regular key handling
@@ -1127,64 +1162,47 @@ def main():
 
         # GROK_INTEGRATION_POINT: only call Grok when toggled on
         if current_action is None and grok_agent and grok_enabled.is_set() and grok_active:
-            try:
-                # Extract current game state for Grok
-                game_state = extract_structured_game_state(env_wrapper=env, reader=env, quest_manager=quest_manager)
-                # Call Grok to get next action
-                current_action = grok_agent.get_action(game_state)
-                print(f"🤖 [DEBUG] Grok returned: {current_action}")
-                # Send Grok thinking and response to status queue
-                if hasattr(grok_agent, 'last_thinking') and grok_agent.last_thinking:
-                    status_queue.put(('__grok_thinking__', grok_agent.last_thinking))
-                if hasattr(grok_agent, 'last_response') and grok_agent.last_response:
-                    status_queue.put(('__grok_response__', grok_agent.last_response))
-                if current_action is not None:
-                    print(f"🤖 ✅ Grok action: {current_action} = {VALID_ACTIONS_STR[current_action]}")
-                    action_source = 'grok'
-                    
-                    # CRITICAL FIX: When Grok returns PATH_FOLLOW_ACTION (6), handle it like human key 5 input
-                    if current_action == PATH_FOLLOW_ACTION:
-                        print(f"\nplay.py: main(): '5' key (from Grok): Using PATH_FOLLOW_ACTION")
-                        
-                        # CRITICAL FIX: Ensure environment loads the current quest coordinates
+            # Non-blocking Grok action fetch
+            if grok_thread is None:
+                start_grok_thread()
+            elif not grok_thread.is_alive():
+                # Retrieve the Grok action from background thread
+                retrieved = grok_action
+                grok_thread = None
+                grok_action = None
+                # If Grok returned PATH_FOLLOW_ACTION, replicate manual '5' key behavior
+                if retrieved == PATH_FOLLOW_ACTION:
+                    raw_dialog = env.read_dialog() or ''
+                    if raw_dialog.strip():
+                        # Dialog active: override to B button
+                        print("Dialog active; overriding Grok PATH_FOLLOW_ACTION to B press")
+                        current_action = VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_B)
+                    else:
+                        print("Grok PATH_FOLLOW_ACTION: triggering quest path follow")
+                        # Load quest coordinates
                         current_q = quest_manager.get_current_quest()
                         if current_q is not None:
-                            print(f"play.py: Grok PATH_FOLLOW: Current quest is {current_q}")
-                            
-                            # Load quest coordinates in environment BEFORE triggering PATH_FOLLOW
                             if not navigator.load_coordinate_path(current_q):
-                                print(f"play.py: Grok PATH_FOLLOW: ERROR - Failed to load quest {current_q} coordinates")
-                            else:
-                                print(f"play.py: Grok PATH_FOLLOW: Successfully loaded quest {current_q} coordinates")
-                            
-                            # Sync quest IDs across all components
+                                print(f"Grok PATH_FOLLOW: failed to load quest {current_q} coordinates")
                             setattr(env, 'current_loaded_quest_id', current_q)
                             quest_manager.current_quest_id = current_q
                             navigator.active_quest_id = current_q
                         else:
-                            print("play.py: Grok PATH_FOLLOW: WARNING - No current quest found")
-                        
-                        # Apply quest-specific overrides (e.g., force A press for quest 015)
+                            print("Grok PATH_FOLLOW: no current quest to follow")
+                        # Use quest filtering
                         desired = quest_manager.filter_action(PATH_FOLLOW_ACTION)
                         if desired == PATH_FOLLOW_ACTION:
-                            # Use PATH_FOLLOW_ACTION directly - let environment handle it
+                            # Let generic executor handle environment.step()
                             current_action = PATH_FOLLOW_ACTION
                         else:
-                            # FIXED: Override with quest-specific emulator action using centralized execution
-                            current_obs, current_reward, current_terminated, current_truncated, current_info, total_steps = execute_action_step(
+                            # Override via centralized execution
+                            obs, reward, terminated, truncated, info, total_steps = execute_action_step(
                                 env, desired, quest_manager, navigator, logger, total_steps
                             )
-                            # Record the override action
                             recorded_playthrough.append(desired)
-                            # Update observation and info for this frame
-                            obs, reward, terminated, truncated, info = current_obs, current_reward, current_terminated, current_truncated, current_info
                 else:
-                    print("🤖 Grok returned None")
-            except Exception as e:
-                print(f"❌ Grok error: {e}")
-                import traceback
-                traceback.print_exc()
-                current_action = None
+                    # Regular non-path-follow Grok action
+                    current_action = retrieved
 
         if current_action is None:
             # Existing quest/navigation fallback logic

@@ -44,7 +44,7 @@ class LineCountRotatingFileHandler(logging.Handler):
     Creates new files when line limit is reached with timestamped naming.
     """
     
-    def __init__(self, filename: Union[str, Path], max_lines: int = 20000, backup_count: int = 10):
+    def __init__(self, filename: Union[str, Path], max_lines: int = 10000, backup_count: int = 10):
         super().__init__()
         self.filename = Path(filename)
         self.max_lines = max_lines
@@ -196,7 +196,7 @@ class PokemonLogger:
     Specialized logger for Pokemon game system with multiple log streams
     """
     
-    def __init__(self, logs_dir: Path, max_lines: int = 20000, overwrite_logs: bool = True):
+    def __init__(self, logs_dir: Path, max_lines: int = 10000, overwrite_logs: bool = True):
         self.logs_dir = Path(logs_dir)
         self.max_lines = max_lines
         self.overwrite_logs = overwrite_logs
@@ -424,7 +424,7 @@ class PokemonLogger:
 # Global logger instance
 _pokemon_logger: Optional[PokemonLogger] = None
 
-def setup_logging(logs_dir: str = "logs", max_lines: int = 20000, redirect_stdout: bool = True, overwrite_logs: bool = True) -> PokemonLogger:
+def setup_logging(logs_dir: str = "logs", max_lines: int = 10000, redirect_stdout: bool = False, overwrite_logs: bool = True) -> PokemonLogger:
     """
     Setup the Pokemon logging system
     
@@ -473,16 +473,11 @@ def setup_logging(logs_dir: str = "logs", max_lines: int = 20000, redirect_stdou
 
 def get_pokemon_logger() -> Optional[PokemonLogger]:
     """
-    Get the global Pokemon logger instance
-    
-    Returns:
-        PokemonLogger instance or None if not initialized
+    Return the global Pokemon logger if it has been initialized; otherwise return None.
+    Note: Logging must be explicitly set up via setup_logging() to enable file logging.
     """
     global _pokemon_logger
-    if _pokemon_logger is None:
-        # Auto-initialize with default settings
-        return setup_logging()
-    return _pokemon_logger
+    return _pokemon_logger  # Do not auto-initialize; avoid redirecting stdout by default
 
 def close_logging():
     """
@@ -497,7 +492,7 @@ def close_logging():
 class TemporaryLogging:
     """Context manager for temporary logging setup"""
     
-    def __init__(self, logs_dir: str = "logs", max_lines: int = 20000, redirect_stdout: bool = True):
+    def __init__(self, logs_dir: str = "logs", max_lines: int = 10000, redirect_stdout: bool = True):
         self.logs_dir = logs_dir
         self.max_lines = max_lines
         self.redirect_stdout = redirect_stdout

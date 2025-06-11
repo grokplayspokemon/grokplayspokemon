@@ -282,7 +282,7 @@ class SpeechBubbleManager:
         # Show on specified canvases
         for canvas_name in canvas_names:
             if canvas_name in self.renderers:
-                print(f"Showing quest {quest_id} start text: {begin_text[:50]}...")
+                print(f"Showing quest {quest_id} start text: {begin_text}...")
                 self.renderers[canvas_name].show_bubble(begin_text, "quest_start", duration=4.0)
     
     def show_quest_complete(self, quest_id: str, canvas_names: Optional[List[str]] = None):
@@ -303,7 +303,7 @@ class SpeechBubbleManager:
         # Show on specified canvases
         for canvas_name in canvas_names:
             if canvas_name in self.renderers:
-                print(f"Showing quest {quest_id} completion text: {end_text[:50]}...")
+                print(f"Showing quest {quest_id} completion text: {end_text}...")
                 self.renderers[canvas_name].show_bubble(end_text, "quest_complete", duration=5.0)
     
     def handle_quest_change(self, new_quest_id: Optional[str]):

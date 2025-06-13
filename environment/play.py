@@ -53,6 +53,58 @@ with open(QUESTS_FILE, 'r') as f:
 
 # Quest functions moved to quest_manager.py
 
+# Import StageManager for bootstrapping intro skip
+from environment.environment_helpers.stage_helper import StageManager
+
+def run_intro_bootstrap(env, executor, quest_manager, navigator, logger, max_steps=20000):
+    """
+    Advance the game from the title screen to the custom-name entry screen by
+    simply feeding *noop* actions into the environment and letting the *single*
+    StageManager instance attached to the environment handle the required
+    START/B/A overrides.
+
+    Using the existing `env.stage_manager` avoids creating a second
+    StageManager that would clash with the one embedded in `env.process_action`.
+    """
+    mgr = getattr(env, 'stage_manager', None)
+    if mgr is None:
+        # Should never happen – the environment attaches one in its __init__
+        mgr = StageManager(env)
+
+    total = 0
+    for _ in range(max_steps):
+        # Update stage logic (normally called internally each step, but we run
+        # it explicitly here prior to the first action so the very first frame
+        # already has scripted movements active).
+        mgr.update_stage_manager()
+
+        # Feed a neutral action (0 – DOWN). StageManager will transform it to
+        # START / B / A as dictated by the scripted rules.
+        obs, reward, done, truncated, info, total = executor(
+            env, 0, quest_manager, navigator, logger, total)
+
+        # ------------------------------------------------------------------
+        # NEW: Rate-limit bootstrap stepping
+        # ------------------------------------------------------------------
+        # Without any user interaction the intro-skip loop can blast through
+        # hundreds of emulator frames per second which is not helpful for
+        # debugging and makes it appear as if the screen is just "black".
+        # Capping the rate to ~2 Hz (0.5 s per frame) keeps the intro visible
+        # while still progressing automatically.
+        time.sleep(0.5)
+        
+        # Break as soon as we hit the preset-name dialog («NEW NAME») or the
+        # "YOUR NAME?" prompt signalling the custom name screen.
+        dialog = (env.get_active_dialog() or '')
+        if 'NEW NAME' in dialog or 'YOUR NAME?' in dialog:
+            mgr.clear_scripted_movements()
+            break
+
+        if done or truncated:
+            break
+
+    return total
+
 def execute_action_step(env, action, quest_manager=None, navigator=None, logger=None, total_steps=0):
     """
     Centralized action execution function that ensures all environment systems stay synchronized.
@@ -471,12 +523,27 @@ def main():
     print(f"[Setup] Created and attached trigger_evaluator to environment using global map tracking")
 
     # 6b. Initialize QuestManager now that run_dir is known
-    # Load existing run or create a new one to get run_dir for QuestManager
-    run_info = load_latest_run(env)
+    # Load (or reuse) an existing run so QuestManager can use its run_dir
+    # Priority order:
+    #   1. A run the environment just created during `env.reset()`
+    #   2. The latest previously-saved run on disk (via `load_latest_run`)
+    #   3. Create a brand-new run if neither of the above exist
+
+    # 1️⃣ Prefer a run that the environment may have already created. This
+    #     prevents a second directory (e.g. "002-…") from being made a few
+    #     frames later.
+    run_info = getattr(env, "current_run_info", None)
+
+    # 2️⃣ If the environment didn't create one (e.g. running from a saved
+    #     state), fall back to whatever the RunManager thinks is latest.
     if run_info is None:
-        # Create a new run using current map name and map id
+        run_info = load_latest_run(env)
+
+    # 3️⃣ If still None, we really do need a fresh run directory.
+    if run_info is None:
         current_map_name = env.get_map_name_by_id(current_map_id_after_reset)
         run_info = create_new_run(env, current_map_name, current_map_id_after_reset)
+
     run_dir = run_info.run_dir
 
     # Initialize QuestManager with run_dir for proper quest status synchronization
@@ -1004,6 +1071,8 @@ def main():
         grok_thread = threading.Thread(target=fetch_action, daemon=True)
         grok_thread.start()
 
+
+    # Enter main loop
     while running:
         # Wait until user clicks Start before stepping the environment or running quest progression
         if not game_started.is_set():
@@ -1203,27 +1272,84 @@ def main():
                 else:
                     # Regular non-path-follow Grok action
                     current_action = retrieved
+        
+        search_strings = ["Welcome to the", "My", "People", "inhabited", "creatures", "Fo", "Others", "I", "First"]
+        if any(s in env.read_dialog() for s in search_strings) and not env.never_run_again:
+            print(f"play.py: main(): is our a key thing triggering???")
+            noop_action = getattr(env, "a", VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_A))
+            print(f"play.py: main(): noop_action: {noop_action}")
+            # Advance with a
+            obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                env,
+                noop_action,
+                quest_manager,
+                navigator,
+                logger,
+                total_steps,
+            )
+            print(f"play.py: main(): noop_action: got past the execute_action_step {noop_action}")
+            env.pyboy.tick()
+            raw_frame = env.render()
+            processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
+            update_screen(screen, processed_frame_rgb, screen_width, screen_height)
+            # Update UI without advancing game state
+            update_ui_if_needed()
+            loop_clock.tick(30)
 
-        if current_action is None:
-            # Existing quest/navigation fallback logic
-            if not config.interactive_mode or (grok_agent and grok_enabled.is_set()):
-                # Ensure quest_manager has the latest current_quest_id
-                _ = quest_manager.get_current_quest()
-
-                # Try to get an action from the quest manager or navigator
-                if quest_manager.is_quest_active():
-                    # Fallback: use navigator to get next action for active quest
-                    if navigator.sequential_coordinates and navigator.navigation_status != "idle":
-                        current_action = navigator.get_next_action()
-                        # Apply quest-specific filtering to the actual navigator action
-                        current_action = quest_manager.filter_action(current_action)
-                elif navigator.sequential_coordinates and navigator.navigation_status != "idle":
-                    current_action = navigator.get_next_action()
-
-        elif current_action is None and not config.interactive_mode: # Replay/tick mode
-            # No-OP mode: slow down loop when AI actions are disabled
             time.sleep(0.05)
             continue
+        
+        if current_action is None:
+            # When no explicit player/AI action is available we must still
+            # advance the emulator so that StageManager, quest triggers and
+            # other time-based systems can execute.  Feed a known *noop*
+            # button index (defaults to 4 if the environment hasn't defined
+            # one) through the unified `execute_action_step` helper so state
+            # progression remains fully synchronised.
+
+            if "na..." in env.read_dialog():
+                print(f"play.py: main(): na... in dialog")
+                noop_action = getattr(env, 'a', 4)
+                obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                    env,
+                    noop_action,
+                    quest_manager,
+                    navigator,
+                    logger,
+                    total_steps,
+                )
+
+                print(f"play.py: main(): pressing a single a button: pressing single button: {noop_action}")
+                env.pyboy.tick()
+                raw_frame = env.render()
+                processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
+                update_screen(screen, processed_frame_rgb, screen_width, screen_height)
+                # Update UI without advancing game state
+                update_ui_if_needed()
+                loop_clock.tick(30)
+
+                time.sleep(0.05)
+                continue
+            
+            if env.quest_manager.current_quest_id == 1 and "NAME" not in env.read_dialog():
+                noop_action = getattr(env, 'noop_button_index', 8)
+
+                # Advance one frame with the noop
+                obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                    env,
+                    noop_action,
+                    quest_manager,
+                    navigator,
+                    logger,
+                    total_steps,
+                )
+
+                # Prevent a second manual tick/render later this iteration
+                already_stepped = True
+
+                # NOTE: We deliberately do *not* add the noop to `recorded_playthrough`
+                # to avoid cluttering replays with frames that carry no semantic
+                # intent.
 
         if grok_enabled.is_set() and current_action is None and env.headless:
             time.sleep(0.01)  # Very short sleep when waiting for Grok
@@ -1356,7 +1482,7 @@ def main():
             })
             
             # record_warp_step(env, last_map_id, new_map_id, total_steps) # If function exists
-            print(f"[MapTransition] Map ID changed from {last_map_id} to {new_map_id}")
+            # print(f"[MapTransition] Map ID changed from {last_map_id} to {new_map_id}")
             
             # Navigation System Monitoring - check at map transition
             if navigation_monitor:

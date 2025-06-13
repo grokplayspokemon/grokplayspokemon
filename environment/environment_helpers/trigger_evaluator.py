@@ -246,8 +246,12 @@ class TriggerEvaluator:
             norm_dialog = re.sub(r'\s+', ' ', raw_dialog.replace('\n', ' ')).strip()
             target_text_raw = trigger.get('text', '')
             target_text_norm = re.sub(r'\s+', ' ', target_text_raw.replace('\n', ' ')).strip()
-            result = (target_text_norm in norm_dialog)
-            values_str = f"Dialog: '{norm_dialog[:50]}...'"
+            # SPECIAL CASE: Empty target string means we want **no dialog** present
+            if target_text_norm == '':
+                result = (norm_dialog == '')
+            else:
+                result = (target_text_norm in norm_dialog)
+            values_str = f"Dialog: '{norm_dialog[:50]}...'" if norm_dialog else 'Dialog: <none>'
             debug_str = f"Evaluating: {logic_code} → {result}"
         elif ttype == 'item_received_dialog':
             raw_dialog = self.env.read_dialog() or ''

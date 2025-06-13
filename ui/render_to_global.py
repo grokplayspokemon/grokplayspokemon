@@ -64,9 +64,9 @@ def local_to_global(r, c, map_n):
         map_x = map_coords[0]
         map_y = map_coords[1]
         
-        # Match environment's calculation exactly
-        global_x = c + map_x - PAD
-        global_y = r + map_y - PAD
+        # Use same formula as environment.global_map.local_to_global (+PAD)
+        global_x = c + map_x + PAD
+        global_y = r + map_y + PAD
         
         return global_y, global_x
     except KeyError:
@@ -217,9 +217,9 @@ def draw_map_optimized(map_canvas, local_x, local_y, map_id, map_name, facing, e
                 map_canvas.delete(map_canvas.map_image_id)
             
             # Draw map image with padding offset
-            # The map image starts at (-PAD, -PAD) in tile coordinates
-            map_offset_x = dx - PAD * TILE_SIZE
-            map_offset_y = dy - PAD * TILE_SIZE
+            # Map image already includes padding, so offset directly by dx,dy
+            map_offset_x = dx
+            map_offset_y = dy
             
             map_canvas.map_image_id = map_canvas.create_image(
                 map_offset_x, map_offset_y, 

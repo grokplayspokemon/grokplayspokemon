@@ -38,6 +38,6 @@ env:
 agent:
   llm_provider: grok
   model_name: grok-3-mini
-  max_tokens: 2048
+  max_tokens: 4096
   temperature: 0.7
   grok_on: true

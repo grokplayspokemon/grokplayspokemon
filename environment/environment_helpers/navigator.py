@@ -1207,6 +1207,40 @@ class ConsolidatedNavigator:
             print(f"ConsolidatedNavigator: get_next_action error: {e}")
             return None
 
+    # =========================
+    # SIMPLE PUBLIC HELPERS EXPECTED BY TOOLS
+    # =========================
+    def move_in_direction(self, direction: str, steps: int = 1):
+        """Move the player a short distance in a specified cardinal direction.
+
+        This helper is a lightweight wrapper that existing Grok tools expect. It translates
+        human-friendly direction strings (e.g. "n", "up", "left") into the action indices
+        used by ConsolidatedNavigator and repeatedly invokes the internal _execute_movement
+        routine.  It returns a tuple (success: bool, message: str) mirroring the contract
+        used in grok_tool_implementations.navigate_to().
+        """
+        # ---- Canonicalise direction -------------------------------------------------
+        dir_map = {
+            "n": "up", "north": "up", "u": "up", "up": "up",
+            "s": "down", "south": "down", "d": "down", "down": "down",
+            "e": "right", "east": "right", "r": "right", "right": "right",
+            "w": "left", "west": "left", "l": "left", "left": "left",
+        }
+        canonical = dir_map.get(direction.lower()) if isinstance(direction, str) else None
+        if canonical is None or canonical not in self.ACTION_MAPPING_STR_TO_INT:
+            return False, f"Invalid direction: {direction}"
+
+        action_int = self.ACTION_MAPPING_STR_TO_INT[canonical]
+
+        moved_steps = 0
+        for _ in range(max(1, steps)):
+            if self._execute_movement(action_int):
+                moved_steps += 1
+            else:
+                # Stop immediately if movement blocked to avoid infinite loops
+                return False, f"Movement blocked after {moved_steps} successful step(s) while moving {canonical}."
+        return True, f"Moved {moved_steps} step(s) {canonical}."
+
 # =========================
 # LEGACY COMPATIBILITY WRAPPER
 # =========================

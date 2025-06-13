@@ -9,7 +9,7 @@ import logging
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import asdict
 import time
-from agent.grok_tool_implementations import AVAILABLE_TOOLS_LIST, press_buttons, navigate_to, exit_menu, ask_friend, handle_battle
+from agent.grok_tool_implementations import AVAILABLE_TOOLS_LIST, press_buttons, navigate_to, exit_menu, ask_friend, handle_battle, enter_name
 from openai import OpenAI
 from utils.logging_config import get_pokemon_logger, setup_logging, LineCountRotatingFileHandler
 from pathlib import Path
@@ -106,13 +106,20 @@ class SimpleAgent:
         except Exception as e:
             self.agent_file_logger.error(f"Error loading token usage persistence: {e}")
         
+        # Holds a pending name suggestion from ask_friend
+        self._pending_name: Optional[str] = None
+        
         self.tool_implementations = {
             "press_buttons": press_buttons,
             "navigate_to": navigate_to,
             "exit_menu": exit_menu,
             "ask_friend": ask_friend,
-            "handle_battle": handle_battle
+            "handle_battle": handle_battle,
+            "enter_name": enter_name
         }
+        
+        # Track previous GameState to describe outcome of last action
+        self._prev_state: Optional[GameState] = None
         
     def get_action(self, game_state: GameState) -> Optional[int]:
         """Get next action from Grok based on current game state"""
@@ -163,6 +170,8 @@ class SimpleAgent:
             agent_logger.log_system_event("GROK_GET_ACTION_RESULT", {"action": action, "response": self.last_response})
             # Also log final action to agent.log
             self.agent_file_logger.info(f"GROK_FINAL_ACTION: action={action} response={self.last_response}")
+            # Store current state for next iteration diffing
+            self._prev_state = game_state
             return action
             
         except Exception as e:
@@ -171,7 +180,15 @@ class SimpleAgent:
             return None
     
     def _build_prompt(self, game_state: GameState) -> str:
-        """Build a comprehensive prompt for Grok"""
+        """Build a comprehensive prompt for Grok.
+        The prompt now contains:
+          • concise current situational info
+          • recent actions list
+          • delta summary of last action outcome
+          • special guidance when on name-entry screens that nudges Grok to
+            call ask_friend and then enter the provided name via D-pad + A,
+            finishing with START.
+        """
         
         # Convert game state to dict for easier formatting
         state_dict = asdict(game_state)
@@ -225,6 +242,19 @@ class SimpleAgent:
         # Dialog info
         if game_state.dialog and not game_state.in_battle:
             context_parts.append(f"Dialog active: {game_state.dialog[:200]}...")
+
+            # ------------------------------------------------------------------
+            # SPECIAL CASE: Player-/Rival-naming screen
+            # ------------------------------------------------------------------
+            if "YOUR NAME?" in game_state.dialog.upper():
+                context_parts.append(
+                    "You are on the character-naming screen (player).  First, call ask_friend(question='What should we name the player?').  "
+                    "After receiving the answer, call enter_name(name='ANSWER', target='player') to automatically type it and confirm."
+                )
+            if "RIVAL" in game_state.dialog.upper() and "NAME" in game_state.dialog.upper():
+                context_parts.append(
+                    "You are on the rival-naming screen.  Call ask_friend(question='What should we name the rival?') then enter_name(name='ANSWER', target='rival')."
+                )
         
         # Recent actions
         if self.action_history:
@@ -232,11 +262,64 @@ class SimpleAgent:
             action_str = ", ".join([VALID_ACTIONS_STR[a['action']] for a in recent if a['action'] < len(VALID_ACTIONS_STR)])
             context_parts.append(f"Recent actions: {action_str}")
         
+        # ------------------------------------------------------------------
+        # Describe what happened as a result of the **last** action Grok took
+        # by diffing the previous GameState (if any) against the current
+        # state.  This keeps Grok informed without flooding tokens.
+        # ------------------------------------------------------------------
+        if self._prev_state is not None and self.action_history:
+            last_act = self.action_history[-1]['action'] if self.action_history else None
+            last_act_name = VALID_ACTIONS_STR[last_act] if last_act is not None and last_act < len(VALID_ACTIONS_STR) else str(last_act)
+
+            deltas: list[str] = []
+
+            # Location delta
+            prev_loc = self._prev_state.location
+            curr_loc = game_state.location
+            if (prev_loc['map_id'], prev_loc['x'], prev_loc['y']) != (curr_loc['map_id'], curr_loc['x'], curr_loc['y']):
+                moved_str = f"moved to ({curr_loc['x']},{curr_loc['y']}) on {curr_loc['map_name']} (map {curr_loc['map_id']})"
+                deltas.append(moved_str)
+
+            # Dialog delta
+            prev_dialog = (self._prev_state.dialog or '').strip()
+            curr_dialog = (game_state.dialog or '').strip()
+            if curr_dialog and curr_dialog != prev_dialog:
+                if not prev_dialog:
+                    deltas.append("dialog opened")
+                else:
+                    deltas.append("dialog changed")
+            elif prev_dialog and not curr_dialog:
+                deltas.append("dialog closed")
+
+            # Battle state changes
+            if self._prev_state.in_battle != game_state.in_battle:
+                if game_state.in_battle:
+                    deltas.append("entered battle")
+                else:
+                    deltas.append("battle ended")
+
+            # HP fraction significant drop
+            if abs(self._prev_state.hp_fraction - game_state.hp_fraction) > 0.2:
+                deltas.append("hp changed significantly")
+
+            if deltas:
+                outcome = "; ".join(deltas)
+                context_parts.append(f"Last action ({last_act_name}) outcome: {outcome}.")
+        
         # Conditional prompt for game start
         if game_state.location['map_id'] == 0 and loc['x'] == 0 and loc['y'] == 0 or game_state.location['map_id'] == 38 and loc['x'] == 3 and loc['y'] == 6 and game_state.dialog != "":
             prompt_start = "Make sure you pick entertaining names for yourself and your rival!"
         else:
             prompt_start = ""
+
+        # Ensure tool availability note (helps Grok discover ask_friend)
+        context_parts.append("Available helper tools: ask_friend, enter_name, press_buttons, navigate_to, exit_menu, handle_battle.")
+
+        # If we already have a suggested name pending, remind Grok
+        if self._pending_name and "YOUR NAME?" in (game_state.dialog or "").upper():
+            context_parts.append(
+                f"Friend suggested the name '{self._pending_name}'. Call enter_name(name='{self._pending_name}', target='player') to type it."
+            )
 
         # Build the full prompt
         prompt = f"""{prompt_start}
@@ -259,8 +342,7 @@ Available actions:
 5: b (cancel/back)
 6: path to location (handles general navigational movement but does not position you at exactly the place you need to stand.)
 7: start (menu)
-
-Think step by step about what to do next, then call the 'choose_action' tool with your chosen action number.
+When you are ready, call the correct tool per the instructions.
 
 """
 
@@ -276,22 +358,48 @@ Think step by step about what to do next, then call the 'choose_action' tool wit
             else:
                 messages.append({"role": "user", "content": BATTLE_PROMPT})
         elif game_state.dialog:
-            messages.append({"role": "user", "content": DIALOG_PROMPT})
+            # Use specialized prompt for naming screens so Grok knows to ask for a name and call enter_name
+            dlg_upper = game_state.dialog.upper()
+            if ("YOUR NAME?" in dlg_upper) or ("RIVAL" in dlg_upper and "NAME" in dlg_upper):
+                # Re-use the richer prompt containing naming instructions that we embedded in `prompt`
+                # This prompt already contains the helpful directions: it appears in the `prompt` parameter we built above.
+                messages.append({"role": "user", "content": prompt})
+            else:
+                messages.append({"role": "user", "content": DIALOG_PROMPT})
         else:
             messages.append({"role": "user", "content": prompt})
         return messages
     
     def _call_grok(self, prompt: str, game_state: GameState) -> str:
-        """Call Grok API with optimized prompts based on context"""
-        
-        # Construct messages list based on current game state
+        """Call Grok API and automatically handle multi-turn tool-call chains.
+        The function now loops until Grok either returns a choose_action tool-call
+        or a normal (non-tool) answer.  For every intermediate tool-call we:
+          1. Execute the tool locally
+          2. Append a synthetic `role="tool"` message containing the structured
+             output of that tool so Grok sees the result
+          3. Re-issue the chat completion with the augmented message list
+        This prevents the infinite ask_friend loop seen in the logs because
+        Grok now gets the friend's answer before it decides the next step.
+        In addition, we now:
+          • Push Grok thinking / response strings to the status_queue so the web UI can display them.
+          • Stream per-call and lifetime token/cost statistics to the UI via the '__grok_cost__' event.
+        """
+
+        # --------------------------------------------------
+        # 0. Notify UI that Grok has started thinking
+        # --------------------------------------------------
+        if self.status_queue is not None:
+            try:
+                # Keep the first 250 characters of the prompt for display – it's usually enough context
+                self.status_queue.put(("__grok_thinking__", prompt[0:1000]))
+            except Exception:
+                pass
+
+        # 1. Build initial message list from game state
         messages = self._make_messages(game_state, prompt)
-        # Log messages count
-        agent_logger.log_system_event("GROK_API_MESSAGES", {"messages_count": len(messages)})
-        # Standard max tokens
-        max_tokens = 2000
-        # Build kwargs for API call
-        tools = [
+
+        # 2. Assemble the full tool list once – reused for every retry
+        tools: list[dict] = [
             {
                 "type": "function",
                 "function": {
@@ -300,8 +408,8 @@ Think step by step about what to do next, then call the 'choose_action' tool wit
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "action": {"type": "integer", "description": "The action number to execute (0-7)", "minimum": 0, "maximum": 7},
-                            "reasoning": {"type": "string", "description": "Brief explanation of why this action was chosen"}
+                            "action": {"type": "integer", "minimum": 0, "maximum": 7},
+                            "reasoning": {"type": "string"}
                         },
                         "required": ["action", "reasoning"]
                     }
@@ -309,100 +417,68 @@ Think step by step about what to do next, then call the 'choose_action' tool wit
             }
         ]
         for tool_info in AVAILABLE_TOOLS_LIST:
-            if 'declaration' in tool_info:  # Make sure declaration exists
-                tools.append({
+            if "declaration" in tool_info:
+                tools.append({"type": "function", "function": tool_info["declaration"]})
+        # Ensure 'handle_battle' is present exactly once
+        if not any(
+            t.get("function", {}).get("name") == "handle_battle" for t in tools
+        ):
+            tools.append(
+                {
                     "type": "function",
-                    "function": tool_info['declaration']
-                })
-        
-        # Register handle_battle function for fully automated battle handling
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "handle_battle",
-                "description": "Automatically handle battles by selecting the best move.",
-                "parameters": {"type": "object", "properties": {}, "required": []}
-            }
-        })
-        
-        # Log what we're doing
-        agent_logger.log_system_event("GROK_API_CALL", {"max_tokens": max_tokens, "prompt_length": len(prompt)})
-        
-        try:
-            # Build kwargs dynamically
+                    "function": {
+                        "name": "handle_battle",
+                        "description": "Automatically handle battles by selecting the best move.",
+                        "parameters": {"type": "object", "properties": {}, "required": []},
+                    },
+                }
+            )
+
+        # Helper that actually calls Grok with current messages
+        def _chat_once(msgs: list[dict]):
             api_kwargs = {
                 "model": "grok-3-mini",
-                "messages": messages,
+                "messages": msgs,
                 "tools": tools,
                 "tool_choice": "auto",
                 "temperature": 0.7,
-                "max_tokens": max_tokens
+                "max_tokens": 2500,
             }
-            
-            # Call the API
             completion = self.client.chat.completions.create(**api_kwargs)
-            
-            # Track API call count
             self.api_calls_count += 1
-            
-            # Log token usage
-            usage = getattr(completion, 'usage', None)
-            if usage:
-                details = getattr(usage, 'completion_tokens_details', None)
-                reasoning_tokens = getattr(details, 'reasoning_tokens', 0) if details else 0
-                
-                # Calculate token usage for this call
-                prompt_tokens = usage.prompt_tokens
-                completion_tokens = usage.completion_tokens
-                total_tokens = usage.total_tokens
-                
-                # Calculate cost
-                prompt_cost = prompt_tokens * COST_PER_INPUT_TOKEN
-                completion_cost = completion_tokens * COST_PER_COMPLETION_TOKEN
-                total_cost = prompt_cost + completion_cost
-                
-                # Update cumulative totals
-                self.total_prompt_tokens += prompt_tokens
-                self.total_completion_tokens += completion_tokens
-                self.total_reasoning_tokens += reasoning_tokens
-                self.total_tokens += total_tokens
-                self.total_cost += total_cost
-                
-                # Log token usage and cost
-                agent_logger.log_system_event("GROK_TOKEN_USAGE", {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "reasoning_tokens": reasoning_tokens,
-                    "total_tokens": total_tokens,
-                    "finish_reason": completion.choices[0].finish_reason,
-                    "call_cost": total_cost,
-                    "cumulative_cost": self.total_cost,
-                    "api_calls_count": self.api_calls_count,
-                    "avg_cost_per_call": self.total_cost / self.api_calls_count if self.api_calls_count > 0 else 0
-                })
-                
-                # Also log to agent.log
-                self.agent_file_logger.info(
-                    f"GROK_TOKEN_COST: prompt={prompt_tokens}, completion={completion_tokens}, "
-                    f"cost=${total_cost:.6f}, total=${self.total_cost:.6f}, calls={self.api_calls_count}"
-                )
-                
-                # Send to UI via status queue
-                if hasattr(self, 'status_queue'):
-                    self.status_queue.put(('__grok_cost__', {
-                        'call_cost': total_cost,
-                        'total_cost': self.total_cost,
-                        'total_tokens': self.total_tokens,
-                        'api_calls_count': self.api_calls_count
-                    }))
-                    # Send detailed token usage for UI input/output fields
-                    self.status_queue.put(('__llm_usage__', {
-                        'input_tokens': prompt_tokens,
-                        'output_tokens': completion_tokens,
-                        'input_cost': prompt_cost,
-                        'output_cost': completion_cost
-                    }))
-                    # Persist token usage to file
+            return completion.choices[0].message, completion.usage
+
+        # 3. Main loop – max 5 chained tool-calls to prevent runaway loops
+        import uuid
+        for iteration in range(5):
+            message, usage = _chat_once(messages)
+            # DEBUG: log the returned message and any call info
+            self.agent_file_logger.debug(f"GROK_LOOP {iteration}: tool_calls={getattr(message,'tool_calls',None)}, function_call={getattr(message,'function_call',None)}, content={getattr(message,'content',None)}")
+
+            # --------------------------------------------------
+            # 3a. Update token usage / cost stats and push to UI
+            # --------------------------------------------------
+            try:
+                if usage is not None:
+                    self.total_prompt_tokens += usage.prompt_tokens or 0
+                    self.total_completion_tokens += usage.completion_tokens or 0
+                    self.total_tokens += usage.total_tokens or 0
+                    # Accurate cost calculation using Grok pricing (per-million tokens)
+                    INPUT_COST_PER_TOKEN = 0.30 / 1_000_000      # $0.30 / 1M tokens
+                    CACHED_INPUT_COST_PER_TOKEN = 0.07 / 1_000_000
+                    OUTPUT_COST_PER_TOKEN = 0.50 / 1_000_000
+
+                    prompt_tokens = usage.prompt_tokens or 0
+                    completion_tokens = usage.completion_tokens or 0
+                    cached_prompt_tokens = getattr(usage, 'cached_prompt_tokens', 0)
+                    call_cost = (
+                        prompt_tokens * INPUT_COST_PER_TOKEN +
+                        cached_prompt_tokens * CACHED_INPUT_COST_PER_TOKEN +
+                        completion_tokens * OUTPUT_COST_PER_TOKEN
+                    )
+                    self.total_cost += call_cost
+
+                    # Persist lifetime stats
                     try:
                         with open(self._usage_file, 'w') as f:
                             json.dump({
@@ -414,101 +490,144 @@ Think step by step about what to do next, then call the 'choose_action' tool wit
                                 'total_cost': self.total_cost,
                                 'api_calls_count': self.api_calls_count
                             }, f)
-                    except Exception as e:
-                        self.agent_file_logger.error(f"Error saving token usage persistence: {e}")
-            
-            # Get the message
-            message = completion.choices[0].message
-            
-            # Capture reasoning if present
-            if hasattr(message, 'reasoning_content') and message.reasoning_content:
-                self.last_thinking = message.reasoning_content
-                # Send to UI via status queue
-                if hasattr(self, 'status_queue'):
-                    self.status_queue.put(('__grok_thinking__', self.last_thinking))
-            
-            # Check for tool calls
+                    except Exception:
+                        pass
+
+                    self.status_queue and self.status_queue.put(("__grok_cost__", {
+                        "api_calls_count": self.api_calls_count,
+                        "total_tokens": self.total_tokens,
+                        "call_cost": call_cost,
+                        "total_cost": self.total_cost
+                    }))
+            except Exception:
+                pass
+
+            # If Grok produced a tool call (tools API) or function_call (functions API), handle it
+            tool_call = None
             if hasattr(message, 'tool_calls') and message.tool_calls:
                 tool_call = message.tool_calls[0]
-                args = json.loads(tool_call.function.arguments)
-                
-                # Update last response for UI
-                self.last_response = f"Action {args.get('action', '?')}: {args.get('reasoning', '')}"
-                
-                agent_logger.log_system_event("GROK_SUCCESS", {
-                    "action": args.get('action'),
-                    "reasoning": args.get('reasoning', '')[:100],  # First 100 chars
-                    "context": "naming_screen" if "NAME?" in prompt else "general"
-                })
-                
-                return json.dumps({
-                    "tool_call": tool_call.function.name,
-                    "arguments": args
-                })
-            
-            # Check finish reason
-            finish_reason = completion.choices[0].finish_reason
-            if finish_reason == "length":
-                agent_logger.log_error("GROK_LENGTH_LIMIT", 
-                    f"Hit token limit with {max_tokens} max_tokens", {})
-                
-                # Retry with more tokens
-                if max_tokens < 3000:
-                    agent_logger.log_system_event("GROK_RETRY", {"new_max_tokens": 3000})
-                    api_kwargs["max_tokens"] = 3000
-                    retry_completion = self.client.chat.completions.create(**api_kwargs)
+            elif hasattr(message, 'function_call') and message.function_call:
+                # wrap function_call into a synthetic tool_call
+                fc = message.function_call
+                synthetic_id = str(uuid.uuid4())
+                class SyntheticFunc:
+                    pass
+                class SyntheticCall:
+                    pass
+                func = SyntheticFunc()
+                func.name = fc.name
+                func.arguments = fc.arguments
+                sc = SyntheticCall()
+                sc.id = synthetic_id
+                sc.type = 'function'
+                sc.function = func
+                tool_call = sc
+
+            if tool_call:
+                tool_name = tool_call.function.name
+                try:
+                    tool_args = json.loads(tool_call.function.arguments or "{}")
+                except Exception:
+                    tool_args = {}
+
+                if tool_name == "choose_action":
+                    # Debug log and return choose_action for parsing upstream
+                    self.agent_file_logger.debug(f"GROK_TOOL choose_action args={tool_args}")
+                    return json.dumps({"tool_call": tool_name, "arguments": tool_args})
+
+                # Unknown tool – fail fast
+                if tool_name not in self.tool_implementations:
+                    self.agent_file_logger.error(f"GROK_UNKNOWN_TOOL: {tool_name}")
+                    return json.dumps({"error": f"Unknown tool: {tool_name}"})
+
+                # Execute the tool locally
+                try:
+                    tool_fn = self.tool_implementations[tool_name]
+                    human_summary, structured_output = tool_fn(
+                        env=self.reader,
+                        quest_manager=self.quest_manager,
+                        navigator=self.navigator,
+                        env_wrapper=self.env_wrapper,
+                        **tool_args  # Pass any additional arguments
+                    )
                     
-                    retry_message = retry_completion.choices[0].message
-                    if hasattr(retry_message, 'tool_calls') and retry_message.tool_calls:
-                        tool_call = retry_message.tool_calls[0]
-                        args = json.loads(tool_call.function.arguments)
-                        return json.dumps({
-                            "tool_call": tool_call.function.name,
-                            "arguments": args
-                        })
+                    # Log tool execution
+                    self.agent_file_logger.info(f"Tool {tool_name} executed: {human_summary}")
+                    self.last_response = f"Tool {tool_name}: {human_summary}"
+                    
+                    # Post-processing for ask_friend / enter_name
+                    if tool_name == "ask_friend":
+                        # Capture suggested name if provided
+                        suggested = structured_output.get("suggested_name") if isinstance(structured_output, dict) else None
+                        if suggested:
+                            self._pending_name = suggested
+                    elif tool_name == "enter_name":
+                        # Naming done; clear pending suggestion
+                        self._pending_name = None
+                    
+                    # For handle_battle, we don't return an action since it handles the battle
+                    # Return None to indicate no single action needed
+                    if tool_name == "handle_battle":
+                        return None
+                    
+                    # For navigation tools, might return a specific action
+                    # For now, return None and let the next iteration decide
+                    return None
+                    
+                except Exception as e:
+                    logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
+                    self.last_response = f"Tool error: {str(e)}"
+                    return None
             
-            # Add this after parsing the tool call response:
-            if data.get("tool_call") == "handle_battle":
-                # Execute the handle_battle function
-                if hasattr(self, 'tool_implementations'):
-                    handle_battle_fn = self.tool_implementations.get("handle_battle")
-                    if handle_battle_fn:
-                        human_summary, structured_output = handle_battle_fn(
-                            self.reader,  # env
-                            self.quest_manager,
-                            self.navigator,
-                            self.env_wrapper
-                        )
-                        # Return some indication that battle was handled
-                        return json.dumps({
-                            "tool_call": "handle_battle",
-                            "result": structured_output,
-                            "summary": human_summary
-                        })
-                        
-            # No tool call generated
-            agent_logger.log_error("GROK_NO_TOOL_CALL", "No tool call in response", {
-                "finish_reason": finish_reason,
-                "has_content": bool(getattr(message, 'content', None))
-            })
-            
-            # Provide sensible defaults
-            if "NAME?" in prompt:
-                return json.dumps({
-                    "tool_call": "choose_action",
-                    "arguments": {"action": 4, "reasoning": "Selecting default actions..."}
-                })
-            else:
-                return json.dumps({"error": "No tool call generated"})
-                
-        except Exception as e:
-            logger.error(f"Grok API error: {e}")
-            
-            return json.dumps({"error": str(e)})
+            # Feed the tool result back to Grok in the exact schema Grok expects:
+            #   1) Re-append the assistant message that contained the tool_call so
+            #      the history shows the request Grok just made (OpenAI keeps
+            #      it on the server but we need it client-side for the follow-up).
+            #   2) Append a role="tool" message with *tool_call_id* referencing
+            #      the original call id and the JSON payload.
+            assistant_call_msg = {
+                "role": "assistant",
+                "content": message.content or "",
+                "tool_calls": [
+                    {
+                        "id": tool_call.id,
+                        "type": tool_call.type,
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps(tool_args)
+                        }
+                    }
+                ]
+            }
+            messages.append(assistant_call_msg)
+
+            # Tool response – MUST include the same id so Grok can match it
+            tool_msg = {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": tool_name,
+                "content": json.dumps(structured_output if structured_output else {"result": human_summary})
+            }
+            messages.append(tool_msg)
+            self.agent_file_logger.debug(f"GROK_TOOL_RESP appended: {tool_msg}")
+
+            # Continue to next iteration which will call Grok again with augmented messages
+            continue
+
+        # Exhausted loop
+        return json.dumps({"error": "Exceeded tool-call chain limit"})
     
     def _parse_response(self, response: str) -> Optional[int]:
         """Parse Grok's response to extract the action or execute tools"""
-        
+        # ---------------------------------------------
+        # Push final response to UI for display
+        # ---------------------------------------------
+        if self.status_queue is not None:
+            try:
+                self.status_queue.put(("__grok_response__", response[:500]))
+            except Exception:
+                pass
+        # Existing parsing logic follows
         try:
             data = json.loads(response)
             
@@ -553,6 +672,16 @@ Think step by step about what to do next, then call the 'choose_action' tool wit
                     # Log tool execution
                     self.agent_file_logger.info(f"Tool {tool_name} executed: {human_summary}")
                     self.last_response = f"Tool {tool_name}: {human_summary}"
+                    
+                    # Post-processing for ask_friend / enter_name
+                    if tool_name == "ask_friend":
+                        # Capture suggested name if provided
+                        suggested = structured_output.get("suggested_name") if isinstance(structured_output, dict) else None
+                        if suggested:
+                            self._pending_name = suggested
+                    elif tool_name == "enter_name":
+                        # Naming done; clear pending suggestion
+                        self._pending_name = None
                     
                     # For handle_battle, we don't return an action since it handles the battle
                     # Return None to indicate no single action needed

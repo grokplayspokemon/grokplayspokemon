@@ -18,6 +18,8 @@ import io
 import logging
 from shared import game_started, grok_enabled
 from omegaconf import OmegaConf
+from .quest_map_generator import generate as build_quest_map, PAD_ROW, PAD_COL, TILE_SIZE
+from PIL import ImageDraw
 
 # load the exact same config.yaml you merged in play.py
 _CONFIG = OmegaConf.load(Path(__file__).parent.parent / "config.yaml")
@@ -245,6 +247,13 @@ def handle_status_update(item_id, data):
         game_state['quest_data']['triggers'][str(item_id)] = data
         broadcast_update('trigger_update', {'id': item_id, 'completed': data})
     
+    elif item_id == '__global_map_player__':
+        # Player position for global map overlay
+        # data expected as tuple/list [y, x]
+        gy, gx = data[0], data[1] if isinstance(data, (list, tuple)) else (0, 0)
+        game_state['global_map_player'] = {'gy': gy, 'gx': gx}
+        broadcast_update('global_map_player', {'gy': gy, 'gx': gx})
+    
     game_state['last_update'] = time.time()
 
 def monitor_status_queue(status_queue):
@@ -453,11 +462,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .center-content {
             grid-column: 2;
             grid-row: 2;
-            display: flex;
-            flex-direction: column;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr auto;
             padding: 20px;
             gap: 20px;
             overflow: hidden;
+            height: 100%;
         }
 
         /* Game screen area */
@@ -1209,19 +1220,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         <!-- Center content with game and team -->
         <div class="center-content">
-            <div class="game-area">
-                <div class="game-screen-container">
-                    <img id="gameScreen" alt="Game Screen" style="display: none;">
-                    <div class="game-placeholder" id="gamePlaceholder">
-                        Waiting for game capture...
-                    </div>
-                    <!-- Speech Bubble Overlay -->
-                    <div class="speech-bubble-overlay" id="speechBubbleOverlay"></div>
+            <div class="global-map-container" style="grid-column: 1; grid-row: 1; position: relative; height: 100%;">
+                <h2 class="section-title">Global Map</h2>
+                <div class="map-canvas" id="globalMapWrapper" style="position: absolute; inset: 0;">
+                    <img id="globalMapImage" src="/global-map.png" alt="Global Map"
+                         style="image-rendering: pixelated; width: 100%; height: 100%; object-fit: cover;">
+                    <canvas id="globalMapCanvas"
+                            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; image-rendering: pixelated;"></canvas>
+                </div>
+                <div class="map-info">
+                    <span>Position: <span id="mapPosition">(0, 0)</span></span>
+                    <span>Map: <span id="currentMapName">Unknown</span></span>
                 </div>
             </div>
-            
-            <!-- Pokemon Team -->                
-            <section class="team-display-area">
+            <div class="game-screen-container" style="grid-column: 2; grid-row: 1; position: relative; height: 100%;">
+                <img id="gameScreen" alt="Game Screen" style="width: 100%; height: 100%; object-fit: contain; display: none;">
+                <div class="game-placeholder" id="gamePlaceholder"
+                     style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;">
+                    Waiting for game capture...
+                </div>
+                <div class="speech-bubble-overlay" id="speechBubbleOverlay"
+                     style="position: absolute; inset: 0; pointer-events: none;"></div>
+            </div>
+            <section class="team-display-area" style="grid-column: 1 / span 2; grid-row: 2;">
                 <h2 class="section-title" style="text-align: center; margin-bottom: 16px;">Active Team</h2>
                 <div class="team-grid" id="pokemon-team">
                     <div class="pokemon-card empty-slot">—</div>
@@ -1277,25 +1298,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <div class="pricing-info">grok-3-mini pricing</div>
                         </div>
                         <div style="color: #666; font-size: 12px;" id="grokWaiting">Waiting for Grok to think...</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Global Map -->
-            <div class="global-map-container">
-                <div class="global-map-section">
-                    <h2 class="section-title">Global Map</h2>
-                    <div class="map-canvas" id="globalMap">
-                        <div class="map-placeholder">
-                            <div>Kanto region map</div>
-                            <div style="font-size: 11px; margin-top: 8px;">Player position will be shown here</div>
-                        </div>
-                        <img id="globalMapImage" src="/static/images/kanto_map.png" alt="Kanto Map">
-                        <div class="player-sprite" id="playerSprite" style="display: none;"></div>
-                    </div>
-                    <div class="map-info">
-                        <span>Position: <span id="mapPosition">(0, 0)</span></span>
-                        <span>Map: <span id="currentMapName">Unknown</span></span>
                     </div>
                 </div>
             </div>
@@ -1436,7 +1438,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         function updatePlayerPosition(gx, gy) {
             const playerSprite = document.getElementById('playerSprite');
             const mapImage = document.getElementById('globalMapImage');
-            const mapCanvas = document.getElementById('globalMap');
+            const mapCanvas = document.getElementById('globalMapCanvas');
             const mapPlaceholder = document.querySelector('.map-placeholder');
 
             if (!mapImage.complete || mapImage.naturalWidth === 0) {
@@ -1759,14 +1761,45 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }
         }
 
-        // SSE Connection
+        // Track first SSE connection so we can auto-refresh when Flask reloads
+        let firstConnect = true;
+        let lastServerId = null;
+        const RECONNECT_FALLBACK_MS = 5000;  // if SSE isn't back after 5s, reload
+        const WATCHDOG_INTERVAL_MS = 45000; // 45s without any SSE -> reload
+        let reconnectTimer = null;
+        let lastSseTime = Date.now();
+
         const eventSource = new EventSource('/events');
-        
+
+        eventSource.onopen = () => {
+            // connection (re)established – cancel any pending fallback reload
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        };
+
         eventSource.onmessage = async (e) => {
             if (!e.data) return;
             try {
                 const msg = JSON.parse(e.data);
                 console.log('SSE message:', msg.type, msg.data);
+                
+                // Handle server restarts – when Flask's reloader spins up a new
+                // process it emits a different server_id. If we detect that,
+                // reload the whole page so fresh assets are used.
+                if (msg.type === 'connected') {
+                    const sid = msg.data?.server_id;
+                    if (lastServerId && sid && lastServerId !== sid) {
+                        location.reload();
+                        return;
+                    }
+                    lastServerId = sid;
+                    if (!firstConnect) {
+                        // Fallback: if we somehow missed the server_id check
+                        location.reload();
+                        return;
+                    }
+                    firstConnect = false;
+                }
                 
                 switch(msg.type) {
                     case 'location':
@@ -1777,7 +1810,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         document.getElementById('statGlobal').textContent = `(${msg.data.gy || 0},${msg.data.gx || 0})`;
                         
                         if (msg.data.gx !== undefined && msg.data.gy !== undefined) {
-                            updatePlayerPosition(msg.data.gx, msg.data.gy);
+                            // Reload the generated global map to include current player position
+                            const mapImg = document.getElementById('globalMapImage');
+                            mapImg.src = `/global-map.png?ts=${Date.now()}`;
+                            // Update textual stats
+                            document.getElementById('mapPosition').textContent = `(${msg.data.gy},${msg.data.gx})`;
+                            document.getElementById('currentMapName').textContent = msg.data.map_name || 'Unknown';
                         }
                         break;
                         
@@ -1897,11 +1935,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             } catch (err) {
                 console.error('Error parsing SSE message', err);
             }
+            lastSseTime = Date.now();
         };
 
         eventSource.onerror = (err) => {
             console.error('SSE connection error:', err);
+            // EventSource will auto-retry by itself, but if for some reason we
+            // don't get an 'open' event again within RECONNECT_FALLBACK_MS,
+            // force a full page reload so the browser grabs a fresh SSE stream.
+            clearTimeout(reconnectTimer);
+            // Always start (or restart) the fallback reload timer
+            reconnectTimer = setTimeout(() => location.reload(), RECONNECT_FALLBACK_MS);
         };
+
+        // Watchdog: if no SSE message received for WATCHDOG_INTERVAL_MS reload page
+        setInterval(() => {
+            if (Date.now() - lastSseTime > WATCHDOG_INTERVAL_MS) {
+                console.warn('SSE watchdog timeout – reloading page');
+                location.reload();
+            }
+        }, WATCHDOG_INTERVAL_MS / 2);
 
         // Agent control functions
         async function startAgent() {
@@ -2053,11 +2106,19 @@ def events():
             sse_clients.append(client_queue)
         
         try:
-            # Send initial connection message
-            yield f"data: {json.dumps({'type': 'connected', 'data': 'Connected to game server'})}\n\n"
+            # Send initial connection message with unique server_id (PID)
+            yield (
+                f"data: " + json.dumps({
+                    'type': 'connected',
+                    'data': {
+                        'msg': 'Connected to game server',
+                        'server_id': os.getpid()
+                    }
+                }) + "\n\n"
+            )
             
             # Send current game state if available
-            keys = ['location', 'stats', 'pokemon_team', 'current_quest', 'quest_data', 'grok_thinking', 'grok_response']
+            keys = ['location', 'stats', 'pokemon_team', 'current_quest', 'quest_data', 'grok_thinking', 'grok_response', 'grok_enabled']
             initial_updates = [(key, game_state.get(key)) for key in keys]
 
             for event_type, data in initial_updates:
@@ -2241,18 +2302,48 @@ def start_server(status_queue, host='0.0.0.0', port=8080):
     from shared import game_started
     game_started.set()
     
-    # Run Flask server
-    app.run(host=host, port=port, debug=False, threaded=True)
+    # 🔄  Enable Grok immediately so manual 'Start Grok' click is unnecessary
+    grok_enabled.set()
+    broadcast_update('grok_enabled', True)
+    
+    # Run Flask server – enable reloader only when we are running in the main
+    # thread (e.g. `python web_server.py`).  When the server is launched from
+    # within `play.py` it runs in a background thread and signal-based reloaders
+    # are disallowed; in that case we fall back to a plain threaded server.
+    in_main_thread = threading.current_thread() is threading.main_thread()
+
+    app.run(
+        host=host,
+        port=port,
+        debug=in_main_thread,          # debug implies nice tracebacks
+        use_reloader=in_main_thread,   # only safe in main thread
+        threaded=True
+    )
+
+@app.route('/global-map.png')
+def global_map_png():
+    """Dynamically generate and serve the quest-overlay global map."""
+    out_path = STATIC_DIR / 'images' / 'kanto_map.png'
+    # Generate quest-overlay map in place
+    quest_dir = Path(__file__).parent.parent / 'environment' / 'environment_helpers' / 'quest_paths'
+    build_quest_map(output_path=out_path, quest_dir=quest_dir, n=10)
+    # Optionally overlay current player position as a red rectangle
+    player = game_state.get('global_map_player')
+    if player:
+        gy, gx = player.get('gy', 0), player.get('gx', 0)
+        # Convert padded global to tile coords
+        tx = gx - PAD_COL
+        ty = gy - PAD_ROW
+        # Load image and draw
+        img = Image.open(out_path).convert('RGBA')
+        draw = ImageDraw.Draw(img)
+        x0, y0 = tx * TILE_SIZE, ty * TILE_SIZE
+        draw.rectangle([x0, y0, x0 + TILE_SIZE - 1, y0 + TILE_SIZE - 1], outline=(255, 0, 0), width=2)
+        img.save(out_path)
+    return send_from_directory(out_path.parent, out_path.name, max_age=0)
 
 if __name__ == '__main__':
-    # Test mode
+    # Developer-run mode: start an *empty* queue and print instructions.
     from queue import SimpleQueue
-    test_queue = SimpleQueue()
-    
-    # Add some test data
-    test_queue.put(('__location__', {'x': 1, 'y': 6, 'map_id': 37, 'map_name': 'REDS_HOUSE_1F', 'gx': 76, 'gy': 354}))
-    test_queue.put(('__current_quest__', 2))
-    test_queue.put(('__stats_money', 999999))
-    # # Send Grok status
-    # test_queue.put(('__grok_enabled__', grok_enabled.is_set() if grok_agent else False))
-    start_server(test_queue)
+    print("\n📖  Running web_server directly. For full game data run play.py, which\n     starts the emulator, status queue, and this server automatically.\n     This standalone mode is for UI work only – you will not see live\n     game frames.\n")
+    start_server(SimpleQueue())

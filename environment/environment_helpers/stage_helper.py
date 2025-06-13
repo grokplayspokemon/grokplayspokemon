@@ -6,6 +6,7 @@ and the scripted_stage_blocking method for selective warp control.
 
 from environment.data.environment_data.pokered_constants import MAP_ID_REF, WARP_DICT, MAP_DICT
 from typing import Dict, List, Any, Optional
+from collections import deque
 
 # Stage-specific configuration with both blocking and scripted movement
 #             ['block', 'ROUTE_5', 'UNDERGROUND_PATH_ROUTE_5@1',],
@@ -68,11 +69,98 @@ from typing import Dict, List, Any, Optional
 # =============================================================================
 
 STAGE_DICT = {
-    1: {
-        'events': [],
-        'blockings': [],
-        'scripted_movements': []
-    },
+    # ------------------------------------------------------------------
+    # Stage 0 – Game boot & intro-dialog skipping until the custom name
+    #           entry screen ("YOUR NAME?") is visible.  This is *only*
+    #           responsible for getting the game from title screen to the
+    #           letter-grid.  Further name typing is handled elsewhere.
+    # ------------------------------------------------------------------
+1: {
+    'events': [],
+    'blockings': [],
+    'scripted_movements': [
+        # 1. Press START until Oak's dialog appears
+        {
+            'condition': {
+                'always': True,
+                'oak_intro_active': False
+            },
+            'stop_condition': {
+                'dialog_contains': 'Hello there'
+            },
+            'action': 'start'
+        },
+        # 2a. Start pressing B when Oak's dialog appears
+        {
+            'condition': {
+                'dialog_contains': 'Hello there',
+                'set_oak_intro_active': True
+            },
+            'stop_condition': {
+                'dialog_contains': 'NEW NAME',
+                'clear_oak_intro_active': True
+            },
+            'action': 'b'
+        },
+        # 2b. Continue pressing B through Oak's intro
+        {
+            'condition': {
+                'oak_intro_active': True,
+                'always': True
+            },
+            'stop_condition': {
+                'dialog_contains': 'NEW NAME',
+                'clear_oak_intro_active': True
+            },
+            'action': 'b'
+        },
+        # 3. Press A to select "NEW NAME"
+        {
+            'condition': {
+                'dialog_contains': 'NEW NAME'
+            },
+            'stop_condition': {
+                'dialog_contains': 'YOUR NAME?'
+            },
+            'action': 'a'
+        },
+        # 4. When on name entry screen, press START to use default name
+        {
+            'condition': {
+                'dialog_contains': 'YOUR NAME?'
+            },
+            'action': 'start'
+        },
+        # 5. Press A to confirm the name when asked "Right?"
+        {
+            'condition': {
+                'dialog_contains': 'Right?'
+            },
+            'action': 'a'
+        },
+        # 6. Press B through rival intro dialog
+        {
+            'condition': {
+                'dialog_contains': 'This is my grand'
+            },
+            'action': 'b'
+        },
+        # 7. Press A when rival name selection appears
+        {
+            'condition': {
+                'dialog_contains': 'GARY'  # Default rival names menu
+            },
+            'action': 'a'
+        },
+        # 8. Press B through final dialog
+        {
+            'condition': {
+                'dialog_contains': 'your very own'
+            },
+            'action': 'b'
+        }
+    ]
+},
     2: {
         'events': [],
         'blockings': [
@@ -174,10 +262,49 @@ class StageManager:
     
     def __init__(self, env):
         self.env = env
-        self.stage = 1  # Current stage
+        # Start at stage 1 because quest progression stages begin at 1.
+        # (Stage-0 bootstrap was removed.)
+        self.stage = 1
         self.blockings = []  # Current active blockings
         self.scripted_movements = []  # Current scripted movements
         self.pending_b_presses = 0  # For managing B press sequences
+        
+        # ------------------------------------------------------------------
+        # Anti-stuck safeguard: Counts how many times Stage-1 scripted rule 3
+        # (A-press on «NEW NAME») has fired in the current session.  If this
+        # exceeds a reasonable threshold we assume the intro sequence is
+        # already past the point where "YOUR NAME?" would appear (e.g. when
+        # loading from a mid-intro save) and automatically advance to the
+        # next stage to prevent endless A-button spamming.
+        # ------------------------------------------------------------------
+        self._stage1_a_press_counter = 0
+        
+        # ------------------------------------------------------------------
+        # Tracks whether we are currently inside Professor Oak's intro
+        # monologue (from the first «Hello there!» up until the preset-name
+        # screen appears).  Used so the B-spamming rule only fires during
+        # that interval.
+        # ------------------------------------------------------------------
+        self._oak_intro_active: bool = False
+        
+        # ------------------------------------------------------------------
+        # ACTIVE BUTTON GENERATION 🔄
+        # ------------------------------------------------------------------
+        # Until now StageManager only *modified* player/AI actions that were
+        # already present in the input stream.  For certain early-game
+        # automation (notably Quest 001) we sometimes need to *originate* an
+        # input even when the upstream systems supply **no** action (e.g. the
+        # AI is thinking or interactive player is idle).
+        #
+        # We implement a tiny FIFO queue so update_stage_manager() can enqueue
+        # one-off key-presses.  The next call to scripted_stage_movement()
+        # will pop from this queue **before** evaluating the normal scripted
+        # movement rules, thereby ensuring the press is executed exactly once
+        # and is transparently blended with the existing override logic.
+        # ------------------------------------------------------------------
+        self._auto_action_queue: "deque[int]" = deque(maxlen=8)
+        # Simple frame counter so we can throttle auto-press frequency
+        self._frame_counter: int = 0
         
         # Action mapping for scripted movements
         self.action_mapping = {
@@ -190,6 +317,14 @@ class StageManager:
             'path': 6,
             'start': 7
         }
+        
+        # ------------------------------------------------------------------
+        # Immediately load stage-specific configuration for the initial stage
+        # so that bootstrap scripted movements (Stage-0 intro-skip) are active
+        # from the very first frame.  Without this call the "scripted_stage_
+        # movement" method finds an empty list and the automation never fires.
+        # ------------------------------------------------------------------
+        self.update({})
         
     def update(self, current_states: Dict[str, Any]):
         """Update stage based on current game state"""
@@ -317,30 +452,40 @@ class StageManager:
         Returns a different action if scripted movement should override the input action.
         Enhanced with automatic quest path following.
         """
-        # CRITICAL: Do not override actions when dialog is active - player needs to interact
-        try:
-            dialog = self.env.read_dialog()
-            if dialog and dialog.strip():
-                print(f"StageManager: Dialog active, allowing player action {action} for interaction")
-                return action
-        except Exception as e:
-            print(f"StageManager: Error checking dialog in scripted_stage_movement: {e}")
+        # --------------------------------------------------------------
+        # 0️⃣  FIRST PRIORITY – Execute any auto-generated action that
+        #     was queued in update_stage_manager().  This guarantees the
+        #     press originates *inside* StageManager and is not dependent
+        #     on upstream input.
+        # --------------------------------------------------------------
+        if self._auto_action_queue:
+            auto_act = self._auto_action_queue.popleft()
+            print(f"StageManager: Executing queued auto-action {auto_act} (remaining: {len(self._auto_action_queue)})")
+            return auto_act
             
+        # ------------------------------------------------------------------
         # Handle PATH_FOLLOW_ACTION first, regardless of scripted movements
+        # (preserves original navigation delegation logic).
+        # ------------------------------------------------------------------
         from environment.environment import PATH_FOLLOW_ACTION
         if action == PATH_FOLLOW_ACTION:
             print(f"StageManager: Converting PATH_FOLLOW_ACTION to quest-appropriate movement")
-            
+
             # Debug: Check if quest manager is available
             if hasattr(self.env, 'quest_manager') and self.env.quest_manager:
                 current_quest = getattr(self.env.quest_manager, 'current_quest_id', None)
                 print(f"StageManager: Current quest ID from quest manager: {current_quest}")
             else:
-                print(f"StageManager: No quest manager available on environment")
-                
+                print("StageManager: No quest manager available on environment – passing through original action")
+                return action
+
             return self._convert_path_follow_to_movement(action)
             
         if not self.scripted_movements:
+            # No scripted movements defined for the current stage – allow the
+            # original action to proceed unchanged.  We only log once so the
+            # console is not flooded every frame.
+            print("StageManager: No scripted movements active – passing through action", action)
             return action
             
         try:
@@ -351,59 +496,162 @@ class StageManager:
                 from environment.data.recorder_data.global_map import local_to_global
                 global_y, global_x = local_to_global(y, x, map_id)
                 global_coords = (global_y, global_x)
-            except:
+                print(f"DEBUGGING STAGEMANAGER: global coords available: {global_coords}")
+            except Exception as e:
+                # Global coordinate conversion failed (likely on maps that are
+                # not part of the world map).  This is not fatal – just log
+                # once and proceed with local coordinates only.
+                print("StageManager: No global coords available (", e, ") – continuing with local coords only")
                 global_coords = None
             
             # Process scripted movements in order
             for movement in self.scripted_movements:
+                print(f"DEBUGGING STAGEMANAGER: processing movement {movement} in self.scripted_movements {self.scripted_movements}")
+                # ------------------------------------------------------------------
+                # NEW FEATURE: Optional "stop_condition"
+                # ------------------------------------------------------------------
+                # A scripted movement can now specify a complementary
+                #     'stop_condition': {...}
+                # When this evaluates to True the scripted movement will be
+                # temporarily ignored (but *not* removed) allowing finely-
+                # grained control without having to invert the original
+                # triggering condition.
+                # ------------------------------------------------------------------
+                stop_cond = movement.get('stop_condition')
+                if stop_cond and self._check_movement_condition(stop_cond, x, y, map_id, global_coords):
+                    # The stop-condition overrides the trigger – skip this movement rule.
+                    print("StageManager: stop_condition met – skipping scripted movement", movement)
+                    continue
+
                 condition = movement.get('condition', {})
+                print(f"DEBUGGING STAGEMANAGER: condition: {condition}")
                 
-                # Check if conditions are met
+                # Check if trigger conditions are met
                 if self._check_movement_condition(condition, x, y, map_id, global_coords):
                     scripted_action = movement.get('action', action)
-                    
+                    print(f"DEBUGGING STAGEMANAGER: scripted_action: {scripted_action}")
+                    print(f"DEBUGGING STAGEMANAGER: action: {action}")
                     # Handle special actions
                     if 'set_pending_b' in movement:
                         self.pending_b_presses = movement['set_pending_b']
+                        print(f"DEBUGGING STAGEMANAGER: set_pending_b: {self.pending_b_presses}")
                     if 'decrement_pending_b' in movement and movement['decrement_pending_b']:
                         self.pending_b_presses = max(0, self.pending_b_presses - 1)
-                    
+                        print(f"DEBUGGING STAGEMANAGER: decrement_pending_b: {self.pending_b_presses}")
                     # Handle special path following action
                     if scripted_action == 'path_follow':
                         return self._handle_path_following(action, movement)
-                    
+                    print(f"DEBUGGING STAGEMANAGER: scripted_action: {scripted_action}")
                     # Convert action string to action index
                     if isinstance(scripted_action, str) and scripted_action in self.action_mapping:
+                        # ------------------------------------------------------
+                        # Track how often the Stage-1 «NEW NAME» automation fires
+                        # so we can detect and break out of infinite loops after
+                        # loading a save state mid-intro.
+                        # ------------------------------------------------------
+                        if self.stage == 1 and scripted_action == 'a':
+                            self._stage1_a_press_counter += 1
+                        print(f"DEBUGGING STAGEMANAGER: self._stage1_a_press_counter: {self._stage1_a_press_counter}")
                         scripted_action_int = self.action_mapping[scripted_action]
-                        print(f"StageManager: Scripted movement triggered - {scripted_action} ({scripted_action_int}) at {(x,y)} map {map_id}")
+                        print(f"StageManager: OVERRIDE → {scripted_action} ({scripted_action_int}) at {(x, y)} map {map_id} [rule: {movement}]")
                         return scripted_action_int
                     elif isinstance(scripted_action, int):
-                        print(f"StageManager: Scripted movement triggered - action {scripted_action} at {(x,y)} map {map_id}")
+                        print(f"StageManager: OVERRIDE → action {scripted_action} at {(x, y)} map {map_id} [rule: {movement}]")
                         return scripted_action
-                        
+                    print(f"DEBUGGING STAGEMANAGER: scripted_action: {scripted_action}")
         except Exception as e:
             print(f"StageManager: Error in scripted_stage_movement: {e}")
             
+        # ------------------------------------------------------------------
+        # NEW FEATURE: Stray-A suppression – once Quest 001 is complete we
+        # no longer want the intro-bootstrap key-repeat to mash the A button
+        # when no dialog is present.  If we detect such an "A" (index 4)
+        # that is NOT triggered by any scripted rule we simply convert it to
+        # a noop so downstream systems stay idle.
+        # ------------------------------------------------------------------
+        try:
+            if (action == self.action_mapping.get('a') and  # It *is* an A-press
+                not (self.env.get_active_dialog() or '').strip() and  # No dialog visible
+                self._quest001_completed()):
+                print("StageManager: Suppressing stray 'A' press – Quest 001 completed, no active dialog")
+                return self._get_noop_action()
+        except Exception as e:
+            print("StageManager: Error in stray-A suppression logic:", e)
+        
+        print(f"DEBUGGING STAGEMANAGER: action={action}")
         return action
     
     def _check_movement_condition(self, condition: Dict[str, Any], x: int, y: int, map_id: int, global_coords: Optional[tuple]) -> bool:
         """Check if movement condition is satisfied"""
         try:
+            # ------------------------------------------------------------------
+            # SUPER-VERBOSE DEBUGGING ─ print full context before evaluating the
+            # condition so we can trace exactly why it does / does not match.
+            # ------------------------------------------------------------------
+            print("\n[StageManager-DEBUG] --------------------------------------------------")
+            print("Checking condition:", condition)
+            print("Player   : local=(%d,%d) map_id=%d" % (x, y, map_id))
+            if global_coords:
+                print("           global=", global_coords)
+            current_dialog = (self.env.get_active_dialog() or '').replace("\n", "\\n")
+            print("Dialog   : '%s'" % current_dialog)
+            print("Flags    : oak_intro_active=%s, pending_b=%d" % (self._oak_intro_active, self.pending_b_presses))
+            print("--------------------------------------------------------------------")
+
+            # ------------------------------------------------------------------
+            # NEW: Dialog-aware scripted movement conditions
+            # ------------------------------------------------------------------
+            # Allow conditions to react to in-game dialog text so we can automate
+            # the early ‑game boot sequence (skipping intro text, choosing NEW
+            # NAME, etc.).  Two complementary keys are supported:
+            #   • dialog_contains : <substring>   – True iff substring is in the
+            #                                       current active dialog
+            #   • dialog_present  : True / False  – True  => any dialog visible
+            #                                       False => *no* dialog visible
+            # ------------------------------------------------------------------
+            if 'dialog_contains' in condition:
+                substr = str(condition['dialog_contains'])
+                dialog = (self.env.get_active_dialog() or '')
+                # Case-insensitive comparison
+                dialog_ci = dialog.lower()
+                substr_ci = substr.lower()
+                # Empty substring – always match (but still require dialog
+                # visibility so START spamming only happens while *no* dialog*)
+                if substr:
+                    if substr_ci not in dialog_ci:
+                        print(f"StageManager DEBUG: dialog_contains check failed – wanted substring '{substr}', active dialog='{dialog}'")
+                        return False
+                else:
+                    # If empty string provided, succeed only when dialog is
+                    # non-empty (avoid matching during title screen)
+                    if not dialog:
+                        print("StageManager DEBUG: dialog_contains='' check failed – no active dialog visible")
+                        return False
+
+            if 'dialog_present' in condition:
+                want_present = bool(condition['dialog_present'])
+                has_dialog = bool(self.env.get_active_dialog() or '')
+                if want_present != has_dialog:
+                    print(f"StageManager DEBUG: dialog_present check failed – want_present={want_present}, has_dialog={has_dialog}")
+                    return False
             # Check local coordinates
             if 'local_coords' in condition:
                 target_x, target_y = condition['local_coords']
                 if (x, y) != (target_x, target_y):
+                    print(f"StageManager DEBUG: local_coords check failed – at ({x},{y}), expected ({target_x},{target_y})")
                     return False
             
             # Check global coordinates
             if 'global_coords' in condition and global_coords:
                 target_global = condition['global_coords']
                 if global_coords != target_global:
+                    print(f"StageManager DEBUG: global_coords check failed – at {global_coords}, expected {target_global}")
                     return False
                     
             # Check map ID
             if 'map_id' in condition:
                 if map_id != condition['map_id']:
+                    print(f"StageManager DEBUG: map_id check failed – current {map_id}, expected {condition['map_id']}")
                     return False
             
             # Check item possession
@@ -415,6 +663,7 @@ class StageManager:
                 if item_name and hasattr(self.env, 'item_handler'):
                     has_item = self.env.item_handler.has_item(item_name)
                     if has_item != should_have:
+                        print(f"StageManager DEBUG: item_check failed – item '{item_name}' possession {has_item}, expected {should_have}")
                         return False
                 elif item_name:
                     # Fallback item check method
@@ -430,12 +679,15 @@ class StageManager:
                 check = condition['pending_b_presses']
                 if check == '>0':
                     if self.pending_b_presses <= 0:
+                        print("StageManager DEBUG: pending_b_presses '>0' check failed – none pending")
                         return False
                 elif check == True:
                     if self.pending_b_presses <= 0:
+                        print("StageManager DEBUG: pending_b_presses True check failed – none pending")
                         return False
                 elif isinstance(check, int):
                     if self.pending_b_presses != check:
+                        print(f"StageManager DEBUG: pending_b_presses=={check} check failed – currently {self.pending_b_presses}")
                         return False
             
             # Check special path following conditions
@@ -443,13 +695,32 @@ class StageManager:
                 # This condition always matches
                 pass
                 
+            # --------------------------------------------------------------
+            # Custom intro-sequence flag helpers
+            # --------------------------------------------------------------
+            if 'oak_intro_active' in condition:
+                if bool(condition['oak_intro_active']) != self._oak_intro_active:
+                    print("StageManager DEBUG: oak_intro_active condition failed – flag is",
+                          self._oak_intro_active)
+                    return False
+
             if 'quest_path_active' in condition and condition['quest_path_active']:
                 # Check if quest manager has active path following
                 if hasattr(self.env, 'quest_manager') and hasattr(self.env.quest_manager, 'warp_blocker'):
                     if not self.env.quest_manager.warp_blocker.path_follower.path_following_active:
+                        print("StageManager DEBUG: quest_path_active check failed – no active path following")
                         return False
                 else:
+                    print("StageManager DEBUG: quest_path_active check failed – quest manager or warp_blocker missing")
                     return False
+            
+            # If we reach here the condition is satisfied – perform any side-effects
+            if condition.get('set_oak_intro_active'):
+                print("StageManager: Setting _oak_intro_active = True")
+                self._oak_intro_active = True
+            if condition.get('clear_oak_intro_active'):
+                print("StageManager: Clearing _oak_intro_active flag")
+                self._oak_intro_active = False
             
             return True
             
@@ -550,7 +821,7 @@ class StageManager:
         
         self.update(current_states)
         
-        # Handle stage 10 special blocking logic (your example)
+        # Handle stage 10 special blocking logic
         if self.stage == 10:
             map_id = self.env.current_map_id - 1
             if map_id == 0xD8:  # pokemon mansion b1f
@@ -566,4 +837,94 @@ class StageManager:
                             self.blockings.remove(additional_blocking)
                     else:  # switch off
                         if additional_blocking not in self.blockings:
-                            self.blockings.append(additional_blocking) 
+                            self.blockings.append(additional_blocking)
+
+        # In update_stage_manager method, replace the Stage 1 completion check:
+        if self.stage == 1:
+            # Only transition to Stage 2 when we're actually in the game world
+            # Check for:
+            # 1. Map 0 (Pallet Town)
+            # 2. NOT at coordinates 0,0 (which is title screen)
+            # 3. No intro dialog visible
+            current_map = self.env.get_game_coords()[2]
+            x, y = self.env.get_game_coords()[:2]
+            dialog = self.env.get_active_dialog() or ''
+            
+            # We're in Pallet Town if:
+            # - Map is 0
+            # - We're not at 0,0 (title screen position)
+            # - No character selection dialog visible
+            if (current_map == 0 and 
+                (x != 0 or y != 0) and
+                'ABCDEFGHIJKLMNOP' not in dialog):  # Character grid dialog
+                print("StageManager: Intro complete - now in Pallet Town game world, entering Stage 2")
+                self.stage = 2
+                self.clear_scripted_movements()
+            # Fallback: If we've pressed A on «NEW NAME» more than 25 times
+            elif self._stage1_a_press_counter >= 25:
+                print("StageManager: Detected stuck intro loop – forcing transition to Stage 2")
+                self.stage = 2
+                self.clear_scripted_movements()
+                self._stage1_a_press_counter = 0  # Reset counter for safety
+
+        # ------------------------------------------------------------------
+        # ACTIVE INPUT GENERATION FOR QUEST 001
+        # ------------------------------------------------------------------
+        # When Quest 001 is active we want to guarantee that the player keeps
+        # interacting even if no upstream action is provided.  As a simple
+        # heuristic we enqueue an "A" press every ~6 frames (≈10 Hz game
+        # time) whenever *no dialog* is visible – this causes rapid
+        # interaction with the nearest NPC/menu without interfering with
+        # user-driven input because queued auto-actions have highest
+        # priority.
+        # ------------------------------------------------------------------
+        try:
+            self._frame_counter = (self._frame_counter + 1) % 60  # prevent overflow
+            if (
+                hasattr(self.env, 'quest_manager') and
+                getattr(self.env.quest_manager, 'current_quest_id', None) == '001' and
+                not self._quest001_completed()
+            ):
+                dialog_active = bool((self.env.get_active_dialog() or '').strip())
+                # Only press A when dialog is visible (to advance text) *or*
+                # when player is idle in front of an NPC (no dialog);
+                # heuristic: press every 6 frames regardless, StageManager's
+                # existing warp/NPC intercepts will handle context.
+                if self._frame_counter % 6 == 0:
+                    # Avoid flooding queue
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action('a')
+        except Exception as e:
+            print(f"StageManager: Error in quest001 auto-action logic: {e}")
+
+    # ------------------------------------------------------------------
+    # Quest/condition helpers
+    # ------------------------------------------------------------------
+    def _quest001_completed(self) -> bool:
+        """Return True when quest 001 is marked as completed by QuestManager."""
+        if hasattr(self.env, 'quest_manager') and self.env.quest_manager:
+            status = getattr(self.env.quest_manager, 'quest_completed_status', {})
+            return bool(status.get('001'))
+        return False 
+
+    # ------------------------------------------------------------------
+    # Auto-action queue helpers
+    # ------------------------------------------------------------------
+    def _queue_auto_action(self, action_name_or_int: "str|int") -> None:
+        """Enqueue a single button press to be executed on the next frame.
+
+        Args:
+            action_name_or_int: Either an integer index that directly maps
+                to the environment action space or a mnemonic string ("a",
+                "b", "up", …) present in self.action_mapping.
+        """
+        if isinstance(action_name_or_int, str):
+            action_int = self.action_mapping.get(action_name_or_int)
+            if action_int is None:
+                print(f"StageManager: Unknown action '{action_name_or_int}' – ignoring auto-queue request")
+                return
+        else:
+            action_int = int(action_name_or_int)
+
+        self._auto_action_queue.append(action_int)
+        print(f"StageManager: Queued auto-action {action_name_or_int} → {action_int} (queue size: {len(self._auto_action_queue)})") 

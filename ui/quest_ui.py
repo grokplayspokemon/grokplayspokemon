@@ -361,7 +361,15 @@ def setup_polling(root, status_queue, emulator_canvas, collision_canvas, map_can
 # Helper functions for polling
 def handle_location_update(status_data, env_labels, map_canvas):
     """Handle location updates"""
-    local_x, local_y, map_id, map_name = status_data
+    # Support both tuple (legacy) and dict (current) formats
+    if isinstance(status_data, dict):
+        local_x = status_data.get('x', 0)
+        local_y = status_data.get('y', 0)
+        map_id = status_data.get('map_id') or status_data.get('mapId') or 0
+        map_name = status_data.get('map_name') or status_data.get('mapName') or 'Unknown'
+    else:
+        # Legacy tuple/list format: (x, y, map_id, map_name)
+        local_x, local_y, map_id, map_name = status_data
     
     # Update labels
     env_labels['direct_map_name'].config(text=f"Map: {map_name}")

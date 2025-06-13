@@ -935,7 +935,7 @@ class NavigationSystemMonitor:
         try:
             # Map transitions are critical - always do full check
             results = self.verify_complete_system_state(force_detailed=True)
-            print(f"🗺️  Navigation check at map transition: {results['total_issues']} issues found")
+            # print(f"🗺️  Navigation check at map transition: {results['total_issues']} issues found")
         except Exception as e:
             print(f"Error in map transition check: {e}")
     

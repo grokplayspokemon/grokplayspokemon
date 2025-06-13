@@ -1,5 +1,5 @@
 # grok_plays_pokemon/agent/grok_tool_implementations.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing import List, Literal, Optional, Dict, Any, Tuple
 
 # Import environment components for type hinting and use in tools
@@ -54,6 +54,89 @@ class AskFriendRequest(BaseModel):
     question: str = Field(description="Question to ask an unaffiliated helper Grok agent for high-level advice or stuck situations.")
 ask_friend_schema = AskFriendRequest.model_json_schema()
 
+# ----------------------------- NEW TOOL -----------------------------
+class EnterNameRequest(BaseModel):
+    name: str = Field(description="Exact name to enter (max 10 characters, letters/numbers only)")
+    target: Optional[str] = Field(default="player", description="Either 'player' or 'rival'")
+
+# Generate JSON schema for EnterNameRequest
+enter_name_schema = EnterNameRequest.model_json_schema()
+
+def _move_cursor(env: RedGymEnv, from_pos: Tuple[int,int], to_pos: Tuple[int,int]):
+    """Helper: move naming-screen cursor using D-Pad presses."""
+    row_from, col_from = from_pos
+    row_to, col_to = to_pos
+    # Vertical moves first
+    vert = row_to - row_from
+    key = WindowEvent.PRESS_ARROW_DOWN if vert > 0 else WindowEvent.PRESS_ARROW_UP
+    for _ in range(abs(vert)):
+        env.pyboy.send_input(key)
+        env.pyboy.tick(2)
+        env.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN if vert>0 else WindowEvent.RELEASE_ARROW_UP)
+        env.pyboy.tick(2)
+    # Horizontal moves
+    horiz = col_to - col_from
+    key = WindowEvent.PRESS_ARROW_RIGHT if horiz > 0 else WindowEvent.PRESS_ARROW_LEFT
+    for _ in range(abs(horiz)):
+        env.pyboy.send_input(key)
+        env.pyboy.tick(2)
+        env.pyboy.send_input(WindowEvent.RELEASE_ARROW_RIGHT if horiz>0 else WindowEvent.RELEASE_ARROW_LEFT)
+        env.pyboy.tick(2)
+
+
+def enter_name(
+    env: RedGymEnv,
+    quest_manager: QuestManager,
+    navigator: InteractiveNavigator,
+    env_wrapper: EnvWrapper,
+    name: str,
+    target: str = "player"
+) -> Tuple[str, Dict[str, Any]]:
+    """Automatically enter a name on the naming screen by moving the cursor and pressing A for each letter, then START at the end."""
+    name = name.strip().upper()[:10]
+    logger.info(f"Entering {target} name: {name}")
+
+    # Letter grid coordinates (row, col)
+    grid = {
+        'A': (0,0), 'B': (0,1), 'C': (0,2), 'D': (0,3), 'E': (0,4), 'F': (0,5), 'G': (0,6), 'H': (0,7), 'I': (0,8),
+        'J': (1,0), 'K': (1,1), 'L': (1,2), 'M': (1,3), 'N': (1,4), 'O': (1,5), 'P': (1,6), 'Q': (1,7), 'R': (1,8),
+        'S': (2,0), 'T': (2,1), 'U': (2,2), 'V': (2,3), 'W': (2,4), 'X': (2,5), 'Y': (2,6), 'Z': (2,7),
+        ' ': (2,8)  # Use last slot as space (actually "Z" rightmost); space handled by ED but rarely used
+    }
+
+    # Start by resetting cursor to top-left (press UP/LEFT 10 times each)
+    for _ in range(9):
+        env.pyboy.send_input(WindowEvent.PRESS_ARROW_UP)
+        env.pyboy.tick(2)
+        env.pyboy.send_input(WindowEvent.RELEASE_ARROW_UP)
+        env.pyboy.tick(2)
+    for _ in range(9):
+        env.pyboy.send_input(WindowEvent.PRESS_ARROW_LEFT)
+        env.pyboy.tick(2)
+        env.pyboy.send_input(WindowEvent.RELEASE_ARROW_LEFT)
+        env.pyboy.tick(2)
+
+    cur_pos = (0,0)
+    for ch in name:
+        if ch not in grid:
+            continue  # skip unsupported characters
+        target_pos = grid[ch]
+        _move_cursor(env, cur_pos, target_pos)
+        cur_pos = target_pos
+        # Press A to select letter
+        env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+        env.pyboy.tick(3)
+        env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+        env.pyboy.tick(3)
+
+    # Press START to confirm
+    env.pyboy.send_input(WindowEvent.PRESS_BUTTON_START)
+    env.pyboy.tick(5)
+    env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
+    env.pyboy.tick(5)
+
+    summary = f"Entered {target} name '{name}' and confirmed."
+    return summary, {"status":"success","name":name,"target":target}
 
 # Optional: Define the actual function implementations
 def press_buttons(
@@ -230,133 +313,117 @@ def ask_friend(
     except Exception as e_loc:
         logger.warning(f"Could not get current location for ask_friend: {e_loc}")
 
-    human_summary = f"Question for friend: '{question}' (Current location: {current_location}). Friend's response will be handled by the agent."
-    # The structured output is what the 'tool' role message will contain.
-    # For ask_friend, the 'result' is that the question is posed. The *answer* comes from the LLM in a subsequent turn.
-    # So, the tool itself doesn't return the friend's answer.
-    # This is a slight mismatch with typical tool patterns where the tool *provides* the data.
-    # For now, let's simulate a passthrough acknowledgement.
-    structured_output = {
-        "status": "success", 
+    # --- New simple "friend" logic ---
+    # If the question is about naming, return a fun, short name suggestion.
+    suggestion = None
+    try:
+        import os
+        from openai import OpenAI  # Lazy import only when ask_friend is called
+
+        api_key = os.getenv("XAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("No XAI_API_KEY or OPENAI_API_KEY env var set for ask_friend")
+
+        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+
+        friend_system_prompt = (
+            "You are Grok's sardonic, jaded friend Gork. Answer the user's question in a short, concise way. "
+            """If the question asks for a name, it's your idiotic alter ego Grok trying to name his character in pokemon, 
+            name his rival, or name a pokemon he got. Reply with a name up to 7 characters using  
+            A B C D E F G H I
+J K L M N O P Q R
+S T U V W X Y Z
+× ( ) : ; [ ] Pk Mn
+- ? ! ♂ ♀ / . ,"""
+        )
+        messages = [
+            {"role": "system", "content": friend_system_prompt},
+            {"role": "user", "content": question}
+        ]
+
+        completion = client.chat.completions.create(
+            model="grok-3-mini",
+            messages=messages,
+            max_tokens=2500,
+            temperature=0.8
+        )
+
+        suggestion = completion.choices[0].message.content.strip()
+        # Only keep first word for naming scenarios
+        if " " in suggestion:
+            suggestion = suggestion.split()[0]
+    except Exception as e_friend:
+        logger.warning(f"ask_friend secondary LLM call failed: {e_friend}")
+        suggestion = None
+    
+    # --- Structured output request for name suggestions ---
+    if suggestion is None and "name" in question.lower():
+        logger.info("ask_friend: attempting structured-output name suggestion")
+        try:
+            import json
+
+            # JSON-Schema for a simple name payload
+            name_schema = {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Suggested player or rival name (1-10 alphanumeric characters)"
+                    }
+                },
+                "required": ["name"],
+            }
+
+            completion2 = client.chat.completions.create(
+                model="grok-3-mini",
+                messages=messages,
+                response_format={"type": "json_schema", "schema": name_schema},
+                max_tokens=2500,
+                temperature=0.7,
+                reasoning_effort="low",
+            )
+
+            # The model is guaranteed to reply with a JSON dict per schema
+            raw_json = completion2.choices[0].message.content
+            logger.debug(f"ask_friend structured output raw: {raw_json}")
+
+            data = json.loads(raw_json)
+            suggestion = str(data.get("name", "")).strip()
+
+            # Basic validation
+            if not suggestion or len(suggestion) > 10 or not suggestion.isalnum():
+                raise ValueError(f"Invalid name returned: '{suggestion}'")
+
+        except Exception as e_struct:
+            logger.error(f"ask_friend structured-output request failed: {e_struct}", exc_info=True)
+            suggestion = None
+
+    # After both attempts, if we *still* don't have a suggestion, treat that as a hard error
+    if suggestion is None:
+        error_msg = "ask_friend: failed to obtain name suggestion from Grok (both standard and structured output calls failed)"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+
+    # If we reach here, suggestion is guaranteed valid.
+
+    if suggestion:
+        human_summary = (
+            f"Question for friend: '{question}'. Suggested answer: {suggestion}."
+        )
+    else:
+        human_summary = (
+            f"Question for friend: '{question}' (Current location: {current_location})."
+        )
+
+    structured_output: Dict[str, Any] = {
+        "status": "success",
         "question_asked": question,
-        "context_provided": {"location": current_location},
-        "note": "The agent will process the friend's answer in a separate step."
+        "context_provided": {"location": current_location}
     }
+    if suggestion:
+        structured_output["suggested_name"] = suggestion
+
     return human_summary, structured_output
-
-# def handle_battle(
-#     env: RedGymEnv,
-#     quest_manager: QuestManager,
-#     navigator: InteractiveNavigator,
-#     env_wrapper: EnvWrapper
-# ) -> Tuple[str, Dict[str, Any]]:
-#     """
-#     Automatically handle a battle by selecting the best move.
-#     """
-
-#     env.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)  
-#     env.pyboy.tick(10)
-#     env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
-#     env.pyboy.tick(10)
-#     env.pyboy.send_input(WindowEvent.PRESS_BUTTON_UP)
-#     env.pyboy.tick(10)
-#     env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_UP)
-#     env.pyboy.tick(10)
-#     # 1. CAPTURE INITIAL STATE
-#     dialog_before = env.get_active_dialog() or ""
-#     status_text = dialog_before.strip().replace("\n", " ") if dialog_before else "(Battle dialog cleared)"
-    
-#     env.pyboy.tick(24)
-#     time.sleep(0.5)
-
-#     # 3. BATTLE MENU VERIFICATION
-#     battle_menu_visible = "►FIGHT" in dialog_before
-#     logger.info(f"[BattleAI] Battle menu state: {'Active' if battle_menu_visible else 'Not detected'}")
-    
-#         # Ensure battle menu is visible, clearing any initial dialogs
-#     dialog = env.get_active_dialog() or ""
-#     if "►FIGHT" not in dialog:
-#         # Clear blocking dialog (e.g., 'running from a trainer battle') until the fight menu appears
-#         for _ in range(6):
-#             print("doing what o4-mini suggested..")
-#             env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
-#             env.pyboy.tick()
-#             env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
-#             env.pyboy.tick()
-#             time.sleep(0.1)
-#             dialog = env.get_active_dialog() or ""
-#             if "►FIGHT" in dialog:
-#                 break
-#     print("done doing what o4-mini suggested..")
-    
-#     # Press B to exit unwanted dialogs
-#     while not battle_menu_visible:
-#         print(f"battle_menu_visible={battle_menu_visible}")
-#         for _ in range(4):
-#             env.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)
-#             env.pyboy.tick(10)
-#             env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
-#             env.pyboy.tick(10)
-#             env.pyboy.send_input(WindowEvent.PRESS_BUTTON_UP)
-#             env.pyboy.tick(10)
-#             env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_UP)
-#             env.pyboy.tick(10)
-#             env.pyboy.send_input(WindowEvent.PRESS_BUTTON_LEFT)
-#             env.pyboy.tick(10)
-#             env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_LEFT)
-#             env.pyboy.tick(10)
-#             time.sleep(0.5)
-#             battle_menu_visible = "►FIGHT" in dialog_before
-                
-#     # Cursor should be on FIGHT menu now    
-#     # Open fight menu
-#     print("Opening fight menu...")
-#     env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
-#     env.pyboy.tick(10)
-#     env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
-#     env.pyboy.tick(10)
-#     time.sleep(0.5)
-    
-#     # Determine best move
-#     print("determining best move..")
-#     try:
-#         best_idx = env.choose_best_battle_move()
-#     except Exception:
-#         best_idx = 0
-    
-#     print(f"best_idx={best_idx}")
-        
-#     # Reset cursor to top
-#     for _ in range(4):
-#         print("resetting cursor to top...")
-#         env.pyboy.send_input(WindowEvent.PRESS_ARROW_UP)
-#         env.pyboy.tick(10)
-#         env.pyboy.send_input(WindowEvent.RELEASE_ARROW_UP)
-#         env.pyboy.tick(10)
-#         time.sleep(0.2)
-        
-        
-#     # Move cursor down to selected move
-#     for _ in range(best_idx):
-#         print("moving cursor down to selected move..")
-#         env.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
-#         env.pyboy.tick(10)
-#         env.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
-#         env.pyboy.tick(10)
-#         time.sleep(0.4)
-        
-#     # Select move
-#     print("selecing move...")
-#     env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
-#     env.pyboy.tick(5)
-#     env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
-#     env.pyboy.tick(5)
-#     time.sleep(0.4)
-    
-#     # Summary
-#     human_summary = f"Selected battle move {move_name} index {best_idx}."
-#     structured = {"status": "success", "move_index": best_idx}
-#     return human_summary, structured
 
 def handle_battle(
     env: RedGymEnv,
@@ -491,7 +558,7 @@ AVAILABLE_TOOLS = [
     {
         "name": "ask_friend",
         "type": "function",
-        "description": "Ask an unaffiliated helper Grok any question with game state data, where to go next, etc.",
+        "description": "Ask an unaffiliated helper Grok agent for high-level advice or stuck situations.",
         "input_schema": ask_friend_schema,
     },
     {
@@ -502,6 +569,12 @@ AVAILABLE_TOOLS = [
             "description": "Fully handles battling.",
             "parameters": empty_schema
         }
+    },
+    {
+        "name": "enter_name",
+        "type": "function",
+        "description": "Automatically enter a provided name on naming screen.",
+        "input_schema": enter_name_schema,
     }
 ]
 
@@ -548,10 +621,19 @@ AVAILABLE_TOOLS_LIST = [
     {
         "name": "handle_battle",
         "function": handle_battle,
-        "declartion": {
+        "declaration": {
             "name": "handle_battle",
             "description": "Fully handles battling.",
             "parameters": empty_schema
+        }
+    },
+    {
+        "name": "enter_name",
+        "function": enter_name,
+        "declaration": {
+            "name": "enter_name",
+            "description": "Enter a provided name on the character-naming screen automatically (player or rival).",
+            "parameters": enter_name_schema
         }
     }
 ]

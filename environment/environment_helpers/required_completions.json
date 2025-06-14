@@ -88,15 +88,12 @@
     },
     {
         "quest_id": "004",
-        "begin_quest_text": "Pick a pokemon. charmander is closest to you.",
+        "begin_quest_text": "follow_nav_path out of Oak's Lab.",
         "location_id": 40,
         "location_name": "Oaks Lab",
         "subquest_list": [
             "Complete quest 003.",
-            "Pick a pokemon. Charmander is closest to you.",
             "Try to leave and your rival will battle you.",
-            "Battle your rival, first using growl, then using scratch or tackle.",
-            "Once the battle is over, progress through the dialogs.",
             "Leave Oaks Lab."
         ],
         "end_quest_text": "Get rekt, scrub. See ya, pops! Oh yeah, I'm gonna be the best there ever was, the best there ever will be!",

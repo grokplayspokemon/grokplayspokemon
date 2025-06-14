@@ -1,3 +1,4 @@
+# grok_plays_pokemon/ui/render_to_global.py
 """
 Rendering and drawing logic for quest UI
 Handles map rendering, sprite drawing, and coordinate conversions
@@ -330,7 +331,9 @@ def draw_quest_coordinates(map_canvas, dx, dy, canvas_w, canvas_h):
 def update_sprite(map_canvas, facing, center_x, center_y):
     """Update player sprite on map"""
     if facing not in map_canvas.cached_sprite_photos:
-        SPRITE_INDICES = {'Down': 0, 'Up': 3, 'Left': 6, 'Right': 8}
+        # Correct standing-facing frame indices (matching sprite sheet spec):
+        # index 1 – standing_down, 4 – standing_up, 6 – standing_left, 8 – standing_right
+        SPRITE_INDICES = {"Down": 1, "Up": 4, "Left": 6, "Right": 8}
         idx = SPRITE_INDICES.get(facing, 0)
         
         if 0 <= idx < len(map_canvas.sprite_frames):
@@ -632,7 +635,7 @@ def save_full_map_with_overlays(map_canvas, local_x, local_y, map_id, facing):
         
         # Draw player sprite at current position (FIXED positioning)
         if hasattr(map_canvas, 'sprite_frames') and map_canvas.sprite_frames:
-            SPRITE_INDICES = {'Down': 0, 'Up': 3, 'Left': 6, 'Right': 8}
+            SPRITE_INDICES = {"Down": 1, "Up": 4, "Left": 6, "Right": 8}
             sprite_idx = SPRITE_INDICES.get(facing, 0)
             
             if 0 <= sprite_idx < len(map_canvas.sprite_frames):
@@ -652,28 +655,44 @@ def save_full_map_with_overlays(map_canvas, local_x, local_y, map_id, facing):
         # Draw quest coordinate overlays (FIXED positioning)
         if hasattr(map_canvas, 'all_quest_coordinates'):
             for coord_gy, coord_gx, quest_id in map_canvas.all_quest_coordinates:
-                # CORRECTED: Quest coordinates are stored WITHOUT padding,
-                # but the full map image INCLUDES padding, so we need to add PAD
-                pixel_x = (coord_gx + PAD) * TILE_SIZE + TILE_SIZE // 2
-                pixel_y = (coord_gy + PAD) * TILE_SIZE + TILE_SIZE // 2
-                
-                # Check if coordinate is traversed
+                # -----------------------------------------------------------
+                # QUEST COORDINATE MARKER (COLOR-CODED BY QUEST)
+                # Stored coordinates are WITHOUT padding, but the full map
+                # INCLUDES the +PAD border – so we add PAD back in.
+                # -----------------------------------------------------------
+                pixel_x = (coord_gx + PAD) * TILE_SIZE
+                pixel_y = (coord_gy + PAD) * TILE_SIZE
+
+                # Determine color: each quest id already has a distinct
+                # hex color in map_canvas.quest_colors (created at load).
+                quest_hex = map_canvas.quest_colors.get(str(quest_id).zfill(3), "#ff00ff")
+                # Convert to RGB tuple
+                q_r = int(quest_hex[1:3], 16)
+                q_g = int(quest_hex[3:5], 16)
+                q_b = int(quest_hex[5:7], 16)
+
+                # If traversed, desaturate/brighten the color a bit to
+                # differentiate visited vs remaining.
                 coord_pos = (coord_gy, coord_gx)
-                is_traversed = hasattr(map_canvas, 'traversed_coordinates') and coord_pos in map_canvas.traversed_coordinates
-                
-                # Draw coordinate marker
+                is_traversed = (
+                    hasattr(map_canvas, "traversed_coordinates") and
+                    coord_pos in map_canvas.traversed_coordinates
+                )
                 if is_traversed:
-                    color = (78, 201, 176)  # #4ec9b0 (green for traversed)
-                    size = 4
-                else:
-                    color = (86, 156, 214)  # #569cd6 (blue for untraversed)
-                    size = 3
-                
-                # Draw filled circle
-                draw.ellipse([
-                    pixel_x - size, pixel_y - size,
-                    pixel_x + size, pixel_y + size
-                ], fill=color)
+                    q_r = min(255, int(q_r * 0.7 + 75))
+                    q_g = min(255, int(q_g * 0.7 + 75))
+                    q_b = min(255, int(q_b * 0.7 + 75))
+
+                marker_colour = (q_r, q_g, q_b)
+
+                # Draw an 8×8 square centred on the tile for stronger visual
+                size = 8
+                draw.rectangle([
+                    pixel_x + (TILE_SIZE - size) // 2,
+                    pixel_y + (TILE_SIZE - size) // 2,
+                    pixel_x + (TILE_SIZE + size) // 2,
+                    pixel_y + (TILE_SIZE + size) // 2,
+                ], fill=marker_colour)
         
         # Use static filename (overwrites previous)
         png_filename = "global_map_with_overlays.png"

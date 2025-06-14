@@ -83,6 +83,11 @@ def _move_cursor(env: RedGymEnv, from_pos: Tuple[int,int], to_pos: Tuple[int,int
         env.pyboy.send_input(WindowEvent.RELEASE_ARROW_RIGHT if horiz>0 else WindowEvent.RELEASE_ARROW_LEFT)
         env.pyboy.tick(2)
 
+def _letter_pos(ch: str) -> Tuple[int,int]:
+    idx = ord(ch) - ord('A')
+    col = idx % 9   # X axis
+    row = idx // 9  # Y axis (0-based)
+    return (row, col)
 
 def enter_name(
     env: RedGymEnv,
@@ -96,44 +101,32 @@ def enter_name(
     name = name.strip().upper()[:10]
     logger.info(f"Entering {target} name: {name}")
 
-    # Letter grid coordinates (row, col)
-    grid = {
-        'A': (0,0), 'B': (0,1), 'C': (0,2), 'D': (0,3), 'E': (0,4), 'F': (0,5), 'G': (0,6), 'H': (0,7), 'I': (0,8),
-        'J': (1,0), 'K': (1,1), 'L': (1,2), 'M': (1,3), 'N': (1,4), 'O': (1,5), 'P': (1,6), 'Q': (1,7), 'R': (1,8),
-        'S': (2,0), 'T': (2,1), 'U': (2,2), 'V': (2,3), 'W': (2,4), 'X': (2,5), 'Y': (2,6), 'Z': (2,7),
-        ' ': (2,8)  # Use last slot as space (actually "Z" rightmost); space handled by ED but rarely used
-    }
-
-    # Start by resetting cursor to top-left (press UP/LEFT 10 times each)
-    for _ in range(9):
-        env.pyboy.send_input(WindowEvent.PRESS_ARROW_UP)
-        env.pyboy.tick(2)
-        env.pyboy.send_input(WindowEvent.RELEASE_ARROW_UP)
-        env.pyboy.tick(2)
-    for _ in range(9):
-        env.pyboy.send_input(WindowEvent.PRESS_ARROW_LEFT)
-        env.pyboy.tick(2)
-        env.pyboy.send_input(WindowEvent.RELEASE_ARROW_LEFT)
-        env.pyboy.tick(2)
-
-    cur_pos = (0,0)
+    cur_pos: Tuple[int,int] = (0,0)  # (row,col) – we start on 'A'
+    LETTER_PRESS_WAIT = 9
+    LETTER_RELEASE_WAIT = 15
     for ch in name:
-        if ch not in grid:
-            continue  # skip unsupported characters
-        target_pos = grid[ch]
+        if not ('A' <= ch <= 'Z'):
+            continue  # ignore unsupported chars
+        target_pos = _letter_pos(ch)
         _move_cursor(env, cur_pos, target_pos)
         cur_pos = target_pos
-        # Press A to select letter
-        env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
-        env.pyboy.tick(3)
-        env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
-        env.pyboy.tick(3)
 
-    # Press START to confirm
+        # Select the letter
+        env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+        env.pyboy.tick(LETTER_PRESS_WAIT)
+        env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+        env.pyboy.tick(LETTER_RELEASE_WAIT)
+
+    # Confirm name with START, wait ~3 seconds, then press A to proceed
     env.pyboy.send_input(WindowEvent.PRESS_BUTTON_START)
-    env.pyboy.tick(5)
+    env.pyboy.tick(LETTER_PRESS_WAIT)
     env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
-    env.pyboy.tick(5)
+    env.pyboy.tick(180)  # ~3 s at 60 fps (most configs)
+
+    env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+    env.pyboy.tick(LETTER_PRESS_WAIT)
+    env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+    env.pyboy.tick(LETTER_RELEASE_WAIT)
 
     summary = f"Entered {target} name '{name}' and confirmed."
     return summary, {"status":"success","name":name,"target":target}
@@ -232,10 +225,7 @@ def navigate_to(
                 structured_output = {"status": "error", "message": human_summary, "target_coords": {"y": target_y, "x": target_x}}
                 return human_summary, structured_output
         elif direction:
-            # This part requires navigator to have a method like `move_in_direction`
-            # For now, we can simulate with button presses if InteractiveNavigator doesn't have it directly
-            # Or expect InteractiveNavigator to have a simple directional move capability.
-            success, move_message = navigator.move_in_direction(direction, steps=4) # Assuming steps=4 as per previous description
+            success, move_message = navigator.move_in_direction(direction, steps=4)
             if success:
                 human_summary = f"Moved towards {direction}: {move_message}"
                 structured_output = {"status": "success", "message": human_summary, "direction": direction}
@@ -352,6 +342,25 @@ S T U V W X Y Z
         # Only keep first word for naming scenarios
         if " " in suggestion:
             suggestion = suggestion.split()[0]
+
+        # Detailed logging: prompt visible to second Grok (friend), to aid debugging
+        try:
+            import json as _json
+            _debug_logger = logging.getLogger('agent_file_logger')
+            _debug_logger.info(f"ASK_FRIEND_PROMPT: {_json.dumps(messages, ensure_ascii=False, indent=2)}")
+        except Exception:
+            pass
+
+        # After receiving completion (suggestion assignment)
+        try:
+            _debug_logger = logging.getLogger('agent_file_logger')
+            reasoning_trace = getattr(completion.choices[0].message, 'reasoning_content', None)
+            if reasoning_trace:
+                _debug_logger.info(f"ASK_FRIEND_THINKING: {reasoning_trace}")
+            _debug_logger.info(f"ASK_FRIEND_RESPONSE: {suggestion}")
+        except Exception:
+            pass
+
     except Exception as e_friend:
         logger.warning(f"ask_friend secondary LLM call failed: {e_friend}")
         suggestion = None
@@ -534,6 +543,58 @@ def handle_battle(
         error_msg = f"Battle handling failed: {str(e)}"
         return error_msg, {"status": "error", "message": error_msg}
 
+def follow_nav_path(
+    env: RedGymEnv,
+    quest_manager: QuestManager,
+    navigator: InteractiveNavigator,
+    env_wrapper: EnvWrapper,
+) -> Tuple[str, Dict[str, Any]]:
+    """Trigger the environment's built-in path-following action.
+
+    This is equivalent to the player pressing the physical '5' key which maps
+    to the special PATH_FOLLOW_ACTION (discrete action index 6).  It does *not*
+    attempt to choose a direction or coordinate – it simply enqueues the
+    standard path-follow action and lets the environment / StageManager decide
+    the exact movement.
+    """
+
+    try:
+        from environment.environment import PATH_FOLLOW_ACTION
+
+        # ------------------------------------------------------------------
+        # 1️⃣  Simulate a *real* keyboard press of the "5" key so the main
+        #     pygame event-loop inside play.py treats it exactly like a human
+        #     pressing the 5-key.  This guarantees we reuse all the quest-
+        #     loading / snapping logic already implemented for the manual key.
+        # ------------------------------------------------------------------
+        try:
+            import pygame  # Local import to avoid forcing pygame dependency when unused
+
+            if pygame.get_init():
+                # Post both KEYDOWN and KEYUP so the repeat logic in play.py
+                # mirrors a quick tap.
+                pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_5))
+                pygame.event.post(pygame.event.Event(pygame.KEYUP,   key=pygame.K_5))
+        except Exception as _e:
+            # If pygame isn't available (headless or during unit tests), fall
+            # back to the direct environment action below.
+            pass
+
+        # ------------------------------------------------------------------
+        # 2️⃣  Still submit the direct PATH_FOLLOW_ACTION to the environment so
+        #     non-interactive/headless runs continue to work.
+        # ------------------------------------------------------------------
+
+        env.process_action(PATH_FOLLOW_ACTION, source="follow_nav_path_tool")  # type: ignore[arg-type]
+
+        human_summary = "Triggered path-follow action (keyboard '5')."
+        structured_output = {"status": "success", "action": PATH_FOLLOW_ACTION}
+        return human_summary, structured_output
+
+    except Exception as e:
+        logger.error(f"Error in follow_nav_path: {e}", exc_info=True)
+        error_msg = f"Exception during follow_nav_path: {str(e)}"
+        return error_msg, {"status": "error", "message": error_msg}
 
 # Define the available tools using the generated schemas
 AVAILABLE_TOOLS = [
@@ -542,12 +603,6 @@ AVAILABLE_TOOLS = [
         "type": "function",
         "description": "Press a sequence of buttons on the Game Boy emulator.",
         "input_schema": press_buttons_schema,
-    },
-    {
-        "name": "navigate_to",
-        "type": "function",
-        "description": "Move to a specific walkable coordinate by (glob_y, glob_x) or by direction (up to 4 spaces): direction parameter.",
-        "input_schema": navigate_to_schema,
     },
     {
         "name": "exit_menu",
@@ -575,7 +630,16 @@ AVAILABLE_TOOLS = [
         "type": "function",
         "description": "Automatically enter a provided name on naming screen.",
         "input_schema": enter_name_schema,
-    }
+    },
+    {
+        "name": "follow_nav_path",
+        "function": follow_nav_path,
+        "declaration": {
+            "name": "follow_nav_path",
+            "description": "Advance along the current quest navigation path by issuing the PATH_FOLLOW_ACTION (key '5').",
+            "parameters": empty_schema
+        }
+    },
 ]
 
 
@@ -589,15 +653,6 @@ AVAILABLE_TOOLS_LIST = [
             "name": "press_buttons",
             "description": "Press a sequence of buttons on the Game Boy emulator. Valid buttons: 'a', 'b', 'start', 'select', 'up', 'down', 'left', 'right'.",
             "parameters": press_buttons_schema
-        }
-    },
-    {
-        "name": "navigate_to",
-        "function": navigate_to,
-        "declaration": {
-            "name": "navigate_to",
-            "description": "Navigate to target (y,x) coordinates or move in a specified cardinal direction for a short distance.",
-            "parameters": navigate_to_schema
         }
     },
     {
@@ -635,7 +690,16 @@ AVAILABLE_TOOLS_LIST = [
             "description": "Enter a provided name on the character-naming screen automatically (player or rival).",
             "parameters": enter_name_schema
         }
-    }
+    },
+    {
+        "name": "follow_nav_path",
+        "function": follow_nav_path,
+        "declaration": {
+            "name": "follow_nav_path",
+            "description": "Advance along the quest path by one step (equivalent to pressing the '5' key).",
+            "parameters": empty_schema
+        }
+    },
 ]
 
 

@@ -114,51 +114,6 @@ STAGE_DICT = {
             },
             'action': 'b'
         },
-        # 3. Press A to select "NEW NAME"
-        {
-            'condition': {
-                'dialog_contains': 'NEW NAME'
-            },
-            'stop_condition': {
-                'dialog_contains': 'YOUR NAME?'
-            },
-            'action': 'a'
-        },
-        # 4. When on name entry screen, press START to use default name
-        {
-            'condition': {
-                'dialog_contains': 'YOUR NAME?'
-            },
-            'action': 'start'
-        },
-        # 5. Press A to confirm the name when asked "Right?"
-        {
-            'condition': {
-                'dialog_contains': 'Right?'
-            },
-            'action': 'a'
-        },
-        # 6. Press B through rival intro dialog
-        {
-            'condition': {
-                'dialog_contains': 'This is my grand'
-            },
-            'action': 'b'
-        },
-        # 7. Press A when rival name selection appears
-        {
-            'condition': {
-                'dialog_contains': 'GARY'  # Default rival names menu
-            },
-            'action': 'a'
-        },
-        # 8. Press B through final dialog
-        {
-            'condition': {
-                'dialog_contains': 'your very own'
-            },
-            'action': 'b'
-        }
     ]
 },
     2: {
@@ -200,8 +155,41 @@ STAGE_DICT = {
     },
     4: {
         'events': [],
-        'blockings': [],  # Allow normal movement after Oak encounter
-        'scripted_movements': []
+        'blockings': [],
+        'scripted_movements': [
+        {
+            'condition': {
+                'global_coords': (349, 109), # all below to keep grok away from oak dialog-lock
+            },
+            'action': 'right'
+        },
+        {
+            'condition': {
+                'global_coords': (349, 110),
+            },
+            'action': 'down'
+        },
+        {
+            'condition': {
+                'global_coords': (349, 111),
+            },
+            'action': 'down'
+        },
+        {
+            'condition': {
+                'global_coords': (348, 109),
+            },
+            'action': 'down'
+        },
+        {
+            'condition': {
+                'global_coords': (348, 110),
+                'party_size': 1,
+            },
+            'action': 'left'
+        },
+        
+        ]
     },
     5: {
         'events': [],
@@ -211,10 +199,12 @@ STAGE_DICT = {
             {'condition': {'global_coords': (338, 94)}, 'action': 'up'}
         ]
     },
-    7: {
-        'events': [''],
+    6: {
+        'events': [],
         'blockings': [],
-        'scripted_movements': []
+        'scripted_movements': [
+            {'condition': {'global_coords': (327, 90), 'item_check': {'item': 'POTION', 'has': False}}, 'action': 'a'}, # updated rule – press A until Potion acquired
+        ]
     },
     9: {
         'events': [''],
@@ -305,6 +295,9 @@ class StageManager:
         self._auto_action_queue: "deque[int]" = deque(maxlen=8)
         # Simple frame counter so we can throttle auto-press frequency
         self._frame_counter: int = 0
+        
+        # Stage 4 helper flag – ensures RIGHT is queued only once at Oak greeting tile
+        self._oak_greet_right_sent: bool = False
         
         # Action mapping for scripted movements
         self.action_mapping = {
@@ -542,23 +535,58 @@ class StageManager:
                     if scripted_action == 'path_follow':
                         return self._handle_path_following(action, movement)
                     print(f"DEBUGGING STAGEMANAGER: scripted_action: {scripted_action}")
-                    # Convert action string to action index
-                    if isinstance(scripted_action, str) and scripted_action in self.action_mapping:
-                        # ------------------------------------------------------
-                        # Track how often the Stage-1 «NEW NAME» automation fires
-                        # so we can detect and break out of infinite loops after
-                        # loading a save state mid-intro.
-                        # ------------------------------------------------------
-                        if self.stage == 1 and scripted_action == 'a':
-                            self._stage1_a_press_counter += 1
-                        print(f"DEBUGGING STAGEMANAGER: self._stage1_a_press_counter: {self._stage1_a_press_counter}")
-                        scripted_action_int = self.action_mapping[scripted_action]
-                        print(f"StageManager: OVERRIDE → {scripted_action} ({scripted_action_int}) at {(x, y)} map {map_id} [rule: {movement}]")
-                        return scripted_action_int
-                    elif isinstance(scripted_action, int):
-                        print(f"StageManager: OVERRIDE → action {scripted_action} at {(x, y)} map {map_id} [rule: {movement}]")
-                        return scripted_action
-                    print(f"DEBUGGING STAGEMANAGER: scripted_action: {scripted_action}")
+                    # --------------------------------------------------------------
+                    # NEW FEATURE: multi-action sequences
+                    # --------------------------------------------------------------
+                    # If the movement defines a 'multiaction' list we must handle
+                    # it *before* the usual single-action logic, otherwise the
+                    # default action placeholder would short-circuit the rule.
+                    # --------------------------------------------------------------
+                    multiaction_seq = movement.get('multiaction')
+                    if multiaction_seq and not movement.get('_multiaction_done'):
+                        action_int_list: list[int] = []
+                        for act in multiaction_seq:
+                            if isinstance(act, str):
+                                mapped = self.action_mapping.get(act)
+                                if mapped is None:
+                                    print(f"StageManager: Unknown action in multiaction list: {act}")
+                                    continue
+                                action_int_list.append(mapped)
+                            else:
+                                action_int_list.append(int(act))
+
+                        if action_int_list:
+                            # Queue all actions after the first so they run on
+                            # subsequent frames via the existing auto-action queue.
+                            for later_act in action_int_list[1:]:
+                                self._queue_auto_action(later_act)
+
+                            movement['_multiaction_done'] = True  # fire only once
+                            first_act = action_int_list[0]
+                            print(
+                                f"StageManager: MULTIACTION triggered – executing {first_act} now; "
+                                f"queued {len(action_int_list) - 1} follow-up actions"
+                            )
+                            return first_act
+                    # ------------------------------------------------------------------
+                    # Standard single-action override (runs only if no multiaction fired)
+                    # ------------------------------------------------------------------
+                    scripted_action = movement.get('action')
+                    if scripted_action is not None:
+                        if isinstance(scripted_action, str) and scripted_action in self.action_mapping:
+                            if self.stage == 1 and scripted_action == 'a':
+                                self._stage1_a_press_counter += 1
+                            scripted_action_int = self.action_mapping[scripted_action]
+                            print(
+                                f"StageManager: OVERRIDE → {scripted_action} ({scripted_action_int}) at {(x, y)} map {map_id} [rule: {movement}]"
+                            )
+                            return scripted_action_int
+                        elif isinstance(scripted_action, int):
+                            print(
+                                f"StageManager: OVERRIDE → action {scripted_action} at {(x, y)} map {map_id} [rule: {movement}]"
+                            )
+                            return scripted_action
+                        # else malformed; ignore and fall through
         except Exception as e:
             print(f"StageManager: Error in scripted_stage_movement: {e}")
             
@@ -584,6 +612,22 @@ class StageManager:
     def _check_movement_condition(self, condition: Dict[str, Any], x: int, y: int, map_id: int, global_coords: Optional[tuple]) -> bool:
         """Check if movement condition is satisfied"""
         try:
+            # Quick helper to know if START menu is on-screen so we can
+            # disable scripted/auto input that would otherwise cause the menu
+            # to scroll uncontrollably.  Criteria: classic START-menu text
+            # contains both "POKéMON" and "ITEM" on the same dialog buffer.
+            def _start_menu_open() -> bool:
+                dlg = (self.env.get_active_dialog() or '')
+                return ('POKéMON' in dlg) and ('ITEM' in dlg)
+            # Bail out early if START menu is open; StageManager should stay
+            # completely passive so the user (or higher-level logic) can
+            # navigate the menu.
+            if _start_menu_open():
+                # Clear any queued presses so they don't fire after closing
+                if self._auto_action_queue:
+                    print('StageManager: START menu active – clearing auto-action queue')
+                self._auto_action_queue.clear()
+                return False  # Condition treated as not met
             # ------------------------------------------------------------------
             # SUPER-VERBOSE DEBUGGING ─ print full context before evaluating the
             # condition so we can trace exactly why it does / does not match.
@@ -721,6 +765,42 @@ class StageManager:
             if condition.get('clear_oak_intro_active'):
                 print("StageManager: Clearing _oak_intro_active flag")
                 self._oak_intro_active = False
+            
+            # --------------------------------------------------------------
+            # PARTY SIZE CONDITIONS
+            # --------------------------------------------------------------
+            # Accept four equivalent keys so stage designers can choose the
+            # most intuitive one:
+            #   • party_size_lt : current_party_size < value
+            #   • party_size_gt : current_party_size > value
+            #   • party_size_is : current_party_size == value
+            #   • party_size    : alias for equality (==) to maintain
+            #                     backwards-compatibility with older rules
+            # --------------------------------------------------------------
+            if (
+                'party_size_lt' in condition or
+                'party_size_gt' in condition or
+                'party_size_is' in condition or
+                'party_size' in condition  # NEW alias
+            ):
+                try:
+                    current_party_size = self.env.read_m('wPartyCount')
+                except Exception as _e:
+                    # If for some reason we cannot read party size, fail the condition
+                    print('StageManager DEBUG: Could not read party size –', _e)
+                    return False
+                if 'party_size_lt' in condition and not (current_party_size < condition['party_size_lt']):
+                    print(f"StageManager DEBUG: party_size_lt check failed – current {current_party_size} !< {condition['party_size_lt']}")
+                    return False
+                if 'party_size_gt' in condition and not (current_party_size > condition['party_size_gt']):
+                    print(f"StageManager DEBUG: party_size_gt check failed – current {current_party_size} !> {condition['party_size_gt']}")
+                    return False
+                if 'party_size_is' in condition and not (current_party_size == condition['party_size_is']):
+                    print(f"StageManager DEBUG: party_size_is check failed – current {current_party_size} != {condition['party_size_is']}")
+                    return False
+                if 'party_size' in condition and not (current_party_size == condition['party_size']):
+                    print(f"StageManager DEBUG: party_size (alias) check failed – current {current_party_size} != {condition['party_size']}")
+                    return False
             
             return True
             
@@ -868,15 +948,40 @@ class StageManager:
                 self._stage1_a_press_counter = 0  # Reset counter for safety
 
         # ------------------------------------------------------------------
-        # ACTIVE INPUT GENERATION FOR QUEST 001
+        # OAK GREET TILE (348,110): press RIGHT once, then spam A until party
+        # size > 0 — runs regardless of stage to avoid timing issues.
         # ------------------------------------------------------------------
-        # When Quest 001 is active we want to guarantee that the player keeps
-        # interacting even if no upstream action is provided.  As a simple
-        # heuristic we enqueue an "A" press every ~6 frames (≈10 Hz game
-        # time) whenever *no dialog* is visible – this causes rapid
-        # interaction with the nearest NPC/menu without interfering with
-        # user-driven input because queued auto-actions have highest
-        # priority.
+        try:
+            from environment.data.recorder_data.global_map import local_to_global
+            y, x, map_id = self.env.get_game_coords()
+            cur_global = local_to_global(y, x, map_id)
+
+            if cur_global == (348, 110):
+                # Current party size
+                party_size = 0
+                try:
+                    party_size = self.env.read_m('wPartyCount')
+                except Exception:
+                    pass
+
+                if party_size == 0:
+                    if not self._oak_greet_right_sent:
+                        self._queue_auto_action('right')
+                        self._oak_greet_right_sent = True
+                    elif self._frame_counter % 4 == 0:
+                        if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                            self._queue_auto_action('a')
+                else:
+                    # Reset after Pokémon obtained
+                    self._oak_greet_right_sent = False
+            else:
+                # Reset if player is not on the greet tile
+                self._oak_greet_right_sent = False
+        except Exception as e:
+            print('StageManager: Oak greet right/A logic error:', e)
+
+        # ------------------------------------------------------------------
+        # ACTIVE INPUT GENERATION FOR QUEST 001
         # ------------------------------------------------------------------
         try:
             self._frame_counter = (self._frame_counter + 1) % 60  # prevent overflow

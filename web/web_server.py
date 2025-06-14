@@ -254,6 +254,16 @@ def handle_status_update(item_id, data):
         game_state['global_map_player'] = {'gy': gy, 'gx': gx}
         broadcast_update('global_map_player', {'gy': gy, 'gx': gx})
     
+    elif item_id == '__grok_prompt__':
+        # Full prompt sent to Grok before it begins reasoning
+        game_state['grok_prompt'] = data
+        broadcast_update('grok_prompt', data)
+        
+    elif item_id == '__facing_direction__':
+        # Facing direction of player for global map overlay
+        game_state['facing'] = data
+        broadcast_update('facing_direction', data) 
+    
     game_state['last_update'] = time.time()
 
 def monitor_status_queue(status_queue):
@@ -290,22 +300,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: #0a0a0a;
             color: #ffffff;
-            overflow: hidden;
-            height: 100vh;
+            /* Allow vertical scrolling when content exceeds viewport */
+            overflow-x: hidden;
+            overflow-y: auto;
+            min-height: 100vh;
+            font-size: 20px; /* Base font size doubled */
         }
 
         .mono {
             font-family: 'JetBrains Mono', monospace;
         }
 
-        /* Main layout with 3 columns */
+        /* Main layout with 3 columns - Updated for flexible sidebars */
         .stream-container {
             display: grid;
-            grid-template-columns: 280px 1fr 300px;
-            grid-template-rows: auto 1fr auto;
-            height: 100vh;
+            grid-template-columns: minmax(400px, 1fr) 2fr minmax(400px, 1fr);
+            grid-template-rows: auto 1fr 180px; /* Taller footer */
+            min-height: 100vh;   /* Allow it to grow beyond viewport */
             background-color: #1a1a1a;
             gap: 1px;
+            overflow-y: auto;   /* Enable internal scroll before pushing body */
         }
 
         /* Header */
@@ -320,7 +334,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .title {
-            font-size: 36px;
+            font-size: 48px; /* Doubled from 36px */
             font-weight: 300;
             letter-spacing: -0.5px;
         }
@@ -336,18 +350,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 8px 16px;
+            padding: 12px 24px; /* Increased from 8px 16px */
             background: #dc2626;
             border-radius: 4px;
-            font-size: 12px;
+            font-size: 20px; /* Doubled from 12px */
             font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
         .live-dot {
-            width: 8px;
-            height: 8px;
+            width: 12px; /* Increased from 8px */
+            height: 12px;
             background: #fff;
             border-radius: 50%;
             animation: pulse 1s ease-in-out infinite;
@@ -361,10 +375,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             padding: 20px;
             overflow-y: auto;
             border-right: 1px solid #1a1a1a;
+            min-width: 400px; /* Minimum width */
         }
 
         .actions-header {
-            font-size: 18px;
+            font-size: 28px; /* Doubled from 18px */
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 1px;
@@ -375,14 +390,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .action-log {
             display: flex;
             flex-direction: column;
-            gap: 12px;
+            gap: 16px; /* Increased from 12px */
         }
 
         .action-entry {
             background: #111;
             border: 1px solid #2a2a2a;
             border-radius: 8px;
-            padding: 12px;
+            padding: 16px; /* Increased from 12px */
             animation: slideIn 0.3s ease;
         }
 
@@ -398,33 +413,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .action-time {
-            font-size: 11px;
+            font-size: 18px; /* Doubled from 11px */
             color: #666;
-            margin-bottom: 8px;
+            margin-bottom: 12px; /* Increased from 8px */
         }
 
         .action-button {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
+            gap: 10px; /* Increased from 8px */
+            padding: 10px 20px; /* Increased from 6px 12px */
             background: #1a1a1a;
             border: 1px solid #333;
             border-radius: 6px;
-            font-size: 13px;
+            font-size: 22px; /* Doubled from 13px */
             font-weight: 500;
-            margin-bottom: 8px;
+            margin-bottom: 12px; /* Increased from 8px */
         }
 
         .action-icon {
-            width: 20px;
-            height: 20px;
+            width: 28px; /* Increased from 20px */
+            height: 28px;
             display: flex;
             align-items: center;
             justify-content: center;
             background: #2a2a2a;
             border-radius: 4px;
-            font-size: 14px;
+            font-size: 20px; /* Increased from 14px */
         }
 
         /* Action type specific colors */
@@ -453,7 +468,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .action-path .action-icon { background: #14b8a6; color: #fff; }
 
         .action-reason {
-            font-size: 12px;
+            font-size: 20px; /* Doubled from 12px */
             color: #999;
             line-height: 1.4;
         }
@@ -475,7 +490,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .game-area {
             flex: 1;
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             position: relative;
         }
 
@@ -505,7 +520,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         .game-placeholder {
             color: #666;
-            font-size: 18px;
+            font-size: 28px; /* Doubled from 18px */
         }
 
         /* Speech Bubble */
@@ -522,7 +537,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: rgba(255, 248, 220, 0.95);
             border: 8px solid #FFA500;
             border-radius: 15px;
-            padding: 15px 20px;
+            padding: 20px 28px; /* Increased from 15px 20px */
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
             opacity: 0;
             transform: scale(0.8) translateY(-20px);
@@ -555,7 +570,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         .speech-bubble-text {
             color: #8B4513;
-            font-size: 16px;
+            font-size: 24px; /* Doubled from 16px */
             font-weight: 600;
             line-height: 1.4;
         }
@@ -570,10 +585,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             grid-row: 2;
             display: flex;
             flex-direction: column;
-            width: fit;
             gap: 1px;
             background: #1a1a1a;
             overflow: hidden;
+            min-width: 400px; /* Minimum width matching left sidebar */
         }
 
         .sidebar-section {
@@ -582,21 +597,84 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow-y: auto;
             display: flex;
             flex-direction: column;
-            width: fit;
             gap: 20px;
             flex-grow: 1;
         }
 
         .section-title {
-            font-size: 16px;
+            font-size: 24px; /* Doubled from 16px */
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 1px;
             color: #999;
             margin-bottom: 12px;
         }
-
+                
         /* Global Map Container */
+        .global-map-container {
+            height: 300px;
+            overflow: hidden;
+            position: relative;
+            background: #0a0a0a;
+            padding: 20px;
+            border-top: 1px solid #1a1a1a;
+        }
+
+        .global-map-section {
+            background: #111;
+            border: 2px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            height: 100%;
+            position: relative;
+        }
+
+        .map-canvas {
+            width: 100%;
+            height: 85%;
+            background: #0a0a0a;
+            border: 1px solid #222;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        #globalMapWrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        #globalMapImage {
+            position: absolute;
+            image-rendering: pixelated;
+            transform-origin: top left;
+            transition: none; /* Remove transition for instant movement */
+        }
+
+        #globalMapCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .map-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 18px;
+            color: #999;
+            padding: 0 5px;
+        }
+                
+
+        /* Global Map Container - commented out duplicate */
+        /*
         .global-map-container {
             height: 300px;
             overflow: hidden;
@@ -631,11 +709,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: none;
             transition: transform 0.1s linear;
         }
+        */
 
         .player-sprite {
             position: absolute;
-            width: 8px;
-            height: 8px;
+            width: 12px; /* Increased from 8px */
+            height: 12px;
             background: #ff0000;
             border: 1px solid #fff;
             border-radius: 50%;
@@ -655,7 +734,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .map-info {
             display: flex;
             justify-content: space-between;
-            font-size: 11px;
+            font-size: 18px; /* Doubled from 11px */
             color: #999;
         }
 
@@ -664,30 +743,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: #111;
             border: 2px solid #333;
             border-radius: 8px;
-            padding: 15px;
+            padding: 20px; /* Increased from 15px */
         }
 
         .quest-description {
             color: #ccc;
-            margin-bottom: 15px;
-            font-size: 13px;
+            margin-bottom: 20px; /* Increased from 15px */
+            font-size: 22px; /* Doubled from 13px */
             line-height: 1.5;
         }
 
         .quest-list {
             list-style: none;
             padding: 0;
-            margin: 0 0 15px 0;
+            margin: 0 0 20px 0; /* Increased from 15px */
         }
 
         .quest-item {
-            margin-bottom: 10px;
+            margin-bottom: 14px; /* Increased from 10px */
             color: #999;
-            font-size: 12px;
+            font-size: 20px; /* Doubled from 12px */
             display: flex;
             align-items: flex-start;
-            gap: 10px;
-            padding: 8px 12px;
+            gap: 14px; /* Increased from 10px */
+            padding: 12px 16px; /* Increased from 8px 12px */
             background: #0a0a0a;
             border-radius: 6px;
             transition: all 0.3s ease;
@@ -695,7 +774,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         .quest-item::before {
             content: '○';
-            font-size: 14px;
+            font-size: 22px; /* Doubled from 14px */
             color: #666;
             flex-shrink: 0;
             margin-top: -2px;
@@ -715,9 +794,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         .quest-progress-bar {
             width: 100%;
-            height: 6px;
+            height: 10px; /* Increased from 6px */
             background: #2a2a2a;
-            border-radius: 3px;
+            border-radius: 5px; /* Increased from 3px */
             overflow: hidden;
         }
 
@@ -730,32 +809,38 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         /* Grok Status Section */
         .grok-status-section {
             height: 100%;
+            max-height: 100%;
             background: #111;
             border: 2px solid #333;
             border-radius: 8px;
-            padding: 15px;
+            padding: 20px; /* Increased from 15px */
+            display: flex;               /* NEW – allow inner wrapper to stretch */
+            flex-direction: column;      /* vertical stacking */
         }
 
+        /* NEW – ensure the wrapper inside fills the section */
+        #grokStatus {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;            /* prevent full-page scrollbars */
+        }
+
+        /* NEW – make thinking / response panels scroll within available space */
+        #grokThinking,
+        #grokResponse {
+            flex: 1;
+            overflow-y: auto;
+        }
+        
         .grok-message {
-            height: 100%;
-            margin-bottom: 10px;
-            padding: 8px 12px;
+            margin-bottom: 14px; /* Increased from 10px */
+            padding: 12px 16px; /* Increased from 8px 12px */
             background: #1a1a1a;
             border-radius: 4px;
-            font-size: 12px;
-            line-height: 1.4;
-        }
-
-        .grok-thinking {
-            background-color: rgba(100, 100, 100, 0.1);
-            border-left: 3px solid #f59e0b;
-            font-style: italic;
-            padding: 10px;
-        }
-
-        .grok-response {
-            border-left: 3px solid #10b981;
-            height: 100%;
+            font-size: 20px; /* Doubled from 12px */
+            line-height: 1.5;
+            /* height & max-height removed – handled by flexbox */
         }
 
         /* Team section styling */
@@ -770,7 +855,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .team-grid {
             display: grid;
             grid-template-columns: repeat(6, 1fr);
-            gap: 12px;
+            gap: 16px; /* Increased from 12px */
             width: 100%;
         }
 
@@ -778,14 +863,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: #111;
             border: 1px solid #2a2a2a;
             border-radius: 8px;
-            padding: 10px;
+            padding: 14px; /* Increased from 10px */
             transition: all 0.2s ease;
             cursor: pointer;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: space-between;
-            min-height: 200px;
+            min-height: 550px; /* Increased from 200px */
         }
 
         .pokemon-card:hover {
@@ -799,18 +884,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             aspect-ratio: 1/1;
             background: linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.08));
             border-radius: 6px;
-            padding: 8px;
+            padding: 12px; /* Increased from 8px */
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: 8px;
+            margin-bottom: 12px; /* Increased from 8px */
         }
 
         .pokemon-sprite {
             width: 100%;
             height: 100%;
-            max-width: 64px;
-            max-height: 64px;
+            max-width: 440px; /* Increased from 64px */
+            max-height: 440px;
             image-rendering: pixelated;
             filter: brightness(1.1) contrast(1.1);
             object-fit: contain;
@@ -830,7 +915,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             justify-content: space-between;
             align-items: flex-start;
             width: 100%;
-            margin-bottom: 6px;
+            margin-bottom: 10px; /* Increased from 6px */
         }
 
         .pokemon-card-left {
@@ -848,7 +933,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .pokemon-name {
-            font-size: 11px;
+            font-size: 18px; /* Doubled from 11px */
             font-weight: 600;
             text-transform: uppercase;
             color: #e0e0e0;
@@ -856,16 +941,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .pokemon-species-name {
-            font-size: 10px;
+            font-size: 16px; /* Doubled from 10px */
             font-weight: 500;
             color: #bbb;
             text-transform: capitalize;
-            margin-top: 2px;
+            margin-top: 4px; /* Increased from 2px */
             line-height: 1.1;
         }
 
         .pokemon-level {
-            font-size: 11px;
+            font-size: 18px; /* Doubled from 11px */
             color: #e0e0e0;
             font-weight: 600;
             line-height: 1.1;
@@ -875,19 +960,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             width: 100%;
             display: flex;
             justify-content: center;
-            margin-bottom: 6px;
-            min-height: 20px;
+            margin-bottom: 10px; /* Increased from 6px */
+            min-height: 30px; /* Increased from 20px */
         }
 
         .pokemon-types {
             display: flex;
-            gap: 4px;
+            gap: 6px; /* Increased from 4px */
             align-items: center;
         }
 
         .type-badge {
-            font-size: 9px;
-            padding: 2px 6px;
+            font-size: 14px; /* Doubled from 9px */
+            padding: 4px 10px; /* Increased from 2px 6px */
             border-radius: 4px;
             text-transform: uppercase;
             font-weight: 600;
@@ -900,12 +985,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .hp-bar {
-            height: 8px;
+            height: 12px; /* Increased from 8px */
             background: #2a2a2a;
-            border-radius: 3px;
+            border-radius: 4px; /* Increased from 3px */
             overflow: hidden;
             width: 100%;
-            margin-bottom: 4px;
+            margin-bottom: 6px; /* Increased from 4px */
         }
 
         .hp-fill {
@@ -927,18 +1012,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             justify-content: space-between;
             align-items: center;
             width: 100%;
-            margin-bottom: 6px;
+            margin-bottom: 10px; /* Increased from 6px */
         }
 
         .hp-text {
-            font-size: 10px;
+            font-size: 16px; /* Doubled from 10px */
             color: #aaa;
             font-variant-numeric: tabular-nums;
             line-height: 1.1;
         }
 
         .pokemon-status {
-            font-size: 10px;
+            font-size: 16px; /* Doubled from 10px */
             font-weight: 600;
             color: #aaa;
             text-transform: uppercase;
@@ -954,11 +1039,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         /* EXP Bar styling */
         .exp-bar {
-            height: 4px;
+            height: 6px; /* Increased from 4px */
             background: #2a2a2a;
             border-radius: 3px;
             overflow: hidden;
-            margin-bottom: 4px;
+            margin-bottom: 6px; /* Increased from 4px */
             width: 100%;
         }
 
@@ -969,7 +1054,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .exp-text {
-            font-size: 9px;
+            font-size: 14px; /* Doubled from 9px */
             color: #999;
             text-align: center;
             font-variant-numeric: tabular-nums;
@@ -1003,26 +1088,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             justify-content: center;
             color: #333;
-            font-size: 18px;
-            min-height: 200px;
+            font-size: 28px; /* Doubled from 18px */
+            min-height: 280px; /* Increased from 200px */
         }
 
-        /* Bottom stats bar */
+        /* Bottom stats bar - Much taller */
         .bottom-bar {
             grid-column: 1 / -1;
             background: #0a0a0a;
             border-top: 1px solid #1a1a1a;
-            padding: 16px 30px;
+            padding: 32px 40px; /* Doubled from 16px 30px */
             display: flex;
             justify-content: space-between;
             align-items: center;
             grid-row: 3;
             flex-wrap: wrap;
+            min-height: 180px; /* Ensure minimum height */
         }
 
         .bottom-stats {
             display: flex;
-            gap: 20px;
+            gap: 32px; /* Increased from 20px */
             flex-wrap: wrap;
             align-items: baseline;
             flex: 1;
@@ -1031,18 +1117,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .bottom-stat {
             display: flex;
             align-items: baseline;
-            gap: 6px;
+            gap: 10px; /* Increased from 6px */
         }
 
         .bottom-stat-label {
-            font-size: 11px;
+            font-size: 18px; /* Doubled from 11px */
             color: #666;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
         .bottom-stat-value {
-            font-size: 13px;
+            font-size: 22px; /* Doubled from 13px */
             font-weight: 500;
             font-variant-numeric: tabular-nums;
         }
@@ -1055,16 +1141,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         /* Input visualization */
         .input-viz {
             display: flex;
-            gap: 8px;
+            gap: 12px; /* Increased from 8px */
             align-items: center;
         }
 
         .input-key {
-            padding: 4px 8px;
+            padding: 8px 16px; /* Doubled from 4px 8px */
             background: #1a1a1a;
             border: 1px solid #333;
             border-radius: 4px;
-            font-size: 11px;
+            font-size: 18px; /* Doubled from 11px */
             font-weight: 500;
             text-transform: uppercase;
             animation: key-press 0.3s ease;
@@ -1079,14 +1165,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         /* Agent controls */
         .agent-controls {
             display: flex;
-            gap: 10px;
+            gap: 14px; /* Increased from 10px */
         }
 
         .agent-controls button {
-            padding: 6px 16px;
+            padding: 12px 28px; /* Doubled from 6px 16px */
             border: none;
             border-radius: 4px;
-            font-size: 14px;
+            font-size: 22px; /* Doubled from 14px */
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s ease;
@@ -1125,9 +1211,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         /* Scrollbar */
-        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar { width: 10px; } /* Increased from 6px */
         ::-webkit-scrollbar-track { background: #0a0a0a; }
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 5px; } /* Increased from 3px */
         ::-webkit-scrollbar-thumb:hover { background: #444; }
 
         @keyframes pulse {
@@ -1137,42 +1223,43 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         .grok-cost {
             background-color: rgba(100, 100, 100, 0.1);
-            border-left: 3px solid #3b82f6;
-            font-size: 0.8rem;
-            padding: 10px;
-            margin-top: 10px;
+            border-left: 4px solid #3b82f6; /* Increased from 3px */
+            font-size: 18px; /* Doubled from 0.8rem */
+            padding: 14px; /* Increased from 10px */
+            margin-top: 14px; /* Increased from 10px */
         }
 
         .grok-cost-header {
             font-weight: bold;
-            margin-bottom: 5px;
+            margin-bottom: 8px; /* Increased from 5px */
+            font-size: 20px; /* Added explicit size */
         }
 
         .grok-cost-info {
             display: flex;
             flex-wrap: wrap;
-            gap: 12px;
+            gap: 16px; /* Increased from 12px */
         }
 
         .grok-cost-metric {
             display: flex;
             flex-direction: column;
-            min-width: 80px;
+            min-width: 120px; /* Increased from 80px */
         }
 
         .grok-cost-label {
-            font-size: 0.7rem;
+            font-size: 14px; /* Doubled from 0.7rem */
             color: #9ca3af;
         }
 
         .grok-cost-value {
-            font-size: 0.9rem;
+            font-size: 18px; /* Doubled from 0.9rem */
             font-weight: 600;
         }
 
         .pricing-info {
-            margin-top: 8px;
-            font-size: 0.7rem;
+            margin-top: 12px; /* Increased from 8px */
+            font-size: 14px; /* Doubled from 0.7rem */
             color: #9ca3af;
         }
     </style>
@@ -1185,18 +1272,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <div class="stream-container">
         <header class="header">
             <h1 class="title"><strong>GROK</strong> Plays Pokémon Red</h1>
-            <div style="display: flex; align-items: center; gap: 24px;">
-                <div style="display: flex; gap: 16px; font-size: 12px; color: #999;">
+            <div style="display: flex; align-items: center; gap: 32px;">
+                <div style="display: flex; gap: 24px; font-size: 20px; color: #999;">
                     <div>
                         <span>Session</span>
-                        <span class="mono" style="color: #fff; margin-left: 8px;">#0847</span>
+                        <span class="mono" style="color: #fff; margin-left: 12px;">#0847</span>
                     </div>
                     <div>
                         <span>Uptime</span>
-                        <span class="mono" style="color: #fff; margin-left: 8px;" id="uptime">00:00:00</span>
+                        <span class="mono" style="color: #fff; margin-left: 12px;" id="uptime">00:00:00</span>
                     </div>
                 </div>
-                <div style="display: flex; align-items: center; gap: 16px;">
+                <div style="display: flex; align-items: center; gap: 24px;">
                     <div class="agent-controls">
                         <button id="start-btn" onclick="startAgent()">Start Grok</button>
                         <button id="pause-btn" onclick="pauseAgent()" disabled>Pause Grok</button>
@@ -1222,6 +1309,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         <div class="center-content">
             <div class="global-map-container" style="grid-column: 1; grid-row: 1; position: relative; height: 100%;">
                 <h2 class="section-title">Global Map</h2>
+                <div class="global-map-section">
+                    <div class="map-canvas" id="globalMapWrapper">
+                        <img id="globalMapImage" src="/global-map.png" alt="Global Map">
+                        <canvas id="globalMapCanvas"></canvas>
+                        <div id="playerSprite" class="player-sprite"></div>
+                    </div>
+                    <div class="map-info">
+                        <span>Position: <span id="mapPosition">(0, 0)</span></span>
+                        <span>Map: <span id="currentMapName">Unknown</span></span>
+                    </div>
+                </div>
+            </div>
+        
+            <!--
+            <div class="global-map-container" style="grid-column: 1; grid-row: 1; position: relative; height: 100%;">
+                <h2 class="section-title">Global Map</h2>
                 <div class="map-canvas" id="globalMapWrapper" style="position: absolute; inset: 0;">
                     <img id="globalMapImage" src="/global-map.png" alt="Global Map"
                          style="image-rendering: pixelated; width: 100%; height: 100%; object-fit: cover;">
@@ -1233,6 +1336,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <span>Map: <span id="currentMapName">Unknown</span></span>
                 </div>
             </div>
+            -->
             <div class="game-screen-container" style="grid-column: 2; grid-row: 1; position: relative; height: 100%;">
                 <img id="gameScreen" alt="Game Screen" style="width: 100%; height: 100%; object-fit: contain; display: none;">
                 <div class="game-placeholder" id="gamePlaceholder"
@@ -1243,7 +1347,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                      style="position: absolute; inset: 0; pointer-events: none;"></div>
             </div>
             <section class="team-display-area" style="grid-column: 1 / span 2; grid-row: 2;">
-                <h2 class="section-title" style="text-align: center; margin-bottom: 16px;">Active Team</h2>
+                <h2 class="section-title" style="text-align: center; margin-bottom: 20px;">Active Team</h2>
                 <div class="team-grid" id="pokemon-team">
                     <div class="pokemon-card empty-slot">—</div>
                     <div class="pokemon-card empty-slot">—</div>
@@ -1297,7 +1401,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             </div>
                             <div class="pricing-info">grok-3-mini pricing</div>
                         </div>
-                        <div style="color: #666; font-size: 12px;" id="grokWaiting">Waiting for Grok to think...</div>
+                        <div style="color: #666; font-size: 20px;" id="grokWaiting">Waiting for Grok to think...</div>
                     </div>
                 </div>
             </div>
@@ -1358,6 +1462,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <script>
         // Global state
         let gameState = {
+            location: null,
+            facing: 'Down',
             questDefinitions: null,
             questData: { quests: {}, triggers: {} },
             currentQuest: null,
@@ -1388,7 +1494,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const hours = Math.floor(elapsed / 3600000);
             const minutes = Math.floor((elapsed % 3600000) / 60000);
             const seconds = Math.floor((elapsed % 60000) / 1000);
-            document.getElementById('uptime').textContent = 
+            document.getElementById('uptime').textContent =
                 `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }, 1000);
 
@@ -1397,11 +1503,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const actionLog = document.getElementById('actionLog');
             const entry = document.createElement('div');
             entry.className = 'action-entry';
-            
+
             const time = new Date().toLocaleTimeString();
             const actionName = ACTION_NAMES[action] || `action_${action}`;
             const icon = ACTION_ICONS[actionName] || "?";
-            
+
             entry.innerHTML = `
                 <div class="action-time">${time}</div>
                 <div class="action-button action-${actionName}">
@@ -1410,11 +1516,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
                 <div class="action-reason">${reasoning || 'No reasoning provided'}</div>
             `;
-            
             actionLog.insertBefore(entry, actionLog.firstChild);
-            
-            // Keep only last 10 actions
-            while (actionLog.children.length > 10) {
+            while (actionLog.children.length > 20) {
                 actionLog.removeChild(actionLog.lastChild);
             }
         }
@@ -1434,53 +1537,212 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return gameState.questDefinitions;
         }
 
-        // Update player position on world map
-        function updatePlayerPosition(gx, gy) {
-            const playerSprite = document.getElementById('playerSprite');
-            const mapImage = document.getElementById('globalMapImage');
-            const mapCanvas = document.getElementById('globalMapCanvas');
-            const mapPlaceholder = document.querySelector('.map-placeholder');
+        // Sprite state
+        gameState.playerSprite = null;
+        gameState.spriteFrames = {};
+        gameState.spriteFrameUrls = {};
 
-            if (!mapImage.complete || mapImage.naturalWidth === 0) {
-                setTimeout(() => updatePlayerPosition(gx, gy), 100);
-                return;
+        // Load player sprite frames
+        async function loadPlayerSprites() {
+            const spriteData = { 'Down': 0, 'Up': 3, 'Left': 6, 'Right': 8 };
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 16;
+            tempCanvas.height = 16;
+            const ctx = tempCanvas.getContext('2d');
+
+            try {
+                const img = new Image();
+                img.src = '/static/images/pokemon_red_player_spritesheet.png';
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = reject;
+                });
+
+                for (const [direction, index] of Object.entries(spriteData)) {
+                    ctx.clearRect(0, 0, 16, 16);
+                    ctx.drawImage(img, index * 17, 0, 16, 16, 0, 0, 16, 16);
+                    // Store ImageData for future use and also cached dataURL for quick background-image
+                    const imageData = ctx.getImageData(0, 0, 16, 16);
+                    gameState.spriteFrames[direction] = imageData;
+                    // Convert to dataURL once
+                    const tmpC = document.createElement('canvas');
+                    tmpC.width = tmpC.height = 16;
+                    tmpC.getContext('2d').putImageData(imageData, 0, 0);
+                    gameState.spriteFrameUrls[direction] = tmpC.toDataURL();
+                }
+                console.log('Player sprites loaded successfully');
+            } catch (error) {
+                console.error('Failed to load player sprites:', error);
             }
-
-            if (mapPlaceholder) mapPlaceholder.style.display = 'none';
-            mapImage.style.display = 'block';
-            playerSprite.style.display = 'block';
-            
-            const render_gx = gx - 40;
-            const render_gy = gy - 40;
-
-            const canvasWidth = mapCanvas.offsetWidth;
-            const canvasHeight = mapCanvas.offsetHeight;
-            const mapLeft = (canvasWidth / 2) - render_gx;
-            const mapTop = (canvasHeight / 2) - render_gy;
-            mapImage.style.transform = `translate(${mapLeft}px, ${mapTop}px)`;
-
-            document.getElementById('mapPosition').textContent = `(${gx}, ${gy})`;
         }
+
+        // Map constants
+        const PAD = 20, TILE_SIZE = 16;
+        gameState.mapData = null;
+        gameState.questPaths = {};
+
+        // Load map data
+        async function loadMapData() {
+            const res = await fetch('/static/data/environment_data/map_data.json');
+            if (!res.ok) throw new Error(res.statusText);
+            const json = await res.json();
+            gameState.mapData = {};
+            json.regions.forEach(r => {
+                gameState.mapData[+r.id] = r;
+            });
+        }
+
+        // Load quest paths
+        async function loadQuestPaths() {
+            const res = await fetch('/static/data/environment_helpers/quest_paths/combined_quest_coordinates_continuous.json');
+            if (!res.ok) throw new Error(res.statusText);
+            const data = await res.json();
+            const { quest_start_indices: idxs, coordinates } = data;
+            const qids = Object.keys(idxs).sort((a,b)=>+a - +b);
+            qids.forEach((qid,i) => {
+                const start = idxs[qid];
+                const end   = idxs[qids[i+1]] || coordinates.length;
+                gameState.questPaths[qid.padStart(3,'0')] =
+                    coordinates.slice(start,end).map(c => [c[0], c[1]]);
+            });
+        }
+
+        // Draw quest coordinates
+        function drawQuestCoordinates(ctx, dx, dy) {
+
+            // NEW – avoid blacking-out the map
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            ctx.imageSmoothingEnabled = false;
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            Object.values(gameState.questPaths).forEach(coords => {
+                coords.forEach(([gy, gx]) => {
+                    // Coordinates arriving from the backend are already *padded* (they include
+                    // the 20-tile border added in Python).  The quest-overlay base map that the
+                    // browser displays, however, has this padding removed.  Therefore we must
+                    // subtract PAD before converting to pixel space so quest dots line up.
+                    const x = (gx - PAD) * TILE_SIZE + dx + TILE_SIZE/2;
+                    const y = (gy - PAD) * TILE_SIZE + dy + TILE_SIZE/2;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            });
+        }
+
+        // Update player position and redraw
+        function updatePlayerPosition(localX, localY, mapId, facing = 'Down') {
+            if (!gameState.mapData) return;
+            // map_data.json stores coordinates as [X, Y] (col, row) – see render_to_global.py
+            const [map_x, map_y] = gameState.mapData[mapId].coordinates;
+            const globalX = localX + map_x + PAD;
+            const globalY = localY + map_y + PAD;
+            // Convert padded global → pixel coordinates relative to the *unpadded* map.
+            const pixelX  = (globalX - PAD) * TILE_SIZE;
+            const pixelY  = (globalY - PAD) * TILE_SIZE;
+
+            const wrapper = document.getElementById('globalMapWrapper');
+            const img     = document.getElementById('globalMapImage');
+            const canvas  = document.getElementById('globalMapCanvas');
+            const ctx     = canvas.getContext('2d');
+            const W = wrapper.clientWidth, H = wrapper.clientHeight;
+
+            let left = W/2 - pixelX - TILE_SIZE/2;
+            let top  = H/2 - pixelY - TILE_SIZE/2;
+
+            const minLeft = W - img.naturalWidth;
+            left = Math.min(0, Math.max(minLeft, left));
+
+            img.style.transform = `translate(${left}px, ${top}px)`;
+            canvas.width = W;
+            canvas.height = H;
+
+            drawQuestCoordinates(ctx, left, top);
+
+            const centerX = W/2, centerY = H/2;
+            const spriteEl = document.getElementById('playerSprite');
+            spriteEl.style.left = `${centerX - TILE_SIZE/2}px`;
+            spriteEl.style.top  = `${centerY - TILE_SIZE/2}px`;
+            const frameUrl = gameState.spriteFrameUrls[facing] || gameState.spriteFrameUrls['Down'];
+            if (frameUrl) {
+                spriteEl.style.width = `${TILE_SIZE}px`;
+                spriteEl.style.height = `${TILE_SIZE}px`;
+                spriteEl.style.backgroundImage = `url(${frameUrl})`;
+                spriteEl.style.backgroundSize = 'contain';
+                spriteEl.style.backgroundRepeat = 'no-repeat';
+            }
+        }
+
+        // Directly centre map using already global (padded) coordinates
+        function updatePlayerGlobal(globalX, globalY, facing='Down') {
+            const wrapper = document.getElementById('globalMapWrapper');
+            const img     = document.getElementById('globalMapImage');
+            const canvas  = document.getElementById('globalMapCanvas');
+            const ctx     = canvas.getContext('2d');
+
+            // Subtract the padding applied in Python so global coordinates align to the
+            // *unpadded* quest-overlay base map exactly like we already do for quest
+            // dots and updatePlayerPosition().
+            const pixelX = (globalX - PAD) * TILE_SIZE;
+            const pixelY = (globalY - PAD) * TILE_SIZE;
+
+            const W = wrapper.clientWidth, H = wrapper.clientHeight;
+            let left = W/2 - pixelX - TILE_SIZE/2;
+            let top  = H/2 - pixelY - TILE_SIZE/2;
+
+            const minLeft = W - img.naturalWidth;
+            left = Math.min(0, Math.max(minLeft, left));
+            // Ensure we don't pan past the bottom/top edges (was missing before)
+            const minTop  = H - img.naturalHeight;
+            top  = Math.min(0, Math.max(minTop , top ));
+
+            img.style.transform = `translate(${left}px, ${top}px)`;
+            canvas.width = W;
+            canvas.height = H;
+            drawQuestCoordinates(ctx, left, top);
+
+            const centerX = W/2, centerY = H/2;
+            const spriteEl = document.getElementById('playerSprite');
+            spriteEl.style.left = `${centerX - TILE_SIZE/2}px`;
+            spriteEl.style.top  = `${centerY - TILE_SIZE/2}px`;
+            const frameUrl = gameState.spriteFrameUrls[facing] || gameState.spriteFrameUrls['Down'];
+            if (frameUrl) {
+                spriteEl.style.width = `${TILE_SIZE}px`;
+                spriteEl.style.height = `${TILE_SIZE}px`;
+                spriteEl.style.backgroundImage = `url(${frameUrl})`;
+                spriteEl.style.backgroundSize = 'contain';
+                spriteEl.style.backgroundRepeat = 'no-repeat';
+            }
+            // Update map position display when using global coordinates
+            const mapPosEl = document.getElementById('mapPosition');
+            if (mapPosEl) mapPosEl.textContent = `(${globalY},${globalX})`;
+        }
+
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', () => {
+            const teamContainer = document.getElementById('pokemon-team');
+            teamContainer.innerHTML = '';
+            for (let i = 0; i < 6; i++) {
+                teamContainer.appendChild(createEmptySlot());
+            }
+            loadQuestDefinitions();
+            loadPlayerSprites();
+            loadMapData();
+            loadQuestPaths();
+        });
 
         // Show speech bubble
         function showSpeechBubble(text, type = 'quest_start', duration = 4000) {
             const overlay = document.getElementById('speechBubbleOverlay');
-            
             clearTimeout(gameState.speechBubbleTimer);
             overlay.innerHTML = '';
-            
             const bubble = document.createElement('div');
             bubble.className = `speech-bubble ${type === 'quest_complete' ? 'quest-complete' : ''}`;
-            
             const textEl = document.createElement('div');
             textEl.className = 'speech-bubble-text';
             textEl.textContent = text;
-            
             bubble.appendChild(textEl);
             overlay.appendChild(bubble);
-            
             setTimeout(() => bubble.classList.add('show'), 50);
-            
             if (duration > 0) {
                 gameState.speechBubbleTimer = setTimeout(() => {
                     bubble.classList.remove('show');
@@ -1493,63 +1755,43 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         async function updateQuestDisplay(questId) {
             await loadQuestDefinitions();
             const section = document.getElementById('questSection');
-            
             if (!questId || !gameState.questDefinitions) {
                 section.style.display = 'none';
                 return;
             }
-            
             const quest = gameState.questDefinitions.find(q => 
                 parseInt(q.quest_id) === parseInt(questId)
             );
-            
             if (!quest) {
-                console.log(`Quest ${questId} not found in definitions`);
+                console.log(`Quest ${questId} not found`);
                 section.style.display = 'none';
                 return;
             }
-            
-            console.log(`Displaying quest ${questId}:`, quest);
             section.style.display = 'block';
-            
-            document.getElementById('questTitle').textContent = 
-                `QUEST ${quest.quest_id}:`;
-            document.getElementById('questDescription').textContent = 
-                quest.begin_quest_text || '';
-            
-            // Update triggers/objectives using subquest_list
+            document.getElementById('questTitle').textContent = `QUEST ${quest.quest_id}:`;
+            document.getElementById('questDescription').textContent = quest.begin_quest_text || '';
             const triggersEl = document.getElementById('questTriggers');
             triggersEl.innerHTML = '';
-            
             const subquests = quest.subquest_list || [];
             const triggers = quest.event_triggers || [];
             let completedCount = 0;
-            
-            // Use subquest_list for display, triggers for completion tracking
-            subquests.forEach((subquest, idx) => {
+            subquests.forEach((sub, idx) => {
                 const li = document.createElement('li');
                 li.className = 'quest-item';
-                li.textContent = subquest;
-                
-                // Check if corresponding trigger is completed
+                li.textContent = sub;
                 if (idx < triggers.length) {
-                    const triggerId = `${questId}_${idx}`;
-                    if (gameState.questData.triggers && gameState.questData.triggers[triggerId]) {
+                    const tid = `${questId}_${idx}`;
+                    if (gameState.questData.triggers && gameState.questData.triggers[tid]) {
                         li.classList.add('completed');
                         completedCount++;
                     }
                 }
-                
                 triggersEl.appendChild(li);
             });
-            
-            const progress = subquests.length > 0 ? (completedCount / subquests.length) * 100 : 0;
+            const progress = subquests.length ? (completedCount/subquests.length)*100 : 0;
             document.getElementById('questProgress').style.width = `${progress}%`;
-            
             if (progress === 100 && gameState.questData.quests && !gameState.questData.quests[questId]) {
-                if (!gameState.questData.quests) gameState.questData.quests = {};
                 gameState.questData.quests[questId] = true;
-                
                 if (quest.end_quest_text) {
                     showSpeechBubble(quest.end_quest_text, 'quest_complete', 5000);
                 }
@@ -1561,142 +1803,94 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const thinkingEl = document.getElementById('grokThinking');
             const responseEl = document.getElementById('grokResponse');
             const waitingEl = document.getElementById('grokWaiting');
-            
             if (thinking) {
-                thinkingEl.textContent = `Thinking: ${thinking}`;
+                const match = thinking.match(/Current situation:\s*([\s\S]*?)(?:Game stats:|$)/);
+                // Display full (untruncated) reasoning; container now scrolls as needed
+                thinkingEl.textContent = (match ? match[1].trim() : thinking);
                 thinkingEl.style.display = 'block';
                 waitingEl.style.display = 'none';
-            } else {
-                thinkingEl.style.display = 'none';
-            }
-            
+            } else thinkingEl.style.display = 'none';
             if (response) {
-                responseEl.textContent = `Action: ${response}`;
+                responseEl.textContent = response;
                 responseEl.style.display = 'block';
                 waitingEl.style.display = 'none';
-            } else {
-                responseEl.style.display = 'none';
-            }
-            
-            if (!thinking && !response) {
-                waitingEl.style.display = 'block';
-            }
+            } else responseEl.style.display = 'none';
+            if (!thinking && !response) waitingEl.style.display = 'block';
         }
 
-        // Calculate experience for level
+        // Experience calc
         function calculateExpForLevel(level, growthRate = 'medium_slow') {
-            // Pokemon Red uses different growth rates, defaulting to Medium Slow
             if (growthRate === 'medium_slow') {
-                return Math.floor((6/5) * Math.pow(level, 3) - 15 * Math.pow(level, 2) + 100 * level - 140);
+                return Math.floor((6/5)*level**3 - 15*level**2 + 100*level - 140);
             }
             return 0;
         }
 
-        // Get Pokemon types from game data
+        // Pokemon types
         function getPokemonTypes(speciesName) {
-            // Type mapping for common Pokemon
-            const typeMap = {
-                'charmander': ['fire'],
-                'charmeleon': ['fire'],
-                'charizard': ['fire', 'flying'],
-                'squirtle': ['water'],
-                'wartortle': ['water'],
-                'blastoise': ['water'],
-                'bulbasaur': ['grass', 'poison'],
-                'ivysaur': ['grass', 'poison'],
-                'venusaur': ['grass', 'poison'],
-                'pikachu': ['electric'],
-                'raichu': ['electric'],
-                'pidgey': ['normal', 'flying'],
-                'pidgeotto': ['normal', 'flying'],
-                'pidgeot': ['normal', 'flying'],
-                'rattata': ['normal'],
-                'raticate': ['normal'],
-                'spearow': ['normal', 'flying'],
-                'fearow': ['normal', 'flying'],
-                'caterpie': ['bug'],
-                'metapod': ['bug'],
-                'butterfree': ['bug', 'flying'],
-                'weedle': ['bug', 'poison'],
-                'kakuna': ['bug', 'poison'],
-                'beedrill': ['bug', 'poison']
+            const map = {
+                'charmander': ['fire'], 'charmeleon': ['fire'], 'charizard': ['fire','flying'],
+                'squirtle':['water'],'wartortle':['water'],'blastoise':['water'],
+                'bulbasaur':['grass','poison'],'ivysaur':['grass','poison'],'venusaur':['grass','poison'],
+                'pikachu':['electric'],'raichu':['electric'],
+                'pidgey':['normal','flying'],'pidgeotto':['normal','flying'],'pidgeot':['normal','flying'],
+                'rattata':['normal'],'raticate':['normal'],
+                'spearow':['normal','flying'],'fearow':['normal','flying'],
+                'caterpie':['bug'],'metapod':['bug'],'butterfree':['bug','flying'],
+                'weedle':['bug','poison'],'kakuna':['bug','poison'],'beedrill':['bug','poison']
             };
-            
-            const lower = speciesName.toLowerCase();
-            return typeMap[lower] || ['normal'];
+            return map[speciesName.toLowerCase()] || ['normal'];
         }
 
         // Update Pokemon team
         async function updatePokemonTeam(partyData) {
             const teamContainer = document.getElementById('pokemon-team');
             teamContainer.innerHTML = '';
-
-            for (const pokemon of partyData) {
+            for (const p of partyData) {
                 try {
-                    const key = pokemon.speciesName.toLowerCase();
+                    const key = p.speciesName.toLowerCase();
                     let spriteUrl = localStorage.getItem(`pokemon_sprite_${key}`);
                     if (!spriteUrl) {
-                        const response = await fetch(`https://pokeapi.co/api/v2/pokemon/${key}`);
-                        if (response.ok) {
-                            const data = await response.json();
-                            spriteUrl = data.sprites.front_default;
+                        const resp = await fetch(`https://pokeapi.co/api/v2/pokemon/${key}`);
+                        if (resp.ok) {
+                            const d = await resp.json();
+                            spriteUrl = d.sprites.front_default;
                             localStorage.setItem(`pokemon_sprite_${key}`, spriteUrl);
                         }
                     }
-
-                    const card = createPokemonCardFromGameData(pokemon, spriteUrl);
-                    teamContainer.appendChild(card);
-
-                } catch (error) {
-                    console.error(`Failed to load Pokemon ${pokemon.id}:`, error);
-                    const errorCard = createEmptySlot(`Error: ${pokemon.nickname || 'Unknown'}`);
-                    teamContainer.appendChild(errorCard);
+                    teamContainer.appendChild(createPokemonCardFromGameData(p, spriteUrl));
+                } catch {
+                    teamContainer.appendChild(createEmptySlot(`Error: ${p.nickname||'Unknown'}`));
                 }
             }
-
             for (let i = partyData.length; i < 6; i++) {
                 teamContainer.appendChild(createEmptySlot());
             }
         }
 
+        // Create card
         function createPokemonCardFromGameData(pokemon, spriteUrl) {
             const card = document.createElement('div');
             card.className = 'pokemon-card';
-
-            const hpPercent = pokemon.maxHp > 0 ? (pokemon.hp / pokemon.maxHp) * 100 : 0;
-            let hpClass = '';
-            if (hpPercent <= 20) hpClass = 'low';
-            else if (hpPercent <= 50) hpClass = 'medium';
-
-            // Experience percentage calculation
-            const curLevel = pokemon.level;
-            const curExp = pokemon.experience || 0;
-            const prevExp = calculateExpForLevel(curLevel);
-            const nextExp = calculateExpForLevel(curLevel + 1);
-            const expPercent = nextExp > prevExp ? Math.max(0, Math.min(100, ((curExp - prevExp) / (nextExp - prevExp)) * 100)) : 0;
-            const expToNext = Math.max(0, nextExp - curExp);
-
-            const speciesName = pokemon.speciesName || `Pokemon #${pokemon.id}`;
-            const nickname = pokemon.nickname || speciesName;
-
-            // Get types for this Pokemon
-            const types = pokemon.types || getPokemonTypes(speciesName);
-            const typesHtml = types.map(type =>
-                `<span class="type-badge type-${type.toLowerCase()}">${type.toUpperCase()}</span>`
-            ).join('');
-
-            // Get status
-            const status = pokemon.status || 'OK';
-            const statusClass = status !== 'OK' ? ` ${status}` : '';
+            const hpPct = pokemon.maxHp>0?(pokemon.hp/pokemon.maxHp)*100:0;
+            let hpClass = hpPct<=20?'low':hpPct<=50?'medium':'';
+            const cur = pokemon.level, curExp = pokemon.experience||0;
+            const prevExp = calculateExpForLevel(cur), nextExp = calculateExpForLevel(cur+1);
+            const expPct = nextExp>prevExp?Math.max(0,Math.min(100,((curExp-prevExp)/(nextExp-prevExp))*100)):0;
+            const expToNext = Math.max(0,nextExp-curExp);
+            const speciesName = pokemon.speciesName||`#${pokemon.id}`;
+            const nickname = pokemon.nickname||speciesName;
+            const typesHtml = (pokemon.types||getPokemonTypes(speciesName))
+                .map(t => `<span class="type-badge type-${t.toLowerCase()}">${t.toUpperCase()}</span>`).join('');
+            const status = pokemon.status||'OK';
+            const statusClass = status!=='OK'?` ${status}`:'';
 
             card.innerHTML = `
                 <div class="pokemon-sprite-container">
-                    <img src="${spriteUrl || 'https://placehold.co/64x64/333333/666666?text=No+Sprite'}" 
-                        alt="${speciesName}" 
-                        class="pokemon-sprite" 
-                        onerror="this.src='https://placehold.co/64x64/333333/666666?text=Error'; this.onerror=null;">
+                    <img src="${spriteUrl||'https://placehold.co/64x64/333/666?text=No+Sprite'}" 
+                        alt="${speciesName}" class="pokemon-sprite"
+                        onerror="this.src='https://placehold.co/64x64/333/666?text=Error';this.onerror=null;">
                 </div>
-                
                 <div class="pokemon-card-info-wrapper">
                     <div class="pokemon-card-main-info">
                         <div class="pokemon-card-left">
@@ -1707,47 +1901,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <div class="pokemon-level">Lv. ${pokemon.level}</div>
                         </div>
                     </div>
-
-                    <div class="pokemon-types-row">
-                        <div class="pokemon-types">
-                            ${typesHtml}
-                        </div>
-                    </div>
+                    <div class="pokemon-types-row"><div class="pokemon-types">${typesHtml}</div></div>
                 </div>
-
                 <div class="pokemon-card-stats-footer">
-                    <div class="hp-bar">
-                        <div class="hp-fill ${hpClass}" style="width: ${hpPercent}%"></div>
-                    </div>
+                    <div class="hp-bar"><div class="hp-fill ${hpClass}" style="width:${hpPct}%"></div></div>
                     <div class="pokemon-card-bottom-details">
-                        <div class="hp-text">HP: ${pokemon.hp}/${pokemon.maxHp}</div>
+                        <div class="hp-text">${pokemon.hp}/${pokemon.maxHp}</div>
                         <div class="pokemon-status${statusClass}">${status}</div>
                     </div>
-                    <div class="exp-bar">
-                        <div class="exp-fill" style="width: ${expPercent}%"></div>
-                    </div>
-                    <div class="exp-text mono">EXP: ${curExp.toLocaleString()} / Next: ${expToNext.toLocaleString()}</div>
+                    <div class="exp-bar"><div class="exp-fill" style="width:${expPct}%"></div></div>
+                    <div class="exp-text mono">EXP: ${curExp.toLocaleString()} / ${expToNext.toLocaleString()}</div>
                 </div>
             `;
-
             return card;
         }
 
+        // Empty slot
         function createEmptySlot(text = '—') {
             const slot = document.createElement('div');
             slot.className = 'pokemon-card empty-slot';
             slot.textContent = text;
             return slot;
         }
-
-        // Initialize with placeholder while waiting for real data
-        document.addEventListener('DOMContentLoaded', () => {
-            const teamContainer = document.getElementById('pokemon-team');
-            teamContainer.innerHTML = '';
-            for (let i = 0; i < 6; i++) {
-                teamContainer.appendChild(createEmptySlot());
-            }
-        });
 
         // Render action
         function renderAction(action) {
@@ -1756,297 +1931,173 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             span.textContent = action;
             span.className = 'input-key';
             viz.appendChild(span);
-            if (viz.children.length > 10) {
-                viz.removeChild(viz.children[0]);
-            }
+            if (viz.children.length > 10) viz.removeChild(viz.children[0]);
         }
 
-        // Track first SSE connection so we can auto-refresh when Flask reloads
-        let firstConnect = true;
-        let lastServerId = null;
-        const RECONNECT_FALLBACK_MS = 5000;  // if SSE isn't back after 5s, reload
-        const WATCHDOG_INTERVAL_MS = 45000; // 45s without any SSE -> reload
-        let reconnectTimer = null;
+        // SSE connection
+        const eventSource = new EventSource('/events');
+        let firstConnect = true, lastServerId = null, reconnectTimer = null;
+        const RECONNECT_FALLBACK_MS = 5000, WATCHDOG_INTERVAL_MS = 45000;
         let lastSseTime = Date.now();
 
-        const eventSource = new EventSource('/events');
-
         eventSource.onopen = () => {
-            // connection (re)established – cancel any pending fallback reload
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
         };
 
-        eventSource.onmessage = async (e) => {
-            if (!e.data) return;
-            try {
-                const msg = JSON.parse(e.data);
-                console.log('SSE message:', msg.type, msg.data);
-                
-                // Handle server restarts – when Flask's reloader spins up a new
-                // process it emits a different server_id. If we detect that,
-                // reload the whole page so fresh assets are used.
-                if (msg.type === 'connected') {
-                    const sid = msg.data?.server_id;
-                    if (lastServerId && sid && lastServerId !== sid) {
-                        location.reload();
-                        return;
-                    }
-                    lastServerId = sid;
-                    if (!firstConnect) {
-                        // Fallback: if we somehow missed the server_id check
-                        location.reload();
-                        return;
-                    }
-                    firstConnect = false;
-                }
-                
-                switch(msg.type) {
-                    case 'location':
-                        document.getElementById('statLocation').textContent = msg.data.map_name || 'Unknown';
-                        document.getElementById('currentMapName').textContent = msg.data.map_name || 'Unknown';
-                        document.getElementById('statMapId').textContent = msg.data.map_id || '0';
-                        document.getElementById('statLocal').textContent = `(${msg.data.y || 0},${msg.data.x || 0})`;
-                        document.getElementById('statGlobal').textContent = `(${msg.data.gy || 0},${msg.data.gx || 0})`;
-                        
-                        if (msg.data.gx !== undefined && msg.data.gy !== undefined) {
-                            // Reload the generated global map to include current player position
-                            const mapImg = document.getElementById('globalMapImage');
-                            mapImg.src = `/global-map.png?ts=${Date.now()}`;
-                            // Update textual stats
-                            document.getElementById('mapPosition').textContent = `(${msg.data.gy},${msg.data.gx})`;
-                            document.getElementById('currentMapName').textContent = msg.data.map_name || 'Unknown';
-                        }
-                        break;
-                        
-                    case 'current_quest':
-                        const oldQuest = gameState.currentQuest;
-                        gameState.currentQuest = msg.data;
-                        await updateQuestDisplay(msg.data);
-                        
-                        if (msg.data && msg.data !== oldQuest && gameState.questDefinitions) {
-                            const quest = gameState.questDefinitions.find(q => 
-                                parseInt(q.quest_id) === parseInt(msg.data)
-                            );
-                            if (quest && quest.begin_quest_text) {
-                                showSpeechBubble(quest.begin_quest_text, 'quest_start');
-                            }
-                        }
-                        break;
-                        
-                    case 'quest_data':
-                        gameState.questData = msg.data;
-                        if (gameState.currentQuest) {
-                            await updateQuestDisplay(gameState.currentQuest);
-                        }
-                        break;
-                        
-                    case 'trigger_update':
-                        if (!gameState.questData.triggers) {
-                            gameState.questData.triggers = {};
-                        }
-                        gameState.questData.triggers[msg.data.id] = msg.data.completed;
-                        if (gameState.currentQuest) {
-                            await updateQuestDisplay(gameState.currentQuest);
-                        }
-                        break;
-                        
-                    case 'speech_bubble':
-                        if (msg.data.text) {
-                            showSpeechBubble(msg.data.text, msg.data.type, msg.data.duration);
-                        }
-                        break;
-                        
-                    case 'stats':
-                        document.getElementById('statMoney').textContent = `₽${msg.data.money || 0}`;
-                        document.getElementById('statSteps').textContent = msg.data.steps || 0;
-                        document.getElementById('statBadges').textContent = `${msg.data.badges || 0}/8`;
-                        document.getElementById('statSeen').textContent = msg.data.pokedex_seen || 0;
-                        document.getElementById('statCaught').textContent = msg.data.pokedex_caught || 0;
-                        break;
-                        
-                    case 'pokemon_team':
-                        await updatePokemonTeam(msg.data);
-                        break;
-                        
-                    case 'game_screen':
-                        const gameScreen = document.getElementById('gameScreen');
-                        const placeholder = document.getElementById('gamePlaceholder');
-                        if (gameScreen && msg.data) {
-                            gameScreen.src = msg.data;
-                            gameScreen.style.display = 'block';
-                            if (placeholder) {
-                                placeholder.style.display = 'none';
-                            }
-                        }
-                        break;
-                        
-                    case 'grok_thinking':
-                        updateGrokStatus(msg.data, null);
-                        break;
-                        
-                    case 'grok_response':
-                        updateGrokStatus(null, msg.data);
-                        // Parse action from response
-                        const match = msg.data.match(/Action (\d+): (.+)/);
-                        if (match) {
-                            const actionNum = parseInt(match[1]);
-                            const reasoning = match[2];
-                            addActionToLog(actionNum, reasoning);
-                        }
-                        break;
-                        
-                    case 'grok_cost':
-                        const costEl = document.getElementById('grokCost');
-                        if (msg.data) {
-                            document.getElementById('apiCallsCount').textContent = msg.data.api_calls_count || 0;
-                            document.getElementById('totalTokens').textContent = msg.data.total_tokens ? 
-                                msg.data.total_tokens.toLocaleString() : 0;
-                            document.getElementById('callCost').textContent = msg.data.call_cost ? 
-                                `$${msg.data.call_cost.toFixed(4)}` : '$0.00';
-                            document.getElementById('totalCost').textContent = msg.data.total_cost ? 
-                                `$${msg.data.total_cost.toFixed(4)}` : '$0.00';
-                            costEl.style.display = 'block';
-                            document.getElementById('statCallCost').textContent = msg.data.call_cost ? `$${msg.data.call_cost.toFixed(4)}` : '$0.00';
-                            document.getElementById('statLifetimeCost').textContent = msg.data.total_cost ? 
-                                `$${msg.data.total_cost.toFixed(2)}` : '$0.00';
-                        } else {
-                            costEl.style.display = 'none';
-                        }
-                        break;
-                        
-                    case 'action':
-                        renderAction(msg.data);
-                        break;
-                        
-                    case 'grok_enabled':
-                        const grokStatusEl = document.getElementById('grokWaiting');
-                        if (grokStatusEl) {
-                            if (msg.data) {
-                                grokStatusEl.textContent = 'Grok is active and thinking...';
-                                grokStatusEl.style.color = '#10b981';
-                            } else {
-                                grokStatusEl.textContent = 'Grok is disabled. Click Start to enable.';
-                                grokStatusEl.style.color = '#666';
-                            }
-                        }
-                        break;
-                }
-            } catch (err) {
-                console.error('Error parsing SSE message', err);
-            }
-            lastSseTime = Date.now();
-        };
-
-        eventSource.onerror = (err) => {
-            console.error('SSE connection error:', err);
-            // EventSource will auto-retry by itself, but if for some reason we
-            // don't get an 'open' event again within RECONNECT_FALLBACK_MS,
-            // force a full page reload so the browser grabs a fresh SSE stream.
+        eventSource.onerror = err => {
+            console.error('SSE error:', err);
             clearTimeout(reconnectTimer);
-            // Always start (or restart) the fallback reload timer
             reconnectTimer = setTimeout(() => location.reload(), RECONNECT_FALLBACK_MS);
         };
 
-        // Watchdog: if no SSE message received for WATCHDOG_INTERVAL_MS reload page
         setInterval(() => {
             if (Date.now() - lastSseTime > WATCHDOG_INTERVAL_MS) {
-                console.warn('SSE watchdog timeout – reloading page');
+                console.warn('SSE watchdog timeout—reloading');
                 location.reload();
             }
         }, WATCHDOG_INTERVAL_MS / 2);
 
-        // Agent control functions
-        async function startAgent() {
-            try {
-                document.getElementById('start-btn').disabled = true;
-                document.getElementById('start-btn').textContent = 'Starting...';
-                
-                const response = await fetch('/start', { method: 'POST' });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const contentType = response.headers.get("content-type");
-                if (!contentType || !contentType.includes("application/json")) {
-                    throw new TypeError("Response was not JSON");
-                }
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    document.getElementById('start-btn').style.display = 'none';
-                    document.getElementById('pause-btn').disabled = false;
-                    document.getElementById('stop-btn').disabled = false;
-                    console.log('Grok agent started successfully');
-                } else {
-                    alert('Failed to start Grok: ' + (result.message || 'Unknown error'));
-                    document.getElementById('start-btn').disabled = false;
-                    document.getElementById('start-btn').textContent = 'Start Grok';
-                }
-            } catch (error) {
-                console.error('Error starting Grok agent:', error);
-                alert('Error starting Grok agent: ' + error.message);
-                document.getElementById('start-btn').disabled = false;
-                document.getElementById('start-btn').textContent = 'Start Grok';
-            }
-        }
+        eventSource.onmessage = async e => {
+            if (!e.data) return;
+            const msg = JSON.parse(e.data);
 
-        async function pauseAgent() {
-            try {
-                const response = await fetch('/pause', { method: 'POST' });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    const pauseBtn = document.getElementById('pause-btn');
-                    if (result.message.includes('paused')) {
-                        pauseBtn.textContent = 'Resume Grok';
-                    } else {
-                        pauseBtn.textContent = 'Pause Grok';
+            // handle server restarts
+            if (msg.type === 'connected') {
+                const sid = msg.data?.server_id;
+                if (lastServerId && sid && lastServerId !== sid) return location.reload();
+                lastServerId = sid;
+                if (!firstConnect) return location.reload();
+                firstConnect = false;
+            }
+
+            switch (msg.type) {
+                case 'location':
+                    gameState.location = msg.data;
+                    document.getElementById('statLocation').textContent   = msg.data.map_name || 'Unknown';
+                    document.getElementById('currentMapName').textContent = msg.data.map_name || 'Unknown';
+                    document.getElementById('statMapId').textContent      = msg.data.map_id   || '0';
+                    document.getElementById('statLocal').textContent      = `(${msg.data.y||0},${msg.data.x||0})`;
+                    document.getElementById('statGlobal').textContent     = `(${msg.data.gy||0},${msg.data.gx||0})`;
+                    if (msg.data.gx!==undefined && msg.data.gy!==undefined) {
+                        // Use precomputed global coordinates when available for highest accuracy
+                        updatePlayerGlobal(msg.data.gx, msg.data.gy, gameState.facing);
+                    } else if (msg.data.x!==undefined && msg.data.y!==undefined) {
+                        updatePlayerPosition(msg.data.x, msg.data.y, msg.data.map_id, gameState.facing);
+                        document.getElementById('mapPosition').textContent = `(${msg.data.gy},${msg.data.gx})`;
                     }
-                    console.log('Grok agent pause state toggled');
-                }
-            } catch (error) {
-                console.error('Error pausing/resuming Grok agent:', error);
-            }
-        }
+                    break;
 
-        async function stopAgent() {
-            try {
-                const response = await fetch('/stop', { method: 'POST' });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    document.getElementById('start-btn').style.display = 'inline-block';
-                    document.getElementById('start-btn').disabled = false;
-                    document.getElementById('start-btn').textContent = 'Start Grok';
-                    document.getElementById('pause-btn').disabled = true;
-                    document.getElementById('pause-btn').textContent = 'Pause Grok';
-                    document.getElementById('stop-btn').disabled = true;
-                    console.log('Grok agent stopped successfully');
-                }
-            } catch (error) {
-                console.error('Error stopping Grok agent:', error);
-            }
-        }
+                case 'facing_direction':
+                    gameState.facing = msg.data;
+                    if (gameState.location?.x!==undefined && gameState.location?.y!==undefined) {
+                        updatePlayerPosition(
+                            gameState.location.x,
+                            gameState.location.y,
+                            gameState.location.map_id,
+                            gameState.facing
+                        );
+                    }
+                    break;
 
-        // Initialize on load
-        document.addEventListener('DOMContentLoaded', () => {
-            updatePokemonTeam([]);
-            loadQuestDefinitions();
-        });
+                case 'current_quest':
+                    {
+                        const old = gameState.currentQuest;
+                        gameState.currentQuest = msg.data;
+                        await updateQuestDisplay(msg.data);
+                        if (msg.data && msg.data!==old && gameState.questDefinitions) {
+                            const q = gameState.questDefinitions.find(q=>parseInt(q.quest_id)===parseInt(msg.data));
+                            if (q?.begin_quest_text) showSpeechBubble(q.begin_quest_text, 'quest_start');
+                        }
+                    }
+                    break;
+
+                case 'quest_data':
+                    gameState.questData = msg.data;
+                    if (gameState.currentQuest) await updateQuestDisplay(gameState.currentQuest);
+                    break;
+
+                case 'trigger_update':
+                    gameState.questData.triggers[msg.data.id] = msg.data.completed;
+                    if (gameState.currentQuest) await updateQuestDisplay(gameState.currentQuest);
+                    break;
+
+                case 'speech_bubble':
+                    if (msg.data.text) showSpeechBubble(msg.data.text, msg.data.type, msg.data.duration);
+                    break;
+
+                case 'stats':
+                    document.getElementById('statMoney').textContent   = `₽${msg.data.money||0}`;
+                    document.getElementById('statSteps').textContent   = msg.data.steps||0;
+                    document.getElementById('statBadges').textContent  = `${msg.data.badges||0}/8`;
+                    document.getElementById('statSeen').textContent    = msg.data.pokedex_seen||0;
+                    document.getElementById('statCaught').textContent  = msg.data.pokedex_caught||0;
+                    break;
+
+                case 'pokemon_team':
+                    await updatePokemonTeam(msg.data);
+                    break;
+
+                case 'game_screen':
+                    const gs = document.getElementById('gameScreen');
+                    const ph = document.getElementById('gamePlaceholder');
+                    if (gs && msg.data) {
+                        gs.src = msg.data;
+                        gs.style.display = 'block';
+                        if (ph) ph.style.display = 'none';
+                    }
+                    break;
+
+                case 'grok_thinking':
+                    updateGrokStatus(msg.data, null);
+                    break;
+
+                case 'grok_response':
+                    updateGrokStatus(null, msg.data);
+                    if (msg.data.startsWith('Tool ')) {
+                        const m = msg.data.match(/Tool (\w+): (.+)/);
+                        if (m) addActionToLog(0, `${m[1]}: ${m[2]}`);
+                    } else {
+                        const m = msg.data.match(/Action (\d+): (.+)/);
+                        if (m) addActionToLog(parseInt(m[1]), m[2]);
+                    }
+                    break;
+
+                case 'grok_cost':
+                    const costEl = document.getElementById('grokCost');
+                    if (msg.data) {
+                        document.getElementById('apiCallsCount').textContent = msg.data.api_calls_count||0;
+                        document.getElementById('totalTokens').textContent   = msg.data.total_tokens?.toLocaleString()||0;
+                        document.getElementById('callCost').textContent      = msg.data.call_cost?`$${msg.data.call_cost.toFixed(4)}`:'$0.00';
+                        document.getElementById('totalCost').textContent     = msg.data.total_cost?`$${msg.data.total_cost.toFixed(4)}`:'$0.00';
+                        costEl.style.display = 'block';
+                        document.getElementById('statCallCost').textContent     = msg.data.call_cost?`$${msg.data.call_cost.toFixed(4)}`:'$0.00';
+                        document.getElementById('statLifetimeCost').textContent = msg.data.total_cost?`$${msg.data.total_cost.toFixed(2)}`:'$0.00';
+                    } else costEl.style.display = 'none';
+                    break;
+
+                case 'action':
+                    renderAction(msg.data);
+                    break;
+
+                case 'grok_enabled':
+                    const grokStatusEl = document.getElementById('grokWaiting');
+                    if (grokStatusEl) {
+                        if (msg.data) {
+                            grokStatusEl.textContent = 'Grok is active and thinking...';
+                            grokStatusEl.style.color = '#10b981';
+                        } else {
+                            grokStatusEl.textContent = 'Grok is disabled. Click Start to enable.';
+                            grokStatusEl.style.color = '#666';
+                        }
+                    }
+                    break;
+            }
+
+            lastSseTime = Date.now();
+        };
     </script>
+
 </body>
 </html>
 '''
@@ -2094,7 +2145,33 @@ def index():
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     """Serve static files"""
-    return send_from_directory(STATIC_DIR, filename)
+    # First try to serve from the standard web/static directory
+    target_path = STATIC_DIR / filename
+    if target_path.exists():
+        return send_from_directory(STATIC_DIR, filename)
+
+    # If not found, fall back to environment data folders needed by the front-end
+    # 1) environment/data/environment_data/
+    env_data_dir = Path(__file__).parent.parent / 'environment' / 'data' / 'environment_data'
+    fallback = env_data_dir / Path(filename).name  # only support direct filenames here
+    if target_path.as_posix().startswith('data/environment_data/'):
+        # Preserve sub-path after the prefix
+        rel = Path(filename).relative_to('data/environment_data')
+        fallback = env_data_dir / rel
+
+    if fallback.exists():
+        return send_from_directory(fallback.parent, fallback.name, max_age=0)
+
+    # 2) environment/environment_helpers/quest_paths/
+    quest_dir = Path(__file__).parent.parent / 'environment' / 'environment_helpers' / 'quest_paths'
+    if target_path.as_posix().startswith('data/environment_helpers/quest_paths/'):
+        rel = Path(filename).relative_to('data/environment_helpers/quest_paths')
+        fallback = quest_dir / rel
+        if fallback.exists():
+            return send_from_directory(fallback.parent, fallback.name, max_age=0)
+
+    # Not found anywhere
+    return "File not found", 404
 
 @app.route('/events')
 def events():
@@ -2303,8 +2380,9 @@ def start_server(status_queue, host='0.0.0.0', port=8080):
     game_started.set()
     
     # 🔄  Enable Grok immediately so manual 'Start Grok' click is unnecessary
-    grok_enabled.set()
-    broadcast_update('grok_enabled', True)
+    if hasattr(_CONFIG, 'grok') and _CONFIG.grok.enabled:
+        grok_enabled.set()
+        broadcast_update('grok_enabled', True)
     
     # Run Flask server – enable reloader only when we are running in the main
     # thread (e.g. `python web_server.py`).  When the server is launched from
@@ -2324,23 +2402,72 @@ def start_server(status_queue, host='0.0.0.0', port=8080):
 def global_map_png():
     """Dynamically generate and serve the quest-overlay global map."""
     out_path = STATIC_DIR / 'images' / 'kanto_map.png'
-    # Generate quest-overlay map in place
+    # Generate full-size quest-overlay map (do not crop) so front-end sizing remains stable
     quest_dir = Path(__file__).parent.parent / 'environment' / 'environment_helpers' / 'quest_paths'
-    build_quest_map(output_path=out_path, quest_dir=quest_dir, n=10)
-    # Optionally overlay current player position as a red rectangle
-    player = game_state.get('global_map_player')
-    if player:
-        gy, gx = player.get('gy', 0), player.get('gx', 0)
-        # Convert padded global to tile coords
-        tx = gx - PAD_COL
-        ty = gy - PAD_ROW
-        # Load image and draw
-        img = Image.open(out_path).convert('RGBA')
-        draw = ImageDraw.Draw(img)
-        x0, y0 = tx * TILE_SIZE, ty * TILE_SIZE
-        draw.rectangle([x0, y0, x0 + TILE_SIZE - 1, y0 + TILE_SIZE - 1], outline=(255, 0, 0), width=2)
-        img.save(out_path)
+    build_quest_map(output_path=out_path, quest_dir=quest_dir, n=10, crop=False)
+    # # Optionally overlay current player position as a red rectangle
+    # # Player sprite overlay now handled in javascript code
+    # player = game_state.get('global_map_player')
+    # if player:
+    #     gy, gx = player.get('gy', 0), player.get('gx', 0)
+    #     # Convert padded global to tile coords
+    #     tx = gx - PAD_COL
+    #     ty = gy - PAD_ROW
+    #     # Load image and draw
+    #     img = Image.open(out_path).convert('RGBA')
+    #     draw = ImageDraw.Draw(img)
+    #     x0, y0 = tx * TILE_SIZE, ty * TILE_SIZE
+    #     draw.rectangle([x0, y0, x0 + TILE_SIZE - 1, y0 + TILE_SIZE - 1], outline=(255, 0, 0), width=2)
+    #     img.save(out_path)
     return send_from_directory(out_path.parent, out_path.name, max_age=0)
+
+@app.route('/static/images/pokemon_red_player_spritesheet.png')
+def serve_spritesheet():
+    """Serve the player spritesheet"""
+    try:
+        spritesheet_path = Path(__file__).parent.parent / 'environment' / 'data' / 'environment_data' / 'pokemon_red_player_spritesheet.png'
+        if spritesheet_path.exists():
+            return send_from_directory(spritesheet_path.parent, spritesheet_path.name)
+        else:
+            # If not found, return a placeholder or error
+            return "Spritesheet not found", 404
+    except Exception as e:
+        print(f"Error serving spritesheet: {e}")
+        return "Error loading spritesheet", 500
+
+# ---------------------------------------------------------------------------
+# Additional static data endpoints needed by the front-end
+# ---------------------------------------------------------------------------
+
+# Map data JSON (used by loadMapData() in the front-end JS)
+@app.route('/static/data/environment_data/<path:filename>')
+def serve_environment_data(filename):
+    """Serve files from environment/data/environment_data/ directory."""
+    try:
+        data_dir = Path(__file__).parent.parent / 'environment' / 'data' / 'environment_data'
+        target = data_dir / filename
+        if target.exists():
+            return send_from_directory(target.parent, target.name, max_age=0)
+        else:
+            return "File not found", 404
+    except Exception as e:
+        print(f"Error serving environment data file {filename}: {e}")
+        return "Error loading file", 500
+
+# Combined quest coordinates JSON (used by loadQuestPaths() in the front-end JS)
+@app.route('/static/data/environment_helpers/quest_paths/<path:filename>')
+def serve_quest_path_data(filename):
+    """Serve files from environment/environment_helpers/quest_paths/ directory."""
+    try:
+        quest_dir = Path(__file__).parent.parent / 'environment' / 'environment_helpers' / 'quest_paths'
+        target = quest_dir / filename
+        if target.exists():
+            return send_from_directory(target.parent, target.name, max_age=0)
+        else:
+            return "File not found", 404
+    except Exception as e:
+        print(f"Error serving quest path data file {filename}: {e}")
+        return "Error loading file", 500
 
 if __name__ == '__main__':
     # Developer-run mode: start an *empty* queue and print instructions.

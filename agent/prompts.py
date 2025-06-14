@@ -26,7 +26,7 @@ DECIDE (Action Selection)
 
 Movement:
 
-    Quests like exit a location, or go to a location, can be completed with a path_to_location tool call.
+    Quests like exit a location, or go to a location, can be completed with a follow_nav_path tool call.
     Quests like pick up an item, or talk to an NPC, require you to walk to where the item or NPC is, face them, and press A.
     If you choose move with arrow keys, before you do so, use the collision map to plan the number of ups, down, lefts and rights you will use to navigate. You cannot walk on unwalkable tiles.
 
@@ -56,11 +56,11 @@ Legend:
 
 Generate a tool call now based on this new game state information like Current Player Environment and the collision map. Paying VERY careful attention to ground your reasoning & collision map ONLY. Careful not to hallucinate, depend on the emulator replies & collision maps to give you facts about where you are.
 
-You will be provided with a collision map of the game at each step. First, describe exactly what you see in the collision map. Then select the keys you will press in order if you aren't planning to use the follow_path tool. Do not make any guesses about the game state beyond what is visible in the collision map & emulator reply — collision map, emulator replies, and your chat history are the ground truth. Careful not to hallucinate progress you don't have evidence for.
+You will be provided with a collision map of the game at each step. First, describe exactly what you see in the collision map. Then select the keys you will press in order if you aren't planning to use the follow_nav_path tool. Do not make any guesses about the game state beyond what is visible in the collision map & emulator reply — collision map, emulator replies, and your chat history are the ground truth. Careful not to hallucinate progress you don't have evidence for.
 
 Don't forget to explain your reasoning in each step along with your tool calls succinctliy; long responses will slow down gameplay.
 
-Focus intently on the collision map if you're not using the follow_path tool. Identify the tile you need to reach and pay close attention to key sprites.
+Focus intently on the collision map if you're not using the follow_nav_path tool. Identify the tile you need to reach and pay close attention to key sprites.
 
 If you see the same screen or sprites repeatedly, you may be stuck in a loop.
  

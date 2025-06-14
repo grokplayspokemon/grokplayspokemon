@@ -1,0 +1,33 @@
+[
+  0,
+  0,
+  {
+    "step": 37045,
+    "action": 3,
+    "original_action": null,
+    "timestamp": 1749883010.0030434,
+    "source": "manual"
+  },
+  {
+    "step": 37046,
+    "action": 3,
+    "original_action": null,
+    "timestamp": 1749883010.2278612,
+    "source": "manual"
+  },
+  0,
+  {
+    "step": 37048,
+    "action": 3,
+    "original_action": null,
+    "timestamp": 1749883013.0559766,
+    "source": "manual"
+  },
+  {
+    "step": 37049,
+    "action": 3,
+    "original_action": null,
+    "timestamp": 1749883015.3516712,
+    "source": "manual"
+  }
+]

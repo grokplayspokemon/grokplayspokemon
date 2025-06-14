@@ -47,8 +47,17 @@ def padded_global_to_tile(g_y: int, g_x: int) -> Tuple[int, int]:
     return g_x - PAD_COL, g_y - PAD_ROW
 
 
-def generate(output_path: Path, quest_dir: Path, n: int = 10) -> None:
-    """Generate quest-overlay map at output_path."""
+def generate(output_path: Path, quest_dir: Path, n: int = 10, crop: bool = True) -> None:
+    """Generate quest-overlay map at output_path.
+
+    Args:
+        output_path: Location to save resulting PNG
+        quest_dir: Directory containing individual quest coordinate JSON files
+        n: Number of quests to overlay (1..n)
+        crop: Whether to crop the image around the coloured quest tiles. Set to
+              False to always export the full original map dimensions – useful
+              for web-UIs that rely on fixed sizing.
+    """
     # Load the full Kanto base map from environment data
     base_img_path = Path(__file__).resolve().parent.parent / 'environment' / 'data' / 'environment_data' / 'full_kanto_map.png'
     base_img = Image.open(base_img_path).convert('RGBA')
@@ -69,8 +78,8 @@ def generate(output_path: Path, quest_dir: Path, n: int = 10) -> None:
                 max_tx, max_ty = max(max_tx, tx), max(max_ty, ty)
         legend_entries.append((f"Quest {idx:03}", colour))
 
-    # Crop only if quest overlays were drawn; otherwise use full base
-    if max_tx >= min_tx and max_ty >= min_ty:
+    # Optionally crop the image around quest overlays to reduce size.
+    if crop and max_tx >= min_tx and max_ty >= min_ty:
         pad_tiles = 5
         x_left = max((min_tx - pad_tiles) * TILE_SIZE, 0)
         y_top = max((min_ty - pad_tiles) * TILE_SIZE, 0)

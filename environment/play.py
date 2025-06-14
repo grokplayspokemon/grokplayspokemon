@@ -1087,8 +1087,8 @@ def main():
                 update_screen(screen, processed_frame, screen_width, screen_height)
                 # Update UI while idle
                 update_ui_if_needed()
-                # Cap to 30 FPS
-                loop_clock.tick(30)
+                # Cap to 5 FPS
+                loop_clock.tick(5)
             else:
                 # Headless mode: tick emulator and update UI
                 env.pyboy.tick()
@@ -1199,6 +1199,7 @@ def main():
                                     # Update observation and info for this frame
                                     obs, reward, terminated, truncated, info = current_obs, current_reward, current_terminated, current_truncated, current_info
                         elif event.key == pygame.K_6:
+                            raise Exception("play.py: main(): '6' key: Manual warp trigger")
                             # "6" key: Manual warp trigger
                             print("Navigator: Manual input - Key 6 -> Manual warp trigger")
                             if navigator.manual_warp_trigger():
@@ -1247,57 +1248,76 @@ def main():
                         print("Dialog active; overriding Grok PATH_FOLLOW_ACTION to B press")
                         current_action = VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_B)
                     else:
-                        print("Grok PATH_FOLLOW_ACTION: triggering quest path follow")
-                        # Load quest coordinates
+                        # On '5' key: Move to next coordinate (quest path)
+                        raw_dialog = env.read_dialog() or ''
+                        if raw_dialog.strip():
+                            print(f"\nplay.py: main(): '5' key: Navigation paused: dialog active, cannot move to next coordinate.")
+                        else:
+                            print(f"\nplay.py: main(): '5' key: Using PATH_FOLLOW_ACTION")
+                        
+                        # CRITICAL FIX: Ensure environment loads the current quest coordinates
                         current_q = quest_manager.get_current_quest()
                         if current_q is not None:
+                            print(f"play.py: '5' key: Current quest is {current_q}")
+                            
+                            # Load quest coordinates in environment BEFORE triggering PATH_FOLLOW
                             if not navigator.load_coordinate_path(current_q):
-                                print(f"Grok PATH_FOLLOW: failed to load quest {current_q} coordinates")
+                                print(f"play.py: '5' key: ERROR - Failed to load quest {current_q} coordinates")
+                            else:
+                                print(f"play.py: '5' key: Successfully loaded quest {current_q} coordinates")
+                            
+                            # Sync quest IDs across all components
                             setattr(env, 'current_loaded_quest_id', current_q)
                             quest_manager.current_quest_id = current_q
                             navigator.active_quest_id = current_q
                         else:
-                            print("Grok PATH_FOLLOW: no current quest to follow")
-                        # Use quest filtering
+                            print("play.py: '5' key: WARNING - No current quest found")
+                        
+                        # Apply quest-specific overrides (e.g., force A press for quest 015)
                         desired = quest_manager.filter_action(PATH_FOLLOW_ACTION)
                         if desired == PATH_FOLLOW_ACTION:
-                            # Let generic executor handle environment.step()
+                            # Use PATH_FOLLOW_ACTION directly - let environment handle it
                             current_action = PATH_FOLLOW_ACTION
                         else:
-                            # Override via centralized execution
-                            obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                            # FIXED: Override with quest-specific emulator action using centralized execution
+                            current_obs, current_reward, current_terminated, current_truncated, current_info, total_steps = execute_action_step(
                                 env, desired, quest_manager, navigator, logger, total_steps
                             )
+                            # Record the override action
                             recorded_playthrough.append(desired)
+                            # Update observation and info for this frame
+                            obs, reward, terminated, truncated, info = current_obs, current_reward, current_terminated, current_truncated, current_info
+                    
                 else:
                     # Regular non-path-follow Grok action
                     current_action = retrieved
         
-        search_strings = ["Welcome to the", "My", "People", "inhabited", "creatures", "Fo", "Others", "I", "First"]
-        if any(s in env.read_dialog() for s in search_strings) and not env.never_run_again:
-            print(f"play.py: main(): is our a key thing triggering???")
-            noop_action = getattr(env, "a", VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_A))
-            print(f"play.py: main(): noop_action: {noop_action}")
-            # Advance with a
-            obs, reward, terminated, truncated, info, total_steps = execute_action_step(
-                env,
-                noop_action,
-                quest_manager,
-                navigator,
-                logger,
-                total_steps,
-            )
-            print(f"play.py: main(): noop_action: got past the execute_action_step {noop_action}")
-            env.pyboy.tick()
-            raw_frame = env.render()
-            processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
-            update_screen(screen, processed_frame_rgb, screen_width, screen_height)
-            # Update UI without advancing game state
-            update_ui_if_needed()
-            loop_clock.tick(30)
+        if env.quest_manager.current_quest_id == 1:
+            search_strings = ["Welcome to the", "My", "People", "inhabited", "creatures", "Fo", "Others", "First"]
+            if any(s in env.read_dialog() for s in search_strings) and not env.never_run_again:
+                print(f"play.py: main(): is our a key thing triggering??? matching items {any(s in env.read_dialog() for s in search_strings)} in {env.read_dialog()}")
+                noop_action = getattr(env, "a", 4)
+                print(f"play.py: main(): noop_action: {noop_action}")
+                # Advance with a
+                obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                    env,
+                    noop_action,
+                    quest_manager,
+                    navigator,
+                    logger,
+                    total_steps,
+                )
+                print(f"play.py: main(): noop_action: got past the execute_action_step {noop_action}")
+                env.pyboy.tick()
+                raw_frame = env.render()
+                processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
+                update_screen(screen, processed_frame_rgb, screen_width, screen_height)
+                # Update UI without advancing game state
+                update_ui_if_needed()
+                loop_clock.tick(30)
 
-            time.sleep(0.05)
-            continue
+                time.sleep(0.05)
+                continue
         
         if current_action is None:
             # When no explicit player/AI action is available we must still
@@ -1307,6 +1327,7 @@ def main():
             # one) through the unified `execute_action_step` helper so state
             # progression remains fully synchronised.
 
+            # intro handler. messy, but it works.
             if "na..." in env.read_dialog():
                 print(f"play.py: main(): na... in dialog")
                 noop_action = getattr(env, 'a', 4)
@@ -1331,6 +1352,7 @@ def main():
                 time.sleep(0.05)
                 continue
             
+            # noops to generate dummy actions, which are then filtered by stage_helper.
             if env.quest_manager.current_quest_id == 1 and "NAME" not in env.read_dialog():
                 noop_action = getattr(env, 'noop_button_index', 8)
 
@@ -1351,6 +1373,74 @@ def main():
                 # to avoid cluttering replays with frames that carry no semantic
                 # intent.
 
+            # look right to charmander, press a a bunch until naming screen
+            if env.quest_manager.current_quest_id == 4 and env.get_game_coords() == (5, 3, 40):
+                noop_action = None
+                if not env._get_direction(env.pyboy.game_area()) == "right" and env.read_dialog() == '' and env.party_size < 1:
+                    noop_action = getattr(env, 'right', 2)
+                    obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                        env,
+                        noop_action,
+                        quest_manager,
+                        navigator,
+                        logger,
+                        total_steps,
+                    )
+                elif env._get_direction(env.pyboy.game_area()) == "right" and env.read_dialog() == '' and env.party_size < 1:
+                    noop_action = getattr(env, 'a', 4)
+                    obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                        env,
+                        noop_action,
+                        quest_manager,
+                        navigator,
+                        logger,
+                        total_steps,
+                    )
+                elif env._get_direction(env.pyboy.game_area()) == "right" and env.read_dialog() != '' and env.party_size < 1:
+                    noop_action = getattr(env, 'a', 4)
+                    obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                        env,
+                        noop_action,
+                        quest_manager,
+                        navigator,
+                        logger,
+                        total_steps,
+                    )
+                elif "►YES\nNO\ngive a nickname" in env.read_dialog() or "Do you want to" in env.read_dialog():
+                    noop_action = getattr(env, 'a', 4)
+                    obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                        env,
+                        noop_action,
+                        quest_manager,
+                        navigator,
+                        logger,
+                        total_steps,
+                    )
+                elif "A B C" in env.read_dialog() or "T U V" in env.read_dialog():
+                    continue
+                elif env.party_size > 0 and env.read_dialog() == '':
+                    noop_action = getattr(env, 'a', 4)
+                    obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                        env,
+                        noop_action,
+                        quest_manager,
+                        navigator,
+                        logger,
+                        total_steps,
+                    )
+
+                # print(f"play.py: main(): CHARMANDER:pressing a single '{noop_action}' button: pressing single button: {noop_action}")
+                env.pyboy.tick()
+                raw_frame = env.render()
+                processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
+                update_screen(screen, processed_frame_rgb, screen_width, screen_height)
+                # Update UI without advancing game state
+                update_ui_if_needed()
+                loop_clock.tick(30)
+
+                time.sleep(0.1)
+                continue
+                
         if grok_enabled.is_set() and current_action is None and env.headless:
             time.sleep(0.01)  # Very short sleep when waiting for Grok
         

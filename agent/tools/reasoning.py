@@ -25,7 +25,7 @@ def get_reasoning_effort():
     This value should be passed into the API call, e.g.:
       client.chat.completions.create(..., reasoning_effort=get_reasoning_effort())
     """
-    return os.getenv("XAI_REASONING_EFFORT", "low")
+    return os.getenv("XAI_REASONING_EFFORT", "high")
 
 def extract_reasoning(response):
     """

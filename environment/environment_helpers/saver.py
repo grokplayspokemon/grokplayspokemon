@@ -18,45 +18,59 @@ def save_initial_state(env, run_info: RunInfo):
     run_manager = get_run_manager()
     run_manager.save_initial_state(env, run_info)
 
+def _recording_disabled(env) -> bool:
+    """Helper: return True if environment indicates recordings are disabled."""
+    return not getattr(env, "record_replays", False) or getattr(env, "disable_recordings", False)
+
 def save_loop_state(env, recorded_playthrough):
-    """Save actions and path trace data during the main loop to the current run directory"""
+    """Save actions and path trace data during the main loop to the current run directory."""
+    # Skip completely when recordings are disabled
+    if _recording_disabled(env):
+        return
+
     if not hasattr(env, 'current_run_info') or env.current_run_info is None:
         return
-    
+
     run_manager = get_run_manager()
     run_info = env.current_run_info
-    
+
     # Save actions
     run_manager.save_actions(recorded_playthrough, run_info)
-    
+
     # Save path trace
     if hasattr(env, 'path_trace_data') and env.path_trace_data:
         run_manager.save_coordinates(env.path_trace_data, run_info)
 
 def save_final_state(env, run_info: RunInfo, recorded_playthrough=None, coords_data=None):
-    """Save final actions JSON, coords JSON, and end state file after the session ends"""
+    """Save final actions JSON, coords JSON, and end state file after the session ends."""
+    if _recording_disabled(env):
+        return
+
     run_manager = get_run_manager()
-    
+
     # Save final state
     run_manager.save_final_state(env, run_info)
-    
+
     # Save actions if provided
     if recorded_playthrough is not None:
         run_manager.save_actions(recorded_playthrough, run_info)
-    
+
     # Save coordinates if provided
     if coords_data is not None:
         run_manager.save_coordinates(coords_data, run_info)
 
-def create_new_run(env, start_map_name: str, map_id: int) -> RunInfo:
-    """Create a new run directory and return RunInfo"""
+def create_new_run(env, start_map_name: str, map_id: int) -> RunInfo | None:
+    """Create a new run directory (unless recordings are disabled) and return RunInfo."""
+    if _recording_disabled(env):
+        return None
+
     run_manager = get_run_manager()
     run_info = run_manager.create_run_directory(start_map_name, map_id)
-    
+
     # Store run info in environment for easy access
     env.current_run_info = run_info
     env.current_run_dir = run_info.run_dir  # Maintain backward compatibility
-    
+
     return run_info
 
 def load_latest_run(env, map_name: str = None, map_id: int = None) -> RunInfo | None:

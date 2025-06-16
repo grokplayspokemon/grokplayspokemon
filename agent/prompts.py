@@ -26,13 +26,13 @@ DECIDE (Action Selection)
 
 Movement:
 
-    Quests like exit a location, or go to a location, can be completed with a follow_nav_path tool call.
-    Quests like pick up an item, or talk to an NPC, require you to walk to where the item or NPC is, face them, and press A.
+    Quests like exit a location, or go to a location, can be completed with a follow_nav_path tool call. If you have to talk to an NPC, for the most part, follow_nav_path will take you to that NPC.
+    Quests like pick up an item, or talk to an NPC, require you to walk to where the item or NPC is, face them, and press A. After you have the item or talked to the NPC, use follow_nav_path repeatedly to proceed.
     If you choose move with arrow keys, before you do so, use the collision map to plan the number of ups, down, lefts and rights you will use to navigate. You cannot walk on unwalkable tiles.
 
 Interaction:
 
-    Dialogs: Read the dialog, then press A to continue.
+    Dialogs: Read the dialog, determine the NPC's name. Write down the name and coordinates of the NPC to avoid talking to them any more than once.
     Menus: Navigate with arrows, A to select, B to cancel/exit
     Battle: Choose moves based on type matchups, status, PP conservation
 

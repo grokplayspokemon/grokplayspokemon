@@ -206,7 +206,7 @@ def get_default_config(
     n_record=10,
     perfect_ivs=True,
     auto_flash=False,
-    disable_wild_encounters=True,
+    disable_wild_encounters=False,
     auto_teach_cut=True,
     auto_use_cut=True,
     auto_teach_surf=True,
@@ -222,7 +222,9 @@ def get_default_config(
     insert_saffron_guard_drinks=False,
     infinite_money=True,
     infinite_health=True,
+    infinite_pp_and_move_hack=False,
     animate_scripts=True,
+    disable_recordings=False,
 ):
     env_config = {
         "gb_path": gb_path,
@@ -256,7 +258,9 @@ def get_default_config(
         "insert_saffron_guard_drinks": insert_saffron_guard_drinks,
         "infinite_money": infinite_money,
         "infinite_health": infinite_health,
+        "infinite_pp_and_move_hack": infinite_pp_and_move_hack,
         "animate_scripts": animate_scripts,
+        "disable_recordings": disable_recordings,
     }
     return OmegaConf.create(env_config)
 
@@ -302,7 +306,9 @@ def _setup_configuration(args, project_root_path):
         insert_saffron_guard_drinks=env_yaml.get('insert_saffron_guard_drinks'),
         infinite_money=env_yaml.get('infinite_money'),
         infinite_health=env_yaml.get('infinite_health'),
+        infinite_pp_and_move_hack=env_yaml.get('infinite_pp_and_move_hack'),
         animate_scripts=env_yaml.get('animate_scripts'),
+        disable_recordings=env_yaml.get('disable_recordings'),
     )
 
     # Merge defaults + YAML + CLI
@@ -407,7 +413,7 @@ def main():
     parser.add_argument("--infinite_money", type=bool, default=None)
     parser.add_argument("--infinite_health", type=bool, default=None)
     parser.add_argument("--emulator_delay", type=int, default=None)
-    parser.add_argument("--disable_wild_encounters", type=bool, default=None)
+    parser.add_argument("--disable_wild_encounters", type=bool, default=False)
     parser.add_argument("--auto_teach_cut", type=bool, default=None)
     parser.add_argument("--auto_use_cut", type=bool, default=None)
     parser.add_argument("--auto_teach_surf", type=bool, default=None)
@@ -422,6 +428,7 @@ def main():
     parser.add_argument("--infinite_safari_steps", type=bool, default=None)
     parser.add_argument("--insert_saffron_guard_drinks", type=bool, default=None)
     parser.add_argument("--auto_flash", type=bool, default=None)
+    parser.add_argument("--infinite_pp_and_move_hack", type=bool, default=None)
     parser.add_argument("--animate_scripts", type=bool, default=None)
     parser.add_argument("--grok_api_key", type=str, default=None) # Keep for potential future use
 
@@ -1096,8 +1103,8 @@ def main():
                 time.sleep(0.1)
             continue
 
-        if env.map_history[-1] != env.read_m("wCurMap"):
-            print(f'line 986 of play.py in main(): player location: {env.get_game_coords()}')
+        # if env.map_history[-1] != env.read_m("wCurMap"):
+        #     print(f'line 986 of play.py in main(): player location: {env.get_game_coords()}')
         
         current_time = time.time()
         current_action = None
@@ -1133,6 +1140,8 @@ def main():
                             # On '4' key: Snap navigator and environment to the nearest coordinate in the current quest path
                             raw_dialog = env.read_dialog() or ''
                             if raw_dialog.strip():
+                                # Override 4 key to A press when in a dialog
+                                current_action = VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_A)
                                 print("play.py: main(): '4' key: Navigation paused: dialog active, cannot snap to path.")
                             else:
                                 print("play.py: main(): '4' key: Snapping to nearest coordinate on recorded path.")
@@ -1162,7 +1171,21 @@ def main():
                             # On '5' key: Move to next coordinate (quest path)
                             raw_dialog = env.read_dialog() or ''
                             if raw_dialog.strip():
-                                print(f"\nplay.py: main(): '5' key: Navigation paused: dialog active, cannot move to next coordinate.")
+                                # # if player hasn't just purchased an item to prevent loop
+                                # print(f"env.item_handler._items_in_bag: {env.item_handler._items_in_bag}")
+                                # print(f"env.item_handler.get_items_in_bag(): {env.item_handler.get_items_in_bag()}")
+                                # print(f"env.item_handler.get_items_quantity_in_bag(): {env.item_handler.get_items_quantity_in_bag()}")
+                                # print(f"pokeball in bag?: {4 in env.item_handler.get_items_in_bag()}")
+                                # print(f"quantity of pokeball in bag?: {env.item_handler.get_items_quantity_in_bag()[env.item_handler.get_items_in_bag().index(4)]}")
+                                
+                                # # if pokeball in bag and 
+                                # if 4 in env.item_handler.get_items_in_bag() and ("anything" in raw_dialog or "Take your time" in raw_dialog):
+                                #     current_action = VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_B)
+                                # else:
+                                #     # Override 5 key to A press when in a dialog
+                                #     current_action = VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_A)
+                                # print(f"\nplay.py: main(): '5' key: Navigation paused: dialog active, cannot move to next coordinate. Overriding action with {VALID_ACTIONS[current_action]}")
+                                print(f"play.py: main(): '5' key: Navigation paused: dialog active, cannot move to next coordinate.")
                             else:
                                 print(f"\nplay.py: main(): '5' key: Using PATH_FOLLOW_ACTION")
                                 
@@ -1230,6 +1253,10 @@ def main():
             # print(f"🔍 [DEBUG] Step {total_steps}: current_action={current_action}, grok_enabled={grok_enabled.is_set()}, grok_agent={grok_agent is not None}")
             pass
 
+        
+        
+        
+        
         # GROK_INTEGRATION_POINT: only call Grok when toggled on
         if current_action is None and grok_agent and grok_enabled.is_set() and grok_active:
             # Non-blocking Grok action fetch
@@ -1251,6 +1278,8 @@ def main():
                         # On '5' key: Move to next coordinate (quest path)
                         raw_dialog = env.read_dialog() or ''
                         if raw_dialog.strip():
+                            # Override 5 key to A press when in a dialog
+                            current_action = VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_A)
                             print(f"\nplay.py: main(): '5' key: Navigation paused: dialog active, cannot move to next coordinate.")
                         else:
                             print(f"\nplay.py: main(): '5' key: Using PATH_FOLLOW_ACTION")

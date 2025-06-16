@@ -112,6 +112,8 @@ from environment.data.environment_data.battle import (
     PLAYERS_MOVE_TYPE,
     PLAYERS_MOVE_PP,
     PLAYERS_MOVE_NUM,
+    ENEMYS_POKEMON_HP,
+    ENEMYS_POKEMON_MAX_HP,
 )
 
 from environment.data.environment_data.species import Species
@@ -208,6 +210,7 @@ class RedGymEnv(Env):
         self.insert_saffron_guard_drinks = env_config.insert_saffron_guard_drinks
         self.infinite_money = env_config.infinite_money
         self.infinite_health = env_config.infinite_health
+        self.infinite_pp_and_move_hack = env_config.infinite_pp_and_move_hack
         self.use_global_map = False
         self.save_state = False
         self.animate_scripts = env_config.animate_scripts
@@ -234,6 +237,12 @@ class RedGymEnv(Env):
         try:
             self.record_replays = env_config.record_replays
         except Exception:
+            self.record_replays = False
+
+        # New override – if disable_recordings is True, forcibly disable
+        # any replay saving regardless of the original record_replays value.
+        self.disable_recordings = getattr(env_config, "disable_recordings", False)
+        if self.disable_recordings:
             self.record_replays = False
 
         # Observation
@@ -678,15 +687,30 @@ class RedGymEnv(Env):
         if self.infinite_health:
             self.reverse_damage()
             self.party = PartyMons(self.pyboy)
-        # Infinite PP and super move hack in default reset
-        for i in range(self.read_m("wPartyCount")):
-            _, moves_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Moves")
-            # Set first slot to Hyper Beam
-            self.pyboy.memory[moves_addr] = TmHmMoves.HYPER_BEAM.value
-            # Replenish PP for all slots
-            _, pp_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}PP")
-            for slot in range(4):
-                self.pyboy.memory[pp_addr + slot] = 0x3F
+        if self.infinite_pp_and_move_hack:
+            # Infinite PP and super move hack in default reset
+            for i in range(self.read_m("wPartyCount")):
+                _, moves_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Moves")
+                # Set first slot to Hyper Beam
+                self.pyboy.memory[moves_addr] = TmHmMoves.HYPER_BEAM.value
+                # Replenish PP for all slots
+                _, pp_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}PP")
+                for slot in range(4):
+                    self.pyboy.memory[pp_addr + slot] = 0x3F
+        else:
+            # Ensure Charmander (species 4) keeps its default Scratch move if it was overwritten
+            if self.read_m("wPartyCount") > 0:
+                print(f"environment.py: reset(): Restoring Charmander's Scratch move and PP")
+                species = self.read_m("wPartyMon1Species")
+                print(f"environment.py: reset(): Species: {species}")
+                if species == 176:  # Charmander species ID
+                    _, moves_addr = self.pyboy.symbol_lookup("wPartyMon1Moves")
+                    print(f"environment.py: reset(): Moves address: {moves_addr}")
+                    self.pyboy.memory[moves_addr] = Move.SCRATCH.value
+                    # Restore PP to 35 (0x23)
+                    _, pp_addr = self.pyboy.symbol_lookup("wPartyMon1PP")
+                    print(f"environment.py: reset(): PP address: {pp_addr}")
+                    self.pyboy.memory[pp_addr] = 0x23
 
         # ADDED DEBUG: Print infos right before returning
         print(f"environment.py: reset(): FINAL current_call_infos before return: {current_call_infos}")
@@ -1241,6 +1265,7 @@ class RedGymEnv(Env):
 
         self.update_safari_zone()
 
+        self.item_handler.scripted_buy_items()
         self.check_num_bag_items()
         
         # UNIFIED ARCHITECTURE: Convert PATH_FOLLOW_ACTION to movement action BEFORE calling run_action_on_emulator
@@ -1432,42 +1457,57 @@ class RedGymEnv(Env):
         # REMOVED DUPLICATE: run_action_on_emulator() was already called at line 1825
         # The duplicate call was causing warp activation failures
         
-        # Dynamic STAB selection, infinite PP, and buff stats
-        # Map Pokemon type codes to strongest STAB move IDs
-        TYPE_TO_MOVE = {
-            PokemonType.FIGHTING.value: Move.HI_JUMP_KICK.value,
-            PokemonType.FLYING.value: Move.SKY_ATTACK.value,
-            PokemonType.GROUND.value: Move.EARTHQUAKE.value,
-            PokemonType.ROCK.value: Move.ROCK_SLIDE.value,
-            PokemonType.FIRE.value: Move.FIRE_BLAST.value,
-            PokemonType.WATER.value: Move.HYDRO_PUMP.value,
-            PokemonType.GRASS.value: Move.SOLARBEAM.value,
-            PokemonType.POISON.value: Move.SLUDGE.value,
-            PokemonType.ELECTRIC.value: Move.THUNDERBOLT.value,
-            PokemonType.PSYCHIC.value: Move.PSYCHIC_M.value,
-            PokemonType.ICE.value: Move.BLIZZARD.value,
-            PokemonType.NORMAL.value: Move.EXPLOSION.value,
-        }
-        for i in range(self.read_m("wPartyCount")):
-            # Read Pokemon types
-            _, t1_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Type1")
-            type1 = self.pyboy.memory[t1_addr]
-            _, t2_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Type2")
-            type2 = self.pyboy.memory[t2_addr]
-            move_id = TYPE_TO_MOVE.get(type1) or TYPE_TO_MOVE.get(type2) or TmHmMoves.HYPER_BEAM.value
-            # Set STAB move in slot 1
-            _, moves_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Moves")
-            self.pyboy.memory[moves_addr] = move_id
-            # Replenish PP for all slots
-            _, pp_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}PP")
-            for slot in range(4):
-                self.pyboy.memory[pp_addr + slot] = 0x3F
-            # Buff stats: Attack, Speed, Special
-            for stat in ["Attack", "Speed", "Special"]:
-                _, stat_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}{stat}")
-                self.pyboy.memory[stat_addr] = 0xFF
-                self.pyboy.memory[stat_addr+1] = 0xFF
-
+        print(f"environment.py: step(): infinite_pp_and_move_hack: {self.infinite_pp_and_move_hack}")
+        if self.infinite_pp_and_move_hack:
+            # Dynamic STAB selection, infinite PP, and buff stats
+            # Map Pokemon type codes to strongest STAB move IDs
+            TYPE_TO_MOVE = {
+                PokemonType.FIGHTING.value: Move.HI_JUMP_KICK.value,
+                PokemonType.FLYING.value: Move.SKY_ATTACK.value,
+                PokemonType.GROUND.value: Move.EARTHQUAKE.value,
+                PokemonType.ROCK.value: Move.ROCK_SLIDE.value,
+                PokemonType.FIRE.value: Move.FIRE_BLAST.value,
+                PokemonType.WATER.value: Move.HYDRO_PUMP.value,
+                PokemonType.GRASS.value: Move.SOLARBEAM.value,
+                PokemonType.POISON.value: Move.SLUDGE.value,
+                PokemonType.ELECTRIC.value: Move.THUNDERBOLT.value,
+                PokemonType.PSYCHIC.value: Move.PSYCHIC_M.value,
+                PokemonType.ICE.value: Move.BLIZZARD.value,
+                PokemonType.NORMAL.value: Move.EXPLOSION.value,
+            }
+            for i in range(self.read_m("wPartyCount")):
+                # Read Pokemon types
+                _, t1_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Type1")
+                type1 = self.pyboy.memory[t1_addr]
+                _, t2_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Type2")
+                type2 = self.pyboy.memory[t2_addr]
+                move_id = TYPE_TO_MOVE.get(type1) or TYPE_TO_MOVE.get(type2) or TmHmMoves.HYPER_BEAM.value
+                # Set STAB move in slot 1
+                _, moves_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}Moves")
+                self.pyboy.memory[moves_addr] = move_id
+                # Replenish PP for all slots
+                _, pp_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}PP")
+                for slot in range(4):
+                    self.pyboy.memory[pp_addr + slot] = 0x3F
+                # Buff stats: Attack, Speed, Special
+                for stat in ["Attack", "Speed", "Special"]:
+                    _, stat_addr = self.pyboy.symbol_lookup(f"wPartyMon{i+1}{stat}")
+                    self.pyboy.memory[stat_addr] = 0xFF
+                    self.pyboy.memory[stat_addr+1] = 0xFF
+        else:
+            # Ensure Charmander (species 4) keeps its default Scratch move if it was overwritten
+            if self.read_m("wPartyCount") > 0:
+                print(f"environment.py: step(): Restoring Charmander's Scratch move and PP")
+                species = self.read_m("wPartyMon1Species")
+                print(f"environment.py: step(): Species: {species}")
+                if species == 176:  # Charmander species ID
+                    _, moves_addr = self.pyboy.symbol_lookup("wPartyMon1Moves")
+                    print(f"environment.py: step(): Moves address: {moves_addr}")
+                    self.pyboy.memory[moves_addr] = Move.SCRATCH.value
+                    # Restore PP to 35 (0x23)
+                    _, pp_addr = self.pyboy.symbol_lookup("wPartyMon1PP")
+                    print(f"environment.py: step(): PP address: {pp_addr}")
+                    self.pyboy.memory[pp_addr] = 0x23
 
         self.current_dialog_lines = self.get_active_dialog()
         done = False
@@ -2663,7 +2703,12 @@ class RedGymEnv(Env):
         hp_sum = sum(self.read_short(f"wPartyMon{i+1}HP") for i in range(party_size))
         max_hp_sum = sum(self.read_short(f"wPartyMon{i+1}MaxHP") for i in range(party_size))
         max_hp_sum = max(max_hp_sum, 1)
-        return hp_sum / max_hp_sum
+        return hp_sum / max_hp_sum    
+    
+    def get_enemy_party_head_hp(self):
+        hp_total = (self.read_m(ENEMYS_POKEMON_MAX_HP[0]) << 8) + self.read_m(ENEMYS_POKEMON_MAX_HP[1])
+        hp_avail = (self.read_m(ENEMYS_POKEMON_HP[0]) << 8) + self.read_m(ENEMYS_POKEMON_HP[1])
+        return hp_total, hp_avail
 
     def get_map_name_by_id(self, map_id_val: int) -> str:
         try:
@@ -2929,10 +2974,14 @@ class RedGymEnv(Env):
         )
 
     def get_required_items(self) -> set[str]:
-        wNumBagItems = self.read_m("wNumBagItems")
-        _, wBagItems = self.pyboy.symbol_lookup("wBagItems")
-        bag_items = self.pyboy.memory[wBagItems : wBagItems + wNumBagItems * 2 : 2]
-        return {Items(item).name for item in bag_items if Items(item) in REQUIRED_ITEMS}
+        try:
+            wNumBagItems = self.read_m("wNumBagItems")
+            _, wBagItems = self.pyboy.symbol_lookup("wBagItems")
+            bag_items = self.pyboy.memory[wBagItems : wBagItems + wNumBagItems * 2 : 2]
+            return {Items(item).name for item in bag_items if Items(item) in REQUIRED_ITEMS}
+        except Exception as e:
+            print(f"Error getting required items: {e}")
+            return set()
 
     def get_events_sum(self):
         # adds up all event flags, exclude museum ticket

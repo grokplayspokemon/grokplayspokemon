@@ -8,7 +8,6 @@ env:
   override_init_state: null
   init_from_last_ending_state: true
   interactive_mode: true
-  record_replays: true
   headless: false
   video_dir: video
   emulator_delay: 11
@@ -18,7 +17,7 @@ env:
   n_record: 10
   perfect_ivs: true
   auto_flash: false
-  disable_wild_encounters: true
+  disable_wild_encounters: false
   auto_teach_cut: true
   auto_use_cut: true
   auto_use_surf: true
@@ -34,7 +33,10 @@ env:
   insert_saffron_guard_drinks: false
   infinite_money: true
   infinite_health: true
+  infinite_pp_and_move_hack: false
   animate_scripts: true
+  disable_recordings: true
+  record_replays: false
 agent:
   llm_provider: grok
   model_name: grok-3-mini

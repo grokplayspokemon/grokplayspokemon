@@ -2,6 +2,8 @@
 from pydantic import BaseModel, Field, ValidationError
 from typing import List, Literal, Optional, Dict, Any, Tuple
 
+import pygame
+
 # Import environment components for type hinting and use in tools
 from environment.wrappers.env_wrapper import EnvWrapper
 from environment.environment import RedGymEnv
@@ -389,7 +391,7 @@ S T U V W X Y Z
                 response_format={"type": "json_schema", "schema": name_schema},
                 max_tokens=2500,
                 temperature=0.7,
-                reasoning_effort="low",
+                reasoning_effort="high",
             )
 
             # The model is guaranteed to reply with a JSON dict per schema
@@ -443,6 +445,15 @@ def handle_battle(
     """
     Automatically handle a battle by selecting the best move.
     """
+    # SKIP battle tool for Nidoran capture quest to allow StageManager scripted catch
+    if hasattr(env, 'quest_manager') and getattr(env.quest_manager, 'current_quest_id', None) == 23:
+        logger.info("Skipping handle_battle for quest 23 (Nidoran capture); using StageManager scripted catch")
+        # Simulate pressing START (ENTER) multiple times to advance scripted catch
+        for _ in range(12):
+            pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_a))
+            pygame.event.post(pygame.event.Event(pygame.KEYUP,   key=pygame.K_a))
+            time.sleep(0.2)
+        return "Skipped battle handling for Nidoran capture", {"status": "skipped"}
     logger.info("Executing handle_battle tool")
     
     try:

@@ -197,6 +197,23 @@ def handle_status_update(item_id, data):
         game_state['grok_cost'] = data
         broadcast_update('grok_cost', data)
         
+    elif item_id == '__grok_action__':
+        # Separate event for actions only
+        game_state['last_action'] = data
+        broadcast_update('grok_action', data)
+        
+    elif item_id == '__grok_decision__':
+        # Key decision points extracted from thinking
+        broadcast_update('grok_decision', data)
+        
+    elif item_id == '__grok_error__':
+        # Any errors or issues
+        broadcast_update('grok_error', data)
+        
+    elif item_id == '__grok_plan__':
+        # Current plan or strategy
+        broadcast_update('grok_plan', data)    
+        
     elif item_id == '__action__':
         broadcast_update('action', data)
         
@@ -296,15 +313,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             box-sizing: border-box;
         }
 
+        /* Ensure body doesn't create unnecessary scrollbars */
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: #0a0a0a;
             color: #ffffff;
-            /* Allow vertical scrolling when content exceeds viewport */
-            overflow-x: hidden;
-            overflow-y: auto;
-            min-height: 100vh;
-            font-size: 20px; /* Base font size doubled */
+            overflow: hidden; /* Prevent body scroll when zoomed */
+            height: 100vh;
+            margin: 0;
+            font-size: 20px;
         }
 
         .mono {
@@ -315,11 +332,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .stream-container {
             display: grid;
             grid-template-columns: minmax(400px, 1fr) 2fr minmax(400px, 1fr);
-            grid-template-rows: auto 1fr 180px; /* Taller footer */
-            min-height: 100vh;   /* Allow it to grow beyond viewport */
+            grid-template-rows: auto 1fr 180px;
+            height: 100vh; /* Change from min-height to height */
             background-color: #1a1a1a;
             gap: 1px;
-            overflow-y: auto;   /* Enable internal scroll before pushing body */
+            overflow: hidden; /* Prevent container overflow */
         }
 
         /* Header */
@@ -588,17 +605,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             gap: 1px;
             background: #1a1a1a;
             overflow: hidden;
-            min-width: 400px; /* Minimum width matching left sidebar */
+            min-width: 400px;
+            max-height: 100%; /* Constrain height */
         }
-
+        
         .sidebar-section {
             background: #0a0a0a;
             padding: 20px;
             overflow-y: auto;
+            overflow-x: hidden; /* Hide horizontal overflow */
             display: flex;
             flex-direction: column;
             gap: 20px;
             flex-grow: 1;
+            min-height: 0; /* Allow shrinking */
         }
 
         .section-title {
@@ -808,22 +828,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         /* Grok Status Section */
         .grok-status-section {
-            height: 100%;
-            max-height: 100%;
+            flex: 1;
+            min-height: 0;
             background: #111;
             border: 2px solid #333;
             border-radius: 8px;
-            padding: 20px; /* Increased from 15px */
-            display: flex;               /* NEW – allow inner wrapper to stretch */
-            flex-direction: column;      /* vertical stacking */
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Add this to contain children */
         }
 
-        /* NEW – ensure the wrapper inside fills the section */
         #grokStatus {
             flex: 1;
             display: flex;
             flex-direction: column;
-            overflow: hidden;            /* prevent full-page scrollbars */
+            overflow: hidden;
+            min-height: 0; /* Important for flexbox children */
         }
 
         /* NEW – make thinking / response panels scroll within available space */
@@ -831,6 +852,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         #grokResponse {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden; /* Add this */
+            word-wrap: break-word; /* Add this */
+            word-break: break-word; /* Add this */
+            overflow-wrap: break-word; /* Add this */
+            min-height: 0; /* Add this */
+            max-width: 100%; /* Add this */
         }
         
         .grok-message {
@@ -840,7 +867,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 4px;
             font-size: 20px; /* Doubled from 12px */
             line-height: 1.5;
-            /* height & max-height removed – handled by flexbox */
+            word-wrap: break-word; /* Add this */
+            word-break: break-word; /* Add this */
+            overflow-wrap: break-word; /* Add this */
+            white-space: pre-wrap; /* Add this */
+            max-width: 100%; /* Add this */
+            box-sizing: border-box; /* Add this */
+        }
+        
+        /* Ensure the waiting message also wraps */
+        #grokWaiting {
+            color: #666;
+            font-size: 20px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
 
         /* Team section styling */
@@ -1248,17 +1288,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .grok-cost-label {
-            font-size: 14px; /* Doubled from 0.7rem */
+            font-size: 20px; /* Doubled from 0.7rem */
             color: #9ca3af;
         }
 
         .grok-cost-value {
-            font-size: 18px; /* Doubled from 0.9rem */
+            font-size: 24px; /* Doubled from 0.9rem */
             font-weight: 600;
         }
 
         .pricing-info {
-            margin-top: 12px; /* Increased from 8px */
+            margin-top: 20px; /* Increased from 8px */
             font-size: 14px; /* Doubled from 0.7rem */
             color: #9ca3af;
         }
@@ -1498,26 +1538,101 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }, 1000);
 
-        // Add action to log
-        function addActionToLog(action, reasoning) {
+        // New function to extract decision points from thinking
+        function extractDecisionPoints(thinking) {
+            // Look for key patterns in Grok's thinking
+            const patterns = [
+                /Current objective: (.+?)(?:\.|$)/i,
+                /I need to (.+?)(?:\.|$)/i,
+                /My goal is to (.+?)(?:\.|$)/i,
+                /I should (.+?)(?:\.|$)/i,
+                /Next step: (.+?)(?:\.|$)/i,
+                /Planning to (.+?)(?:\.|$)/i
+            ];
+            
+            for (const pattern of patterns) {
+                const match = thinking.match(pattern);
+                if (match) {
+                    addActionToLog('thinking', match[1], 'thinking');
+                    break; // Only show the first match
+                }
+            }
+        }
+        
+        
+        // Add new CSS for the new action types
+        const additionalCSS = `
+        .action-tool { border-color: #14b8a6; }
+        .action-tool .action-icon { background: #14b8a6; color: #fff; }
+
+        .action-thinking { border-color: #8b5cf6; }
+        .action-thinking .action-icon { background: #8b5cf6; color: #fff; }
+
+        .action-prompt { border-color: #6366f1; }
+        .action-prompt .action-icon { background: #6366f1; color: #fff; }
+
+        .action-error { border-color: #ef4444; }
+        .action-error .action-icon { background: #ef4444; color: #fff; }
+
+        /* Make the action log scrollable with more content */
+        .action-log {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            max-height: calc(100vh - 200px); /* Adjust based on header height */
+            overflow-y: auto;
+        }
+        `;
+        
+        // Enhanced addActionToLog function
+        function addActionToLog(action, reasoning, type = 'action') {
             const actionLog = document.getElementById('actionLog');
             const entry = document.createElement('div');
             entry.className = 'action-entry';
 
             const time = new Date().toLocaleTimeString();
-            const actionName = ACTION_NAMES[action] || `action_${action}`;
-            const icon = ACTION_ICONS[actionName] || "?";
+            let icon, actionDisplay, actionClass;
+            
+            switch(type) {
+                case 'tool':
+                    icon = '🔧';
+                    actionDisplay = `TOOL: ${action.toUpperCase()}`;
+                    actionClass = 'action-tool';
+                    break;
+                case 'thinking':
+                    icon = '💭';
+                    actionDisplay = 'THINKING';
+                    actionClass = 'action-thinking';
+                    break;
+                case 'prompt':
+                    icon = '📝';
+                    actionDisplay = 'NEW PROMPT';
+                    actionClass = 'action-prompt';
+                    break;
+                case 'error':
+                    icon = '⚠️';
+                    actionDisplay = 'ERROR';
+                    actionClass = 'action-error';
+                    break;
+                default:
+                    icon = ACTION_ICONS[action] || "?";
+                    actionDisplay = action.toUpperCase();
+                    actionClass = `action-${action}`;
+            }
 
             entry.innerHTML = `
                 <div class="action-time">${time}</div>
-                <div class="action-button action-${actionName}">
+                <div class="action-button ${actionClass}">
                     <span class="action-icon">${icon}</span>
-                    <span>${actionName.toUpperCase()}</span>
+                    <span>${actionDisplay}</span>
                 </div>
-                <div class="action-reason">${reasoning || 'No reasoning provided'}</div>
+                <div class="action-reason">${reasoning || 'No details provided'}</div>
             `;
+            
             actionLog.insertBefore(entry, actionLog.firstChild);
-            while (actionLog.children.length > 20) {
+            
+            // Keep more history in the left sidebar
+            while (actionLog.children.length > 50) {
                 actionLog.removeChild(actionLog.lastChild);
             }
         }
@@ -1916,6 +2031,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return card;
         }
 
+        
         // Empty slot
         function createEmptySlot(text = '—') {
             const slot = document.createElement('div');
@@ -2049,17 +2165,40 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     break;
 
                 case 'grok_thinking':
+                    // Store the thinking for potential reuse
+                    gameState.lastThinking = msg.data;
                     updateGrokStatus(msg.data, null);
+                    
+                    // Extract key decision points for left sidebar
+                    extractDecisionPoints(msg.data);
                     break;
 
+                // Update the SSE message handler for grok_response
                 case 'grok_response':
-                    updateGrokStatus(null, msg.data);
-                    if (msg.data.startsWith('Tool ')) {
-                        const m = msg.data.match(/Tool (\w+): (.+)/);
-                        if (m) addActionToLog(0, `${m[1]}: ${m[2]}`);
+                    // Parse and display the response appropriately
+                    const response = msg.data;
+                    
+                    // Check if this is an action response
+                    if (response.includes('Action') || response.includes('Tool')) {
+                        // Move action to left sidebar
+                        if (response.startsWith('Tool ')) {
+                            const m = response.match(/Tool (\w+): (.+)/);
+                            if (m) {
+                                addActionToLog(m[1], m[2], 'tool');
+                            }
+                        } else {
+                            const m = response.match(/Action (\d+): (.+)/);
+                            if (m) {
+                                const actionNum = parseInt(m[1]);
+                                const actionName = ACTION_NAMES[actionNum] || `action_${actionNum}`;
+                                addActionToLog(actionName, m[2], 'action');
+                            }
+                        }
+                        // Don't show action responses in the right sidebar
+                        updateGrokStatus(gameState.lastThinking, null);
                     } else {
-                        const m = msg.data.match(/Action (\d+): (.+)/);
-                        if (m) addActionToLog(parseInt(m[1]), m[2]);
+                        // Non-action responses stay in right sidebar
+                        updateGrokStatus(null, response);
                     }
                     break;
 

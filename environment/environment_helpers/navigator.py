@@ -183,6 +183,10 @@ class ConsolidatedNavigator:
     # QUEST SYSTEM INTEGRATION
     # =========================
     
+    def get_current_local_coords(self):
+        """Get current local coordinates"""
+        return self.env.get_game_coords()
+    
     def _load_quest_system(self):
         """Load quest definitions and initialize quest tracking"""
         try:
@@ -558,19 +562,20 @@ class ConsolidatedNavigator:
             # — WARP HANDLING: handle explicit map transitions via warp tiles —
             if target_map != map_id:
                 local_pos = (x, y)
-                # only consider warp entries that lead to the desired map
+                # Only consider warp entries that lead to the desired map
                 warps_full = WARP_DICT.get(MapIds(map_id).name, [])
-                # Accept warps that go directly to the desired map or that
-                # use the special 255 "LAST_MAP" sentinel (meaning they lead
-                # back to whatever map we came from – which, for a recorded
-                # human path, will be the desired one).
+                # Accept warps that go directly to the desired map or that use the
+                # special 255 "LAST_MAP" sentinel (meaning they lead back to whatever
+                # map we came from – which, for a recorded human path, will be the
+                # desired one).
                 warps = []
                 for e in warps_full:
                     tmid = e.get('target_map_id')
                     if tmid == target_map or tmid == 255:
                         warps.append(e)
+
                 if warps:
-                    # find nearest warp tile
+                    # Find nearest warp tile to current position
                     best = None
                     best_dist = None
                     for entry in warps:
@@ -580,15 +585,17 @@ class ConsolidatedNavigator:
                         d = abs(wx - local_pos[0]) + abs(wy - local_pos[1])
                         if best_dist is None or d < best_dist:
                             best_dist, best = d, (wx, wy)
+
                     if best is not None:
-                        # door warp: step onto warp tile, then press DOWN to warp
+                        # If we're already standing on the warp tile then pressing DOWN
+                        # (action 0) will activate the warp; otherwise walk towards the tile.
                         if local_pos == best:
-                            return 0
-                        # otherwise, walk toward the warp tile
+                            return 0  # DOWN to trigger warp
+
                         dx, dy = best[0] - x, best[1] - y
                         # Prefer vertical motion first when approaching a warp tile.  For
-                        # indoor exits the critical step is usually to **step down onto the
-                        # bottom-row door tile**; choosing horizontal first can nudge the
+                        # indoor exits the critical step is usually to **step down onto**
+                        # the bottom-row door tile; choosing horizontal first can nudge the
                         # avatar in front of an NPC and block the warp indefinitely.
                         if dy != 0:
                             return 0 if dy > 0 else 3  # DOWN / UP
@@ -596,7 +603,6 @@ class ConsolidatedNavigator:
                             return 2 if dx > 0 else 1  # RIGHT / LEFT
                         else:
                             return 0  # default DOWN (shouldn't occur)
-                # no explicit warp entries for this transition: fall through to normal movement
 
             # Evaluate both axes, prioritising the one with greater distance but
             # *only if* that direction is considered walkable; otherwise swap.
@@ -625,7 +631,21 @@ class ConsolidatedNavigator:
             order = [primary_first, 'vert' if primary_first=='horiz' else 'horiz']
             for axis in order:
                 chosen = horiz_dir if axis=='horiz' else vert_dir
-                if chosen is not None and dir_walkable(chosen):
+                if chosen is None:
+                    continue
+
+                if dir_walkable(chosen):
+                    return chosen
+
+                # --- Lenient fallback ---
+                # If the chosen direction would move us **towards** the target
+                # by exactly one tile on that axis, take it anyway and let the
+                # game engine / collision map decide.  This prevents soft-locks
+                # where the helper refuses to step onto perfectly valid tiles
+                # that happen to lie on the screen boundary.
+                if axis == 'horiz' and dx != 0 and abs(dx) == 1:
+                    return chosen
+                if axis == 'vert' and dy != 0 and abs(dy) == 1:
                     return chosen
 
             # If neither preferred direction is walkable fall back to any that is

@@ -4,7 +4,8 @@ Stage Manager: Handles stage-based warp blocking using STAGE_DICT configuration
 and the scripted_stage_blocking method for selective warp control.
 """
 
-from environment.data.environment_data.pokered_constants import MAP_ID_REF, WARP_DICT, MAP_DICT
+import time
+from environment.data.environment_data.pokered_constants import MAP_ID_REF, WARP_DICT, MAP_DICT, ITEM_NAME_TO_ID_DICT
 from typing import Dict, List, Any, Optional
 from collections import deque
 
@@ -244,6 +245,135 @@ STAGE_DICT = {
             {'condition': {'pending_b_presses': '>0'}, 'action': 'b', 'decrement_pending_b': True}
         ]
     },
+    23: {
+        'events': [],
+        'blockings': [],
+        'scripted_movements': [
+            {
+                'condition': {
+                    'global_coords': (282, 67),
+                    'dialog_present': False,
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
+                },
+                'action': 'down'
+            },
+            {
+                'condition': {
+                    'global_coords': (282, 66),
+                    'dialog_present': False,
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
+                },
+                'action': 'down'
+            },
+            {
+                'condition': {
+                    'global_coords': (282, 65),
+                    'dialog_present': False,
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
+                },
+                'action': 'down'
+            },
+            {
+                'condition': {
+                    'global_coords': (282, 64),
+                    'dialog_present': False,
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
+                },
+                'action': 'down'
+            },
+            {
+                'condition': {
+                    'global_coords': (285, 67),
+                    'dialog_present': False,
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
+                },
+                'action': 'up'
+            },
+            {
+                'condition': {
+                    'global_coords': (285, 66),
+                    'dialog_present': False,
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
+                },
+                'action': 'up'
+            },
+            {
+                'condition': {
+                    'global_coords': (285, 65),
+                    'dialog_present': False,
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
+                },
+                'action': 'up'
+            },
+            {
+                'condition': {
+                    'global_coords': (285, 64),
+                    'dialog_present': False,
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
+                },
+                'action': 'up'
+            },
+            {
+                'condition': {
+                    'global_coords': (285, 63),
+                    'dialog_present': True,
+                    'dialog_text': 'NIDORAN\u2642',
+                },
+                'action': 'a'
+            },
+        ]
+    },
+    21: {
+        'events': [],
+        'blockings': [
+            # Prevent exiting the Viridian Poké Mart door (warp id 2 → LAST_MAP) until ≥4 Poké Balls
+            ['VIRIDIAN_MART', 'LAST_MAP@2']
+        ],
+        'scripted_movements': [
+            # 1️⃣  Engage path-follower until Grok reaches the counter tile
+            {
+                'condition': {
+                    'quest_path_active': True  # ConsolidatedNavigator path following already loaded by QuestManager
+                },
+                'action': 'path'
+            },
+            # 2️⃣  When standing directly in front of the clerk (global coords 299,132) face LEFT and press A
+            {
+                'condition': {
+                    'global_coords': (299, 132),
+                },
+                'action': 'a'
+            },
+            # 3️⃣  While the clerk dialog / shop menus are visible keep spamming A until QuestManager reports >4 Poké Balls
+            {
+                'condition': {
+                    'dialog_present': True,
+                },
+                'action': 'a'
+            },
+        ]
+    },
+    22: {
+        'events': [],
+        'blockings': [
+            # Viridian Mart has two door tiles, both share warp_id 2 pointing to LAST_MAP – block both tiles at once
+            ['VIRIDIAN_MART', 'LAST_MAP@2'],
+        ],
+        'scripted_movements': [
+            {'condition': 
+                {'global_coords': (299, 132),
+                 'item_qty': {'item': 'POKE_BALL', 'qty': 4}}, 'action': 'a'}
+            
+        ]
+    },
     # Add more stages as needed
 }
 
@@ -445,6 +575,23 @@ class StageManager:
         Returns a different action if scripted movement should override the input action.
         Enhanced with automatic quest path following.
         """
+        # ------------------------------------------------------------------
+        # NIDORAN CAPTURE COMPLETION CHECKS – run every frame *before* we
+        # evaluate/forward the action.  This guarantees the special naming
+        # dialog handlers fire even when StageManager is in a different
+        # stage and irrespective of whether the dedicated Nidoran script is
+        # active.
+        # ------------------------------------------------------------------
+        
+        
+        try:
+            self._caught_nidoran_to_naming_dialog()
+            self._caught_nidoran_pokeball_failed()
+        except RuntimeError:
+            # Re-raise so upstream systems can handle the success halt or
+            # any custom exception workflow already in place.
+            raise
+
         # --------------------------------------------------------------
         # 0️⃣  FIRST PRIORITY – Execute any auto-generated action that
         #     was queued in update_stage_manager().  This guarantees the
@@ -487,8 +634,9 @@ class StageManager:
             # Check for global coordinates if available
             try:
                 from environment.data.recorder_data.global_map import local_to_global
-                global_y, global_x = local_to_global(y, x, map_id)
-                global_coords = (global_y, global_x)
+                x, y, map_id = self.env.get_game_coords()  # Note: get_game_coords returns (x, y, map_id)
+                gy, gx = local_to_global(y, x, map_id)
+                global_coords = (gy, gx)
                 print(f"DEBUGGING STAGEMANAGER: global coords available: {global_coords}")
             except Exception as e:
                 # Global coordinate conversion failed (likely on maps that are
@@ -802,6 +950,57 @@ class StageManager:
                     print(f"StageManager DEBUG: party_size (alias) check failed – current {current_party_size} != {condition['party_size']}")
                     return False
             
+            # ----------------------------------------------------------
+            # ITEM QUANTITY (>=) CHECK
+            # ----------------------------------------------------------
+            if 'item_qty' in condition:
+                qty_spec = condition['item_qty']
+                item_name = qty_spec.get('item')
+                target_qty = qty_spec.get('qty', 0)
+                if item_name:
+                    current_qty = self._get_item_quantity(item_name)
+                    if current_qty < target_qty:
+                        print(f"StageManager DEBUG: item_qty check failed – {item_name} qty {current_qty} < {target_qty}")
+                        return False
+
+            # ----------------------------------------------------------
+            # DIALOG TEXT CHECK
+            # ----------------------------------------------------------
+            if 'dialog_text' in condition:
+                dialog_text = condition['dialog_text']
+                if dialog_text not in (self.env.get_active_dialog() or ''):
+                    print(f"StageManager DEBUG: dialog_text check failed – '{dialog_text}' not in '{self.env.get_active_dialog()}'")
+                    return False
+            
+                
+            # ----------------------------------------------------------
+            # POKÉDEX CAUGHT CHECK
+            # ----------------------------------------------------------
+            if 'pokemon_caught' in condition:
+                pc_spec = condition['pokemon_caught']
+                species_name = pc_spec.get('species')
+                should_be_caught = pc_spec.get('caught', True)
+                if species_name:
+                    try:
+                        from environment.data.environment_data.species import Species
+                        species_enum = Species[species_name]
+                        species_id = species_enum.value  # 1-based ID
+                        # env.caught_pokemon is a numpy array of bits (1=caught) indexed from 0
+                        caught_flag = False
+                        try:
+                            caught_flag = bool(self.env.caught_pokemon[species_id - 1])
+                        except Exception:
+                            # Fallback: if caught_pokemon not available or index error
+                            caught_flag = False
+                        if caught_flag != should_be_caught:
+                            print(
+                                f"StageManager DEBUG: pokemon_caught check failed – {species_name} caught={caught_flag}, expected {should_be_caught}"
+                            )
+                            return False
+                    except KeyError:
+                        print(f"StageManager DEBUG: Unknown species '{species_name}' in pokemon_caught condition")
+                        return False
+
             return True
             
         except Exception as e:
@@ -826,6 +1025,60 @@ class StageManager:
         CONSOLIDATED NAVIGATION: All PATH_FOLLOW_ACTION logic now delegated to ConsolidatedNavigator.
         StageManager no longer handles navigation - this prevents navigation logic conflicts.
         """
+        # ------------------------------------------------------------------
+        # VIRIDIAN MART SAFEGUARD (Stage 22)
+        # ------------------------------------------------------------------
+        # When we are inside Viridian Mart buying Poké Balls (stage 22) we must
+        # ensure we *do not* exit the shop until we hold at least four balls.
+        # Path-follow actions from ConsolidatedNavigator would normally march
+        # straight out of the mart once the next quest node is selected, but
+        # we want to block that behaviour until the inventory requirement is
+        # satisfied.  Instead of forwarding the action to the navigator we
+        # simply convert it into an "A" button press so Grok keeps interacting
+        # with the shop clerk / purchase menu to acquire the missing balls.
+        # ------------------------------------------------------------------
+        try:
+            if self.stage in (21, 22):
+                current_qty = self._get_item_quantity('POKE_BALL')
+                if current_qty < 4:
+                    # Only intercept once the player has reached the clerk's
+                    # tile.  Until then we must allow ConsolidatedNavigator to
+                    # generate the movement actions that walk Grok to the
+                    # counter.
+                    from environment.data.recorder_data.global_map import local_to_global
+                    x, y, map_id = self.env.get_game_coords()
+                    gy, gx = local_to_global(y, x, map_id)
+
+                    target_global = (299, 132)  # Standing in front of clerk
+
+                    if (gy, gx) == target_global:
+                        print(
+                            f"StageManager: Stage {self.stage} – at clerk and below ball threshold "
+                            f"(have {current_qty}, need 4). Sending 'A' to purchase."
+                        )
+                        return 4  # 'A' button index
+                    else:
+                        # Not yet at clerk – manually step toward the counter.
+                        dy = target_global[0] - gy  # positive → need to move DOWN (0), negative → UP (3)
+                        dx = target_global[1] - gx  # positive → need to move RIGHT (2), negative → LEFT (1)
+
+                        # Prefer vertical alignment first; once aligned on Y, handle X.
+                        if dy != 0:
+                            action_toward = 0 if dy > 0 else 3
+                        elif dx != 0:
+                            action_toward = 2 if dx > 0 else 1
+                        else:
+                            action_toward = 4  # Fallback 'A' press (should not occur here)
+
+                        print(
+                            f"StageManager: Stage {self.stage} – guiding toward clerk. "
+                            f"Current global={(gy, gx)}, target={target_global}, choosing action={action_toward}."
+                        )
+                        return action_toward
+        except Exception as _e:
+            # Non-fatal – fall back to regular navigation handling
+            print('StageManager: Error in Stage-22 safeguard –', _e)
+
         print(f"StageManager: Delegating PATH_FOLLOW_ACTION to ConsolidatedNavigator")
         
         # Delegate all navigation to the ConsolidatedNavigator
@@ -953,7 +1206,7 @@ class StageManager:
         # ------------------------------------------------------------------
         try:
             from environment.data.recorder_data.global_map import local_to_global
-            y, x, map_id = self.env.get_game_coords()
+            x, y, map_id = self.env.get_game_coords()
             cur_global = local_to_global(y, x, map_id)
 
             if cur_global == (348, 110):
@@ -1002,6 +1255,29 @@ class StageManager:
         except Exception as e:
             print(f"StageManager: Error in quest001 auto-action logic: {e}")
 
+        # ------------------------------------------------------------------
+        # QUEST 023 ▸ Scripted capture of Nidoran ♂
+        # ------------------------------------------------------------------
+        try:
+            if self.stage == 23:
+                # Delegate per-frame button generation to dedicated helper.
+                self._scripted_catch_nidoran()
+        except Exception as e:
+            print('StageManager: Nidoran scripted catch error:', e)
+
+        # --------------------------------------------------------------
+        # Disable Viridian-Mart automation after Poké Balls are stocked
+        # --------------------------------------------------------------
+        try:
+            pokeball_qty = self._get_item_quantity('POKE_BALL')
+            if pokeball_qty >= 4 and self.stage in (21, 22):
+                print(f"StageManager: {pokeball_qty} Poké Balls in bag – disabling Mart blockings/scripted movements (advance stage)")
+                self.stage = 23  # Undefined stage ⇒ no auto config
+                self.blockings.clear()
+                self.scripted_movements.clear()
+        except Exception as e:
+            print('StageManager: Error while evaluating Poké Ball quantity:', e)
+
     # ------------------------------------------------------------------
     # Quest/condition helpers
     # ------------------------------------------------------------------
@@ -1033,3 +1309,174 @@ class StageManager:
 
         self._auto_action_queue.append(action_int)
         print(f"StageManager: Queued auto-action {action_name_or_int} → {action_int} (queue size: {len(self._auto_action_queue)})") 
+
+    # ------------------------------------------------------------------
+    # Helper ▸ Read item quantity in bag by human-readable name (e.g. "POKE_BALL")
+    # ------------------------------------------------------------------
+    def _get_item_quantity(self, item_name: str) -> int:
+        """Return quantity of a specific item currently in the bag.
+
+        Args:
+            item_name: Canonical upper-snake item name as in ITEM_NAME_TO_ID_DICT.
+
+        Returns:
+            Quantity (int) if item present, else 0.  Falls back to 0 on error.
+        """
+        try:
+            if not (hasattr(self.env, 'item_handler') and self.env.item_handler):
+                return 0
+            item_id = ITEM_NAME_TO_ID_DICT.get(item_name)
+            if item_id is None:
+                return 0
+            bag_items = self.env.item_handler.get_items_in_bag()
+            quantities = self.env.item_handler.get_items_quantity_in_bag()
+            for idx, iid in enumerate(bag_items):
+                if iid == item_id:
+                    return quantities[idx] if idx < len(quantities) else 0
+        except Exception as e:
+            print('StageManager: _get_item_quantity error:', e)
+        return 0 
+    
+    def _scripted_catch_nidoran(self) -> None:
+        """Handle dialog transitions during the scripted Nidoran ♂ capture.
+
+        The original implementation only injected **one** batch of inputs and
+        then permanently blocked further injections because the helper flag
+        `_nido_name_seq_enqueued` stayed *True*.  Once the queued inputs were
+        consumed the capture routine stalled and manual input was required.
+
+        We now automatically clear the flag once the auto-action queue is
+        empty so subsequent dialog states can enqueue their own dedicated
+        button batches.  This turns the helper into a simple state machine
+        that can react to *each* dialog screen until the naming prompt is
+        reached.
+        """
+
+        # ------------------------------------------------------------------
+        # ALWAYS CHECK FOR COMPLETION/NAMING DIALOG EACH FRAME
+        # ------------------------------------------------------------------
+        # These helpers raise RuntimeError when their respective dialogs are
+        # detected.  Calling them on every frame guarantees we react
+        # immediately before queuing any further button inputs.
+        self._caught_nidoran_to_naming_dialog()
+        self._caught_nidoran_pokeball_failed()
+
+    
+    def _caught_nidoran_pokeball_failed(self):                
+        # pokeball failed; clear failed pokeball and enemy attack dialogs
+        dlg = self.env.get_active_dialog() or ''
+        # Reset helper flag when the previously-queued buttons finished so
+        # we can inject new retries after a failed throw.
+        if getattr(self, '_nido_name_seq_enqueued', False) and len(self._auto_action_queue) == 0:
+            self._nido_name_seq_enqueued = False
+
+        if "Aww!" in dlg:
+            print(f'StageManager: "Aww!" dialog detected; _auto_action_queue={self._auto_action_queue}')
+            print(f'StageManager: _nido_name_seq_enqueued={getattr(self, "_nido_name_seq_enqueued", False)}')
+            button_seq = ['b'] * 10
+            for btn in button_seq:
+                if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                    self._queue_auto_action(btn)
+            self._nido_name_seq_enqueued = True
+
+        # # This dialog appears immediately after the "All right!" message; we treat it the same.
+        # if 'NIDORAN♂!' in dlg or 'NIDORAN♂!' in dlg:  # handle unicode variations
+        #     raise RuntimeError('StageManager: "NIDORAN♂!" dialog detected – capture sequence successful')
+
+        #     if not getattr(self, '_nido_name_seq_enqueued', False):
+        #         button_seq = ['a'] * 6  # slightly shorter but still clears dialogs
+        #         for btn in button_seq:
+        #             if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+        #                 self._queue_auto_action(btn)
+        #         self._nido_name_seq_enqueued = True
+
+    def _caught_nidoran_to_naming_dialog(self):
+        """React to battle dialogs during Nidoran capture and enqueue inputs.
+
+        This helper is called every frame by `_scripted_catch_nidoran`.  It
+        observes the current dialog string and the enemy HP bar and queues
+        context-appropriate button presses.  To prevent flooding, a simple
+        latch (`_nido_name_seq_enqueued`) is used – we clear that latch once
+        the previously queued actions have run so the next dialog state can
+        enqueue its own inputs.
+        """
+
+        # 1) Allow a new batch once the previous auto-inputs finished.
+        if getattr(self, '_nido_name_seq_enqueued', False) and len(self._auto_action_queue) == 0:
+            self._nido_name_seq_enqueued = False
+
+        dlg = (self.env.get_active_dialog() or '').strip()
+
+        # Guard against divide-by-zero if the HP struct is momentarily unset.
+        try:
+            max_hp, cur_hp = self.env.get_enemy_party_head_hp()
+            hp_fraction = cur_hp / max_hp if max_hp else 1.0
+        except Exception:
+            hp_fraction = 1.0
+
+        print(f'StageManager: Nidoran dlg="{dlg}" hp_frac={hp_fraction:.2f}')
+
+        # Phase A ▸ Initial "NIDORAN♂ appeared!" dialog – mash B to reach FIGHT.
+        # Only match the actual appeared screen, not any dialog containing NIDORAN♂.
+        if 'NIDORAN♂' in dlg and 'appeared!' in dlg and hp_fraction == 1:
+            if not getattr(self, '_nido_name_seq_enqueued', False):
+                for _ in range(5):
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action('b')
+                self._nido_name_seq_enqueued = True
+            return
+
+        # Phase B ▸ FIGHT menu visible while HP still full – pick first move (SCRATCH).
+        fight_strings = ('▶FIGHT', '▸FIGHT', '\u25baFIGHT', 'u25baFIGHT', 'FI...')
+        pokemon_strings = ('PkMn')
+        run_strings = ('RUN')
+        item_strings = ('ITEM')
+        clear_dialog_strings = ('used', 'But', 'failed', 'NIDORAN\u2642 was', 'Shoot!', 'NIDORAN\u2642\nused', 'LEER!', "CHARMANDER's", 'POISON PIN', 'Stiff', 'New POK', 'was', 'Cri', 'Critical', 'will be added')
+        
+        # clear all dialogs where we don't need to make a decision                
+        if any(fs in dlg for fs in clear_dialog_strings) and not 'give a nickname' in dlg and not 'Do y' in dlg:
+            if not getattr(self, '_nido_name_seq_enqueued', False):
+                # B to clear dialogs
+                for _ in range(5):
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action('b')
+                self._nido_name_seq_enqueued = True
+            return
+
+        # Phase B ▸ FIGHT menu visible while HP still full – pick first move (SCRATCH).
+        elif any(fs in dlg for fs in fight_strings) and hp_fraction == 1 or '\u25baSCRATCH' in dlg:
+            if not getattr(self, '_nido_name_seq_enqueued', False):
+                for _ in range(2):
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action('a')
+                self._nido_name_seq_enqueued = True
+            return
+
+
+        # Phase C ▸ FIGHT menu visible while HP is not full - use poke ball.
+        elif any(fs in dlg for fs in fight_strings) and hp_fraction != 1 and not 'give a nickname' in dlg:
+            if not getattr(self, '_nido_name_seq_enqueued', False):
+                button_seq = ['down'] + ['a'] + ['down'] * 2 + ['a']
+                for btn in button_seq:
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action(btn)
+                self._nido_name_seq_enqueued = True
+            return
+
+        # # Phase D ▸ Pres A once to get to nickname screen
+        elif '\u25baYES\nNO\n' in dlg or 'give a nickname' in dlg:
+            if not getattr(self, '_nido_name_seq_enqueued', False):
+                for _ in range(1):
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action('a')
+                self._nido_name_seq_enqueued = True
+            return
+
+        # # Phase D ▸ Generic fallback for any remaining "was caught" lines.
+        # elif 'was' in dlg and hp_fraction != 1:
+        #     if not getattr(self, '_nido_name_seq_enqueued', False):
+        #         for _ in range(57):
+        #             if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+        #                 self._queue_auto_action('a')
+        #         self._nido_name_seq_enqueued = True
+        #     return

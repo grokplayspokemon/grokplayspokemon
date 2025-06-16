@@ -597,7 +597,8 @@ def main():
         run_dir=run_dir, 
         initial_quest_statuses=initial_quest_statuses_from_save, # This is critical
         initial_trigger_statuses=initial_trigger_statuses_from_save, # This is critical
-        logger=logger # CRITICAL FIX: Pass logger to enable trigger evaluation logging
+        logger=logger, # CRITICAL FIX: Pass logger to enable trigger evaluation logging
+        persistence_enabled=not config.get("disable_recordings", False) and config.get("record_replays", True)
     )
     
     quest_manager.quest_progression_engine = quest_progression_engine

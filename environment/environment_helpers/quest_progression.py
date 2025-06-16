@@ -21,7 +21,8 @@ class QuestProgressionEngine:
                  run_dir: Path,
                  initial_quest_statuses: Dict[str, bool],  # New parameter
                  initial_trigger_statuses: Dict[str, bool], # New parameter
-                 logger=None):
+                 logger=None,
+                 *, persistence_enabled: bool = True):
         
         if logger is None:
             self.logger = get_pokemon_logger()
@@ -35,6 +36,7 @@ class QuestProgressionEngine:
         self.quest_ids_all = quest_ids_all # This seems to be just a list of integer IDs
         self.status_queue = status_queue
         self.run_dir = run_dir
+        self.persistence_enabled = persistence_enabled
 
         self.last_step_time = 0
         self.step_interval = 0.2  # 5 times per second
@@ -585,6 +587,10 @@ class QuestProgressionEngine:
         # self.logger.log_system_event("SYSTEM", "_persist_progress called")
         
         try:
+            # If persistence is disabled (e.g., recordings off), skip writing files entirely
+            if not getattr(self, "persistence_enabled", True):
+                return  # Do not persist when disabled
+            
             # Save trigger status - FIX: Save as dictionary mapping trigger_id to completion status
             trigger_file = self.run_dir / 'trigger_status.json'
             trigger_status_dict = {tid: True for tid in self.trigger_completed}

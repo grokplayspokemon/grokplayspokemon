@@ -515,11 +515,26 @@ class ConsolidatedNavigator:
             print(f'current_global: {current_global}')
             target_map   = self.coord_map_ids[self.current_coordinate_index + 1]
             if current_global == target_coord:
-                self.current_coordinate_index += 1
+                # Advance past **all** consecutive duplicates so we always
+                # move forward along the path even when identical coordinates
+                # appear multiple times in the trace (common where a human
+                # paused momentarily).  This prevents the avatar from
+                # oscillating between two identical nodes when the PATH_FOLLOW
+                # button is held down.
+                while (
+                    self.current_coordinate_index + 1 < len(self.sequential_coordinates)
+                    and self.sequential_coordinates[self.current_coordinate_index] == current_global
+                ):
+                    self.current_coordinate_index += 1
+
+                # If we've reached the end of the coordinate list, keep the
+                # game ticking but stop further path-following logic.
                 if self.current_coordinate_index >= len(self.sequential_coordinates):
                     return original_action
+
+                # Update new target after skipping duplicates
                 target_coord = self.sequential_coordinates[self.current_coordinate_index]
-                target_map   = self.coord_map_ids[self.current_coordinate_index]
+                target_map = self.coord_map_ids[self.current_coordinate_index]
 
             # 🚀 Debug current target after bump
             print(f"🚀 active_target_idx={self.current_coordinate_index + 1}, "
@@ -792,7 +807,22 @@ class ConsolidatedNavigator:
     
     def load_coordinate_path(self, quest_id: int) -> bool:
         """Load coordinate path for a quest with aggressive debugging"""
-        
+
+        # ------------------------------------------------------------------
+        # FAST-PATH: If this quest is already loaded **and** we still have the
+        # full coordinate list cached then simply return.  Re-loading would
+        # wipe our current_coordinate_index back to 0 which, when the player
+        # presses the PATH_FOLLOW_ACTION every frame, causes the navigator to
+        # reset and oscillate between adjacent nodes (the back-and-forth bug
+        # the user reported).  Skipping the reload keeps the index moving
+        # forward and lets the avatar progress along the path.
+        # ------------------------------------------------------------------
+        if (
+            self.active_quest_id == quest_id
+            and self.sequential_coordinates  # Non-empty path already cached
+        ):
+            return True
+
         # AGGRESSIVE DEBUG: Don't skip loading if we already have the same quest loaded
 
         quest_dir_name = f"{quest_id:03d}"

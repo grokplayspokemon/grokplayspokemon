@@ -509,32 +509,69 @@ class ConsolidatedNavigator:
             elif self.current_coordinate_index >= len(self.sequential_coordinates):
                 return original_action
 
-            # — CRITICAL FIX: bump index if we're already on the warp-tile coordinate —
+            # Fetch the map ID that corresponds to the *current* target coordinate.
+            # Using +1 here can raise an IndexError when we are on the **last** node of
+            # the recorded path (current_coordinate_index == len(coords) - 1).  That
+            # uncaught error forces the outer try-except to trigger and the navigator
+            # falls back to returning the hard-coded action "3" (UP) which causes the
+            # avatar to walk into walls.  By referencing the same index we guarantee a
+            # valid lookup for every coordinate on the path.
+
             target_coord = self.sequential_coordinates[self.current_coordinate_index]
             print(f"target_coord: {target_coord}")
             print(f'current_global: {current_global}')
-            target_map   = self.coord_map_ids[self.current_coordinate_index + 1]
+            # --- 1️⃣  BUMP INDEX WHEN WE ARRIVE ON A NODE ----------------------
             if current_global == target_coord:
-                # Advance past **all** consecutive duplicates so we always
-                # move forward along the path even when identical coordinates
-                # appear multiple times in the trace (common where a human
-                # paused momentarily).  This prevents the avatar from
-                # oscillating between two identical nodes when the PATH_FOLLOW
-                # button is held down.
+                # Skip over any duplicate coordinates that appear consecutively in
+                # the trace (these typically represent moments where the human
+                # paused).  Advancing past them prevents oscillation between two
+                # tiles.
                 while (
                     self.current_coordinate_index + 1 < len(self.sequential_coordinates)
-                    and self.sequential_coordinates[self.current_coordinate_index] == current_global
+                    and self.sequential_coordinates[self.current_coordinate_index + 1] == current_global
                 ):
                     self.current_coordinate_index += 1
 
-                # If we've reached the end of the coordinate list, keep the
-                # game ticking but stop further path-following logic.
-                if self.current_coordinate_index >= len(self.sequential_coordinates):
-                    return original_action
+                # Move to the *next* node (if one exists)
+                if self.current_coordinate_index + 1 < len(self.sequential_coordinates):
+                    self.current_coordinate_index += 1
+                    target_coord = self.sequential_coordinates[self.current_coordinate_index]
+                else:
+                    # 🏁 Reached the final node for the current quest.
 
-                # Update new target after skipping duplicates
-                target_coord = self.sequential_coordinates[self.current_coordinate_index]
-                target_map = self.coord_map_ids[self.current_coordinate_index]
+                    # 1️⃣  Mark the quest complete in QuestManager (if present) so
+                    #     get_current_quest() will advance to the next one.
+                    try:
+                        qm = getattr(self.env, 'quest_manager', None)
+                        if qm and hasattr(qm, 'quest_completed_status'):
+                            qm.quest_completed_status[str(current_quest).zfill(3)] = True
+                    except Exception as e:
+                        print(f"ConsolidatedNavigator: Could not mark quest {current_quest} complete: {e}")
+
+                    # 2️⃣  Attempt to load the next quest path automatically.  If
+                    #     none is available we gracefully stop navigating.
+                    next_quest = self.get_current_quest()
+                    if next_quest and next_quest != current_quest and self.load_coordinate_path(next_quest):
+                        print(f"ConsolidatedNavigator: Quest {current_quest} finished. Switching to quest {next_quest}.")
+                        self.current_coordinate_index = 0
+                        # Re-enter the converter to generate the first move of the
+                        # new quest.  A single recursive call is safe because the
+                        # new path definitely contains ≥1 coordinate and we just
+                        # reset the index.
+                        return self.convert_path_follow_to_movement_action(original_action)
+
+                    # No further path to follow – set navigator idle.
+                    self.navigation_status = "idle"
+                    return None
+
+            # After potential index bump compute the map for forthcoming node.
+            # Use the map ID of the *current* target coordinate.  Looking one
+            # step ahead caused the navigator to attempt warp logic too early
+            # (e.g. while still several tiles away from a Pokémon Center door),
+            # resulting in incorrect vertical movement into walls.  Relying on
+            # the present node's map ensures we only search for a warp when we
+            # are actually standing on—or adjacent to—the recorded warp tile.
+            target_map = self.coord_map_ids[self.current_coordinate_index]
 
             # 🚀 Debug current target after bump
             print(f"🚀 active_target_idx={self.current_coordinate_index + 1}, "
@@ -818,8 +855,8 @@ class ConsolidatedNavigator:
         # forward and lets the avatar progress along the path.
         # ------------------------------------------------------------------
         if (
-            self.active_quest_id == quest_id
-            and self.sequential_coordinates  # Non-empty path already cached
+            self._last_loaded_quest_id == quest_id  # same quest already loaded
+            and self.sequential_coordinates        # and we still have a path cached
         ):
             return True
 

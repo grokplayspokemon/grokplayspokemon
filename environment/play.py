@@ -551,6 +551,33 @@ def main():
         current_map_name = env.get_map_name_by_id(current_map_id_after_reset)
         run_info = create_new_run(env, current_map_name, current_map_id_after_reset)
 
+    # 🔀 NEW: Gracefully handle the case where recordings are disabled and
+    # no RunInfo could be created.  Many downstream systems (QuestManager,
+    # QuestProgressionEngine, etc.) rely on the presence of a valid
+    # directory path for persisting transient JSON files even when video
+    # recordings are turned off.  If `run_info` is still `None` at this
+    # point, synthesize an in-memory *temporary* run directory so the rest
+    # of the application can continue to operate without crashing.
+    if run_info is None:
+        from tempfile import mkdtemp
+        from environment.environment_helpers.run_manager import RunInfo
+        temp_dir_path = Path(mkdtemp(prefix="temp_run_"))
+        # Ensure mkdtemp created directory; already exists. Print message.
+        print(f"[Fallback] Recordings disabled – using temporary run directory at {temp_dir_path}")
+        import datetime as _dt
+        run_info = RunInfo(
+            run_id="TEMP_RUN",
+            start_map_name=env.get_map_name_by_id(current_map_id_after_reset),
+            map_id=current_map_id_after_reset,
+            date=_dt.datetime.now().strftime("%d%m%Y"),
+            sequence=0,
+            run_dir=temp_dir_path,
+        )
+        # Expose the synthetic run info on the environment so that helper
+        # utilities expecting it (e.g. saver.save_*) do not fail.
+        env.current_run_info = run_info
+        env.current_run_dir = run_info.run_dir
+
     run_dir = run_info.run_dir
 
     # Initialize QuestManager with run_dir for proper quest status synchronization
@@ -1128,6 +1155,28 @@ def main():
                         running = False
                         break
                     # FIXED: Add Ctrl+S manual save
+                    elif event.key == pygame.K_s and (pygame.key.get_mods() & pygame.KMOD_CTRL) and not (pygame.key.get_mods() & pygame.KMOD_SHIFT):
+                        print("Ctrl+S pressed - manual save...")
+                        from environment.environment_helpers.saver import save_manual_state
+                        import datetime
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        save_manual_state(env, run_dir, f"manual_{timestamp}")
+                        continue
+                    # NEW: Ctrl+Shift+S triggers a full manual snapshot (state + actions + coords + quest/trigger status)
+                    elif event.key == pygame.K_s and (pygame.key.get_mods() & pygame.KMOD_CTRL) and (pygame.key.get_mods() & pygame.KMOD_SHIFT):
+                        print("Ctrl+Shift+S pressed - full snapshot save...")
+                        from environment.environment_helpers.saver import save_full_snapshot
+                        import datetime
+                        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        save_full_snapshot(
+                            env,
+                            recorded_playthrough=recorded_playthrough,
+                            coords_data=getattr(env, "path_trace_data", None),
+                            snapshot_name=ts,
+                            base_run_info=run_info,
+                        )
+                        continue
+                    # FIXED: Add Ctrl+S manual save (simple state only)
                     elif event.key == pygame.K_s and (pygame.key.get_mods() & pygame.KMOD_CTRL):
                         print("Ctrl+S pressed - manual save...")
                         from environment.environment_helpers.saver import save_manual_state
@@ -1237,6 +1286,27 @@ def main():
                             print(f"Grok {'enabled' if grok_active else 'disabled'} by toggle")
                             if grok_active:
                                 start_grok_thread()
+                            continue
+                        elif event.key == pygame.K_8:
+                            # Bind the "8" keyboard key to directly invoke the handle_battle() tool for live testing
+                            print("play.py: main(): '8' key pressed – invoking handle_battle tool")
+                            try:
+                                # Local import to avoid circular deps on module load
+                                from agent.grok_tool_implementations import handle_battle
+                            except Exception as import_err:
+                                print(f"play.py: main(): ERROR importing handle_battle: {import_err}")
+                            else:
+                                try:
+                                    summary, result = handle_battle(
+                                        env=env,
+                                        quest_manager=quest_manager,
+                                        navigator=navigator,
+                                        env_wrapper=env  # The wrapper instance is the same as env here
+                                    )
+                                    print(f"play.py: main(): handle_battle completed – {summary}; result={result}")
+                                except Exception as e:
+                                    print(f"play.py: main(): handle_battle raised an exception: {e}")
+                            # Skip further processing for this frame so the battle logic can run without an extra action
                             continue
                         else:
                             # Regular key handling

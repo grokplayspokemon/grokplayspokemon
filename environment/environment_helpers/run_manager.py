@@ -388,8 +388,59 @@ class RunManager:
         """
         latest_run = self.get_latest_run(map_name=map_name, map_id=map_id)
         print(f"run_manager.py: load_latest_state(): latest_run: {latest_run}")
+
+        # ------------------------------------------------------------------
+        # Fallback – try to locate *any* '.state' file under recordings/ when
+        # the directory naming scheme does not match the expected pattern
+        # (e.g. legacy runs such as 'quest_26_beat_rival_on_route_22_…').
+        # ------------------------------------------------------------------
         if latest_run is None:
-            print("run_manager.py: load_latest_state(): No previous runs found")
+            print("run_manager.py: load_latest_state(): No previous runs found via naming scheme. Performing wildcard search …")
+            try:
+                state_paths = sorted(self.base_dir.rglob("*.state"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if state_paths:
+                    state_path = state_paths[0]
+                    print(f"run_manager.py: load_latest_state(): Fallback found state file {state_path}")
+
+                    # Synthesise minimal RunInfo so caller logic stays unchanged
+                    run_dir = state_path.parent
+                    run_id = run_dir.name
+                    # Attempt to derive map_id from run_id; fallback to 0
+                    try:
+                        map_id = int(run_id.split("_")[1]) if "_" in run_id else 0
+                    except Exception:
+                        map_id = 0
+
+                    qs_path = run_dir / "quest_status.json"
+                    trg_path = run_dir / "trigger_status.json"
+
+                    fallback_info = RunInfo(
+                        run_id=run_id,
+                        start_map_name="UNKNOWN",
+                        map_id=map_id,
+                        date=datetime.now().strftime("%d%m%Y"),
+                        sequence=0,
+                        run_dir=run_dir,
+                        end_state_path=state_path,
+                        quest_status_path=qs_path,
+                        trigger_status_path=trg_path,
+                        state_file=state_path,
+                    )
+                    # Attempt to load it immediately
+                    try:
+                        with open(state_path, "rb") as f:
+                            state_bytes = f.read()
+                        env.pyboy.load_state(io.BytesIO(state_bytes))
+                        fallback_info.state_bytes = state_bytes
+                        print("run_manager.py: load_latest_state(): Successfully loaded fallback state file")
+                        return fallback_info
+                    except Exception as e:
+                        print(f"run_manager.py: load_latest_state(): Error loading fallback state: {e}")
+                        # Continue to return None below
+            except Exception as e:
+                print(f"run_manager.py: load_latest_state(): wildcard search failed: {e}")
+
+            print("run_manager.py: load_latest_state(): No suitable state file located via fallback search")
             return None
         
         # Try to load end state first, then start state

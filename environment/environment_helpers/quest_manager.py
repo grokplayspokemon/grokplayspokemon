@@ -39,6 +39,7 @@ class QuestManager:
         self.env = env
         self.nav = navigator if navigator is not None else getattr(env, 'navigator', None)
         self.talked_to_nurse_joy = False
+        self.current_quest_id = None
         
         self.run_dir = run_dir
         if self.run_dir:
@@ -276,6 +277,39 @@ class QuestManager:
         # print(f"QuestManager.update_progress(): Current quest is {current_q}")
         pass # Most logic moved or handled by QuestProgressionEngine & get_current_quest
 
+
+    def update_pressed_button_dict(self, coord, action_index, quest, value=1):
+        # If the quest ID is not in the dictionary, initialize it
+        if quest not in self.pressed_button_dict:
+            self.pressed_button_dict[quest] = {}
+            print(f'Initialized entry for quest_id: {quest}')
+
+        # If the coordinate is not in the quest's entry, initialize it
+        if coord not in self.pressed_button_dict[quest]:
+            self.pressed_button_dict[quest][coord] = {}
+            print(f'Initialized entry for coordinate: {coord} under quest_id: {quest}')
+
+        # If the action index is not in the coordinate's entry, initialize its count to 0
+        if action_index not in self.pressed_button_dict[quest][coord]:
+            self.pressed_button_dict[quest][coord][action_index] = 0
+            print(f'Initialized count for action_index: {action_index} at coordinate: {coord}')
+
+        # Guarantee that the common "A" button entry always exists so look-ups never
+        # raise a KeyError even if it has not been pressed yet.  This is critical
+        # for the nurse-joy logic (e.g. Quest 026) which queries the A-button count
+        # before the first press is registered.
+        if self.a_action_index not in self.pressed_button_dict[quest][coord]:
+            self.pressed_button_dict[quest][coord][self.a_action_index] = 0
+
+        # (Optional) store quest id directly under the coordinate entry for easier
+        # debugging/inspection – we use a string key to avoid collision with the
+        # integer action indices.
+        self.pressed_button_dict[quest][coord]["quest_id"] = quest
+
+        # Increment the count for the specific action at the specific coordinate for the specific quest
+        self.pressed_button_dict[quest][coord][action_index] += value
+        print(f'Incremented count for action_index {action_index} at coordinate {coord} for quest_id {quest}')
+    
     def filter_action(self, action: int) -> int:
         """
         Inspect or modify the given action based on quest logic and warp blocking.
@@ -464,64 +498,68 @@ class QuestManager:
 
         
 
-        if self.current_quest_id == 26:
-            x, y, map_id = self.env.get_game_coords()
-            gy, gx = local_to_global(y, x, map_id)
-            # press a once at (297, 118) to talk to nurse joy
-            if (gy, gx) == (297, 118): # and self.current_quest_id in self.pressed_button_dict:
-                # initialize the pressed_button_dict for this quest if it doesn't exist
-                self.update_pressed_button_dict((gy, gx), self.start_action_index, self.current_quest_id)
-                if (gy, gx) in self.pressed_button_dict[self.current_quest_id]:
-                    # walk away if a has been pressed on this coordinate while not in dialog more than 1 time
-                    if not self.env.read_dialog() and self.pressed_button_dict[self.current_quest_id][(gy, gx)][self.a_action_index] > 1:
-                        self.update_pressed_button_dict((gy, gx), self.down_action_index, self.current_quest_id)
-                        return self.down_action_index
-                    # ensure we actually heal and progress past nurse joy's verbosity
-                    elif self.env.read_dialog() and self.pressed_button_dict[self.current_quest_id][(gy, gx)][self.a_action_index] > 1:
-                        # don't increment the count if we're in dialog
-                        return self.a_action_index
-                    elif self.env.read_hp_fraction() != 1:
-                        return self.a_action_index
-                    else:
-                        # return a_action_index if a has not been pressed on this coordinate
-                        self.update_pressed_button_dict((gy, gx), self.a_action_index, self.current_quest_id)
-                        # self.pressed_button_dict[self.current_quest_id][(gy, gx)][self.a_action_index] += 1
-                        return self.a_action_index                   
-            # press a once at (297, 118) to grab viridian city cut tree potion
-            if (gy, gx) == (270, 89)  and self.current_quest_id in self.pressed_button_dict:
-                # initialize the pressed_button_dict for this quest if it doesn't exist
-                self.update_pressed_button_dict((gy, gx), self.start_action_index, self.current_quest_id)
-                if (gy, gx) in self.pressed_button_dict[self.current_quest_id]:
-                    # return normal action if a has been pressed on this coordinate
-                    if self.pressed_button_dict[self.current_quest_id][(gy, gx)][self.a_action_index] > 0:
-                        return action
-                    else:
-                        # return a_action_index if a has not been pressed on this coordinate
-                        self.update_pressed_button_dict((gy, gx), self.a_action_index, self.current_quest_id)
-                        # self.pressed_button_dict[self.current_quest_id][(gy, gx)][self.a_action_index] += 1
-                        return self.a_action_index
-            # goes *after* leaving pokemon center
-            print(f"quest_manager.py: filter_action(): gy={gy}, gx={gx}")
-            if (gy, gx) == (292, 97):
-                print(f"quest_manager.py: filter_action(): self.env.read_hp_fraction(): {self.env.read_hp_fraction()}")
-                if self.env.read_hp_fraction() == 1:
-                    # Hard-code: load only the '1_again' segment for Quest 026
-                    coord_file = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / "026" / "026_coords.json"
-                    try:
-                        data026 = json.load(coord_file.open('r'))
-                        seg = data026.get("1_again", [])
-                        if seg:
-                            coords = [(int(c[0]), int(c[1])) for c in seg]
-                            if self.nav:
-                                self.nav.sequential_coordinates = coords
-                                self.nav.coord_map_ids = [1] * len(coords)
-                                self.nav.current_coordinate_index = 0
-                                self.nav.active_quest_id = 26
-                            self.env.current_loaded_quest_id = 26
-                            print("quest_manager.py: filter_action(): Hard-loaded '1_again' segment for Quest 026")
-                    except Exception as e:
-                        print(f"quest_manager.py: filter_action(): Failed to load '1_again' segment: {e}")
-                    return self.left_action_index
+        # if self.current_quest_id == 26:
+        #     x, y, map_id = self.env.get_game_coords()
+        #     gy, gx = local_to_global(y, x, map_id)
+        #     print(f'quest_manager.py: filter_action(): current_quest_id={self.current_quest_id}, gy={gy}, gx={gx}')
+        #     # press a once at (297, 118) to talk to nurse joy
+        #     if (gy, gx) == (297, 118): # and self.current_quest_id in self.pressed_button_dict:
+        #         print(f'quest_manager.py: filter_action(): quest 26 condition true')
+        #         # initialize the pressed_button_dict for this quest if it doesn't exist
+        #         self.update_pressed_button_dict((gy, gx), self.start_action_index, self.current_quest_id)
+        #         print(f'quest_manager.py: filter_action(): pressed_button_dict={self.pressed_button_dict}')
+        #         if (gy, gx) in self.pressed_button_dict[self.current_quest_id]:
+        #             print(f'quest_manager.py: filter_action(): (gy, gx) in pressed_button_dict: {self.pressed_button_dict[self.current_quest_id][(gy, gx)]}')
+        #             # walk away if a has been pressed on this coordinate while not in dialog more than 1 time
+        #             if not self.env.read_dialog() and self.pressed_button_dict[self.current_quest_id][(gy, gx)][self.a_action_index] > 1:
+        #                 self.update_pressed_button_dict((gy, gx), self.down_action_index, self.current_quest_id)
+        #                 return self.down_action_index
+        #             # ensure we actually heal and progress past nurse joy's verbosity
+        #             elif self.env.read_dialog() and self.pressed_button_dict[self.current_quest_id][(gy, gx)][self.a_action_index] > 1:
+        #                 # don't increment the count if we're in dialog
+        #                 return self.a_action_index
+        #             elif self.env.read_hp_fraction() != 1:
+        #                 return self.a_action_index
+        #             else:
+        #                 # return a_action_index if a has not been pressed on this coordinate
+        #                 self.update_pressed_button_dict((gy, gx), self.a_action_index, self.current_quest_id)
+        #                 # self.pressed_button_dict[self.current_quest_id][(gy, gx)][self.a_action_index] += 1
+        #                 return self.a_action_index                   
+        #     # press a once at (297, 118) to grab viridian city cut tree potion
+        #     if (gy, gx) == (270, 89)  and self.current_quest_id in self.pressed_button_dict:
+        #         # initialize the pressed_button_dict for this quest if it doesn't exist
+        #         self.update_pressed_button_dict((gy, gx), self.start_action_index, self.current_quest_id)
+        #         if (gy, gx) in self.pressed_button_dict[self.current_quest_id]:
+        #             # return normal action if a has been pressed on this coordinate
+        #             if self.pressed_button_dict[self.current_quest_id][(gy, gx)][self.a_action_index] > 0:
+        #                 return action
+        #             else:
+        #                 # return a_action_index if a has not been pressed on this coordinate
+        #                 self.update_pressed_button_dict((gy, gx), self.a_action_index, self.current_quest_id)
+        #                 # self.pressed_button_dict[self.current_quest_id][(gy, gx)][self.a_action_index] += 1
+        #                 return self.a_action_index
+        #     # goes *after* leaving pokemon center
+        #     print(f"quest_manager.py: filter_action(): gy={gy}, gx={gx}")
+        #     if (gy, gx) == (292, 97):
+        #         print(f"quest_manager.py: filter_action(): self.env.read_hp_fraction(): {self.env.read_hp_fraction()}")
+        #         if self.env.read_hp_fraction() == 1:
+        #             # Hard-code: load only the '1_again' segment for Quest 026
+        #             coord_file = Path(__file__).parent / "replays" / "recordings" / "paths_001_through_046" / "026" / "026_coords.json"
+        #             try:
+        #                 data026 = json.load(coord_file.open('r'))
+        #                 seg = data026.get("1_again", [])
+        #                 if seg:
+        #                     coords = [(int(c[0]), int(c[1])) for c in seg]
+        #                     if self.nav:
+        #                         self.nav.sequential_coordinates = coords
+        #                         self.nav.coord_map_ids = [1] * len(coords)
+        #                         self.nav.current_coordinate_index = 0
+        #                         self.nav.active_quest_id = 26
+        #                     self.env.current_loaded_quest_id = 26
+        #                     print("quest_manager.py: filter_action(): Hard-loaded '1_again' segment for Quest 026")
+        #             except Exception as e:
+        #                 print(f"quest_manager.py: filter_action(): Failed to load '1_again' segment: {e}")
+        #             return self.left_action_index
     
         # avoid list index out of bounds while trainer 0 approaches player
         if self.current_quest_id == 29:

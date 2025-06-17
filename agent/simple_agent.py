@@ -125,8 +125,20 @@ class SimpleAgent:
     # Helper functions to recognise naming screens based on dialog
     # --------------------------------------------------------------
     @staticmethod
+    def _is_alphabet_naming_screen(dlg_upper: str) -> bool:
+        """Detect the universal alphabet grid shown on any naming screen."""
+        return (
+            "B C D E F G H I" in dlg_upper
+            or "S T U V W X Y Z" in dlg_upper
+        )
+
+    @staticmethod
     def _is_player_naming(dlg_upper: str) -> bool:
         """Return True if the dialog text indicates the player-name entry screen."""
+        # Alphabet grid is visible and there are no rival keywords
+        if SimpleAgent._is_alphabet_naming_screen(dlg_upper):
+            return ("RIVAL" not in dlg_upper and "HIS NAME" not in dlg_upper)
+
         return (
             "YOUR NAME?" in dlg_upper
             or ("NEW NAME" in dlg_upper and "HIS NAME" not in dlg_upper and "RIVAL" not in dlg_upper)
@@ -135,9 +147,26 @@ class SimpleAgent:
     @staticmethod
     def _is_rival_naming(dlg_upper: str) -> bool:
         """Return True if the dialog text indicates the rival-name entry screen."""
+        if SimpleAgent._is_alphabet_naming_screen(dlg_upper):
+            return ("RIVAL" in dlg_upper or "HIS NAME" in dlg_upper)
+
         return (
             ("RIVAL" in dlg_upper and "NAME" in dlg_upper)
             or "HIS NAME" in dlg_upper
+        )
+
+    @staticmethod
+    def _is_nickname_naming(dlg_upper: str) -> bool:
+        """Detect Pokémon nickname entry screen after captures."""
+        return "NICKNAME?" in dlg_upper or "GIVE A NICKNAME" in dlg_upper
+
+    @staticmethod
+    def _is_any_naming_screen(dlg_upper: str) -> bool:
+        return (
+            SimpleAgent._is_alphabet_naming_screen(dlg_upper)
+            or SimpleAgent._is_player_naming(dlg_upper)
+            or SimpleAgent._is_rival_naming(dlg_upper)
+            or SimpleAgent._is_nickname_naming(dlg_upper)
         )
 
     def get_action(self, game_state: GameState) -> Optional[int]:
@@ -148,6 +177,38 @@ class SimpleAgent:
         # Also log start event to agent.log
         self.agent_file_logger.info(f"GROK_GET_ACTION_START: {json.dumps({'location': game_state.location, 'quest_id': game_state.quest_id})}")
         
+        # --------------------------------------------------------------
+        # 💡  Naming-screen handling (friend suggestion and auto entry)
+        # --------------------------------------------------------------
+        dlg_upper = (game_state.dialog or "").upper()
+        try:
+            if self._is_any_naming_screen(dlg_upper):
+                # Always delegate to ask_friend with naming_tool flag so it
+                # returns AND executes enter_name in a single chained step.
+                target = (
+                    "pokemon" if self._is_nickname_naming(dlg_upper) else (
+                        "rival" if self._is_rival_naming(dlg_upper) else "player"
+                    )
+                )
+                question = f"What should we name the {target}?"
+                self.agent_file_logger.info(f"Auto-invoking ask_friend(naming_tool=True) for {target} naming screen.")
+                try:
+                    ask_friend(
+                        env=self.reader,
+                        quest_manager=self.quest_manager,
+                        navigator=self.navigator,
+                        env_wrapper=self.env_wrapper,
+                        question=question,
+                        naming_tool=True,
+                    )
+                except Exception as _ex:
+                    self.agent_file_logger.error(f"ask_friend naming_tool call failed: {_ex}")
+                # Update cooldown because we made an API request
+                self.last_api_call = time.time()
+                return None
+        except Exception as _e_name:
+            self.agent_file_logger.error(f"Naming-screen logic error: {_e_name}")
+
         # Check cooldown
         current_time = time.time()
         if current_time - self.last_api_call < self.api_cooldown:
@@ -375,7 +436,7 @@ Available actions:
 3: up
 4: a (interact/confirm)
 5: b (cancel/back)
-6: follow_nav_path (handles general navigational movement but does not position you at exactly the place you need to stand.)
+6: follow_nav_path (Navigates you through the game. Also, if you have to talk to an NPC, for the most part, follow_nav_path will take you to that NPC.)
 7: start (menu)
 When you are ready, call the correct tool per the instructions.
 

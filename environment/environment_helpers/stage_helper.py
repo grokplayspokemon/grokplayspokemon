@@ -8,6 +8,8 @@ import time
 from environment.data.environment_data.pokered_constants import MAP_ID_REF, WARP_DICT, MAP_DICT, ITEM_NAME_TO_ID_DICT
 from typing import Dict, List, Any, Optional
 from collections import deque
+from environment.data.environment_data.tilesets import Tilesets
+from environment.data.recorder_data.global_map import GLOBAL_MAP_SHAPE, local_to_global
 
 # Stage-specific configuration with both blocking and scripted movement
 #             ['block', 'ROUTE_5', 'UNDERGROUND_PATH_ROUTE_5@1',],
@@ -374,6 +376,15 @@ STAGE_DICT = {
             
         ]
     },
+    26: {
+        'events': [],
+        'blockings': [],
+        'scripted_movements': [
+            {'condition': {'global_coords': (270, 89),
+                          'item_check': {'item': 'POTION', 'has': False}},
+             'action': 'a'},
+        ]
+    },
     # Add more stages as needed
 }
 
@@ -422,7 +433,7 @@ class StageManager:
         # movement rules, thereby ensuring the press is executed exactly once
         # and is transparently blended with the existing override logic.
         # ------------------------------------------------------------------
-        self._auto_action_queue: "deque[int]" = deque(maxlen=8)
+        self._auto_action_queue: "deque[int]" = deque(maxlen=32)
         # Simple frame counter so we can throttle auto-press frequency
         self._frame_counter: int = 0
         
@@ -587,10 +598,16 @@ class StageManager:
         try:
             self._caught_nidoran_to_naming_dialog()
             self._caught_nidoran_pokeball_failed()
-        except RuntimeError:
-            # Re-raise so upstream systems can handle the success halt or
-            # any custom exception workflow already in place.
-            raise
+        except Exception as e:
+            print(f"StageManager: Error in caught_nidoran_to_naming_dialog: {e}")
+            print(f"StageManager: Error in caught_nidoran_pokeball_failed: {e}")
+
+        # try:
+        #     self._heal_at_poke_center()
+        # except Exception as e:
+        #     print(f"StageManager: Error in heal_at_poke_center: {e}")
+
+        self._heal_at_poke_center()
 
         # --------------------------------------------------------------
         # 0️⃣  FIRST PRIORITY – Execute any auto-generated action that
@@ -1401,6 +1418,22 @@ class StageManager:
         enqueue its own inputs.
         """
 
+        # return early if not on quest 23
+        if not self.env.quest_manager.current_quest_id == 23:
+            print(f'StageManager: returning early because not in quest 23.quest id={self.env.quest_manager.current_quest_id}')
+            return
+        
+        # return early if not in battle
+        if self.env.read_m(0xD057) == 0:
+            print(f'StageManager: returning early because in overworld, not in battle. wIsInBattle={self.env.read_m(0xD057)}')
+            return
+        
+        # return early if not in battle with Nidoran ♂
+        dlg = self.env.get_active_dialog() or ''
+        if '♂' not in dlg:
+            print(f'StageManager: returning early because not in battle with Nidoran ♂. dlg="{dlg}"')
+            return
+        
         # 1) Allow a new batch once the previous auto-inputs finished.
         if getattr(self, '_nido_name_seq_enqueued', False) and len(self._auto_action_queue) == 0:
             self._nido_name_seq_enqueued = False
@@ -1427,12 +1460,14 @@ class StageManager:
             return
 
         # Phase B ▸ FIGHT menu visible while HP still full – pick first move (SCRATCH).
-        fight_strings = ('▶FIGHT', '▸FIGHT', '\u25baFIGHT', 'u25baFIGHT', 'FI...')
-        pokemon_strings = ('PkMn')
-        run_strings = ('RUN')
-        item_strings = ('ITEM')
-        clear_dialog_strings = ('used', 'But', 'failed', 'NIDORAN\u2642 was', 'Shoot!', 'NIDORAN\u2642\nused', 'LEER!', "CHARMANDER's", 'POISON PIN', 'Stiff', 'New POK', 'was', 'Cri', 'Critical', 'will be added')
+        fight_strings = ('▶FIGHT', '▸FIGHT', '\u25baFIGHT', 'u25baFIGHT', '►FIGHT')
+        pokemon_strings = ('►PkMn', '\u25baPkMn')
+        run_strings = ('►RUN', '\u25baRUN')
+        item_strings = ('►ITEM', '\u25baITEM', )
+        clear_dialog_strings = ('gained', 'used', 'But', 'failed', 'NIDORAN\u2642 was', 'Shoot!', 'NIDORAN\u2642\nused', 'LEER!', "CHARMANDER's", 'POISON PIN', 'Stiff', 'New POK', 'was', 'Cri', 'Critical', 'will be added')
+        current_menu = self.env.get_menu_state()
         
+        print(f'StageManager: current_menu={current_menu}')
         # clear all dialogs where we don't need to make a decision                
         if any(fs in dlg for fs in clear_dialog_strings) and not 'give a nickname' in dlg and not 'Do y' in dlg:
             if not getattr(self, '_nido_name_seq_enqueued', False):
@@ -1452,8 +1487,7 @@ class StageManager:
                 self._nido_name_seq_enqueued = True
             return
 
-
-        # Phase C ▸ FIGHT menu visible while HP is not full - use poke ball.
+        # Phase C_0 ▸ FIGHT visible while HP is not full - open ITEM and use poke ball.
         elif any(fs in dlg for fs in fight_strings) and hp_fraction != 1 and not 'give a nickname' in dlg:
             if not getattr(self, '_nido_name_seq_enqueued', False):
                 button_seq = ['down'] + ['a'] + ['down'] * 2 + ['a']
@@ -1462,7 +1496,39 @@ class StageManager:
                         self._queue_auto_action(btn)
                 self._nido_name_seq_enqueued = True
             return
-
+        
+        # Phase C_1 ▸ ITEM visible while HP is not full - open ITEM. But index in ITEM is unknown.
+        elif any(fs in dlg for fs in item_strings) and hp_fraction != 1 and not 'give a nickname' in dlg:
+            if not getattr(self, '_nido_name_seq_enqueued', False):
+                button_seq = ['a']
+                for btn in button_seq:
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action(btn)
+                self._nido_name_seq_enqueued = True
+            return
+        
+        # Phase C_2 ►CANCEL is visible means cursor is on CANCEL in ITEM.
+        elif '►CANCEL' in dlg:
+            if not getattr(self, '_nido_name_seq_enqueued', False):
+                button_seq = ['up'] # up will move cursor to last item in ITEM
+                for btn in button_seq:
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action(btn)
+                self._nido_name_seq_enqueued = True
+            return
+        
+        # Phase C_3 ▸ .
+        elif 'POKEMON BALL' in dlg:
+            if not getattr(self, '_nido_name_seq_enqueued', False):
+                button_seq = ['a']
+                for btn in button_seq:
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action(btn)
+                self._nido_name_seq_enqueued = True
+            return
+        
+        # Phase C_4 ▸ POKEMON BALL is visible means cursor is on POKEMON BALL in ITEM.
+        
         # # Phase D ▸ Pres A once to get to nickname screen
         elif '\u25baYES\nNO\n' in dlg or 'give a nickname' in dlg:
             if not getattr(self, '_nido_name_seq_enqueued', False):
@@ -1472,6 +1538,15 @@ class StageManager:
                 self._nido_name_seq_enqueued = True
             return
 
+        elif '\u25baPOK\u00e9' in dlg:
+            if not getattr(self, '_nido_name_seq_enqueued', False):
+                button_seq = ['a']
+                for btn in button_seq:
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action(btn)
+                self._nido_name_seq_enqueued = True
+            return
+        
         # # Phase D ▸ Generic fallback for any remaining "was caught" lines.
         # elif 'was' in dlg and hp_fraction != 1:
         #     if not getattr(self, '_nido_name_seq_enqueued', False):
@@ -1480,3 +1555,47 @@ class StageManager:
         #                 self._queue_auto_action('a')
         #         self._nido_name_seq_enqueued = True
         #     return
+        
+    def _heal_at_poke_center(self):
+        """Heal at the Poke Center."""
+        x, y, map_id = self.env.get_game_coords()
+        print(f'StageManager: _heal_at_poke_center x={x} y={y} map_id={map_id}')
+        gy, gx = local_to_global(x, y, map_id)
+        print(f'StageManager: _heal_at_poke_center gy={gy} gx={gx}')
+        dlg = self.env.get_active_dialog() or ''
+        if x == 3 and self.env._is_pokecenter(map_id) and (y == 3 or y == 4 or y == 5 or y == 6 or y == 7 or y == 8):
+            # compute distance from door
+            door_y = 7
+            counter_y = 2
+            dist_from_door = abs(y - door_y)
+            dist_from_counter = abs(counter_y - y)
+            if 'Thank you!' in dlg or 'We hope to see' in dlg or 'your' in dlg:
+                if not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
+                    actions_seq = ['b'] * 8 # arbitrary number to clear dialogs
+                    print(f'StageManager: _heal_at_poke_center actions_seq={actions_seq}')
+                    for btn in actions_seq:
+                        if len(self._auto_action_queue) < self._auto_action_queue.maxlen: 
+                            self._queue_auto_action(btn)
+            print(f'StageManager: _heal_at_poke_center party_hp_fraction={self.env.read_hp_fraction()}')
+            if self.env.read_hp_fraction() != 1:
+                if not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
+                    print(f'StageManager: _heal_at_poke_center party_hp_fraction={self.env.read_hp_fraction()}')
+                    actions_seq = ['up'] * dist_from_counter + ['a'] * 10
+                    print(f'StageManager: _heal_at_poke_center actions_seq={actions_seq}')
+                    for btn in actions_seq:
+                        if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                            self._queue_auto_action(btn)
+            elif self.env.read_hp_fraction() == 1:
+                return
+                if not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
+                    print(f'StageManager: _heal_at_poke_center party_hp_fraction={self.env.read_hp_fraction()}')
+                    actions_seq = ['down'] * dist_from_door
+                    print(f'StageManager: _heal_at_poke_center actions_seq={actions_seq}')
+                    for btn in actions_seq:
+                        if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                            self._queue_auto_action(btn)
+                self._heal_at_poke_center_seq_enqueued = True
+            else:
+                self._heal_at_poke_center_seq_enqueued = False
+                print(f'StageManager: _heal_at_poke_center _heal_at_poke_center_seq_enqueued={self._heal_at_poke_center_seq_enqueued}')
+            return

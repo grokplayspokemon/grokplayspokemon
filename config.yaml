@@ -32,7 +32,7 @@ env:
   infinite_safari_steps: false
   insert_saffron_guard_drinks: false
   infinite_money: true
-  infinite_health: true
+  infinite_health: false
   infinite_pp_and_move_hack: false
   animate_scripts: true
   disable_recordings: true

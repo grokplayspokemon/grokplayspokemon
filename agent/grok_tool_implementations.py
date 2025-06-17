@@ -16,6 +16,36 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# --- Ensure tool logs go to the main game.log ---
+# If the centralized Pokémon logging system is active, reuse its `game_logger`
+# so that calls like `logger.info(...)` end up in `logs/game.log` alongside
+# the rest of the runtime diagnostics.  Fallback to the local module logger
+# if the global logger has not been initialised yet (e.g. during unit tests).
+try:
+    from utils.logging_config import get_pokemon_logger  # type: ignore
+
+    _plogger = get_pokemon_logger()
+    if _plogger is not None:
+        # Replace the module-level logger with the central game logger so all
+        # existing log lines below automatically use the correct handler.
+        logger = _plogger.game_logger  # noqa: PLW0603 – intentional reassignment
+    else:
+        pass
+except Exception:  # pragma: no cover – logging must never break the game loop
+    # Safe fallback: keep using the standard module logger.
+    pass
+
+# Fallback: if the logger still has no handlers (e.g., tests), attach a simple
+# FileHandler that writes to logs/game.log so we do not silently drop logs.
+if not logger.handlers:
+    from pathlib import Path
+    _logs_dir = Path(__file__).resolve().parent.parent / 'logs'
+    _logs_dir.mkdir(exist_ok=True)
+    _fh = logging.FileHandler(_logs_dir / 'game.log')
+    _fh.setFormatter(logging.Formatter('%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'))
+    logger.addHandler(_fh)
+    logger.setLevel(logging.DEBUG)
+
 # Pydantic models for each tool input schema
 class PressButtonsRequest(BaseModel):
     buttons: List[Literal["a", "b", "start", "select", "up", "down", "left", "right"]] = Field(
@@ -54,6 +84,7 @@ navigate_to_schema = NavigateToRequest.model_json_schema()
 # Add AskFriendRequest model and schema
 class AskFriendRequest(BaseModel):
     question: str = Field(description="Question to ask an unaffiliated helper Grok agent for high-level advice or stuck situations.")
+    naming_tool: Optional[bool] = Field(default=False, description="If true, ask_friend will immediately call the naming tool (enter_name) with the suggested name.")
 ask_friend_schema = AskFriendRequest.model_json_schema()
 
 # ----------------------------- NEW TOOL -----------------------------
@@ -106,6 +137,13 @@ def enter_name(
     cur_pos: Tuple[int,int] = (0,0)  # (row,col) – we start on 'A'
     LETTER_PRESS_WAIT = 9
     LETTER_RELEASE_WAIT = 15
+    # clear any AAAAAAAAAA character name that may have been inputted
+    for _ in range(10):
+        env.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)
+        env.pyboy.tick(LETTER_PRESS_WAIT)
+        env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
+        env.pyboy.tick(LETTER_RELEASE_WAIT)
+    
     for ch in name:
         if not ('A' <= ch <= 'Z'):
             continue  # ignore unsupported chars
@@ -292,7 +330,8 @@ def ask_friend(
     quest_manager: QuestManager,
     navigator: InteractiveNavigator,
     env_wrapper: EnvWrapper,
-    question: str
+    question: str,
+    naming_tool: bool = False
 ) -> Tuple[str, Dict[str, Any]]:
     assert env is not None, "RedGymEnv (env) not provided to ask_friend"
     assert question, "Question cannot be empty for ask_friend"
@@ -434,6 +473,34 @@ S T U V W X Y Z
     if suggestion:
         structured_output["suggested_name"] = suggestion
 
+    # --------------------------------------------------------------
+    # If naming_tool flag is set, immediately invoke enter_name
+    # --------------------------------------------------------------
+    if naming_tool and suggestion:
+        try:
+            # Determine target based on dialog – fallback to 'player'
+            dlg_up = (env.get_active_dialog() or "").upper()
+            if "RIVAL" in dlg_up or "HIS NAME" in dlg_up:
+                _target = "rival"
+            elif "NICKNAME?" in dlg_up or "GIVE A NICKNAME" in dlg_up:
+                _target = "pokemon"
+            else:
+                _target = "player"
+
+            enter_summary, enter_struct = enter_name(
+                env=env,
+                quest_manager=quest_manager,
+                navigator=navigator,
+                env_wrapper=env_wrapper,
+                name=suggestion,
+                target=_target,
+            )
+            human_summary += f" Automatically typed name via enter_name."
+            structured_output["enter_name_result"] = enter_struct
+        except Exception as _e_auto:
+            logger.error(f"ask_friend automatic enter_name failed: {_e_auto}", exc_info=True)
+            structured_output["enter_name_error"] = str(_e_auto)
+
     return human_summary, structured_output
 
 def handle_battle(
@@ -447,15 +514,15 @@ def handle_battle(
     """
     # SKIP battle tool for Nidoran capture quest to allow StageManager scripted catch
     if hasattr(env, 'quest_manager') and getattr(env.quest_manager, 'current_quest_id', None) == 23:
-        logger.info("Skipping handle_battle for quest 23 (Nidoran capture); using StageManager scripted catch")
+        logger.debug("Skipping handle_battle for quest 23 (Nidoran capture); using StageManager scripted catch")
         # Simulate pressing START (ENTER) multiple times to advance scripted catch
-        for _ in range(12):
+        for _ in range(15):
             pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_a))
             pygame.event.post(pygame.event.Event(pygame.KEYUP,   key=pygame.K_a))
-            time.sleep(0.2)
+            time.sleep(0.05)
         return "Skipped battle handling for Nidoran capture", {"status": "skipped"}
-    logger.info("Executing handle_battle tool")
-    
+    logger.debug("Executing handle_battle tool")
+
     try:
         # Get current dialog to understand battle state
         dialog = env.get_active_dialog() or ""

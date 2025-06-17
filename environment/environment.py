@@ -69,6 +69,15 @@ import tempfile
 from environment.environment_helpers.tile_visualizer import overlay_on_screenshot
 from environment.environment_helpers.quest_path_visualizer import QuestPathVisualizer
 from environment.environment_helpers.stage_helper import StageManager
+from environment.data.environment_data.menus import (
+    TEXT_MENU_CURSOR_LOCATION,
+    TEXT_MENU_CURSOR_LOCATIONS,
+    PC_POKE_MENU_CURSOR_LOCATIONS,
+    PC_ITEM_MENU_CURSOR_LOCATIONS,
+    BATTLE_MENU_STATES,
+    RedRamMenuValues,
+    RedRamSubMenuValues,
+)
 
 PIXEL_VALUES = np.array([0, 85, 153, 255], dtype=np.uint8)
 VISITED_MASK_SHAPE = (144 // 16, 160 // 16, 1)
@@ -1334,6 +1343,16 @@ class RedGymEnv(Env):
             if overridden != final_action:
                 final_action = overridden
                 print(f"environment.py: step(): StageManager.scripted_stage_movement override to {final_action}")
+
+        # SAFETY GUARD: Never pass a None action to the emulator. If the navigation
+        # logic (e.g., end-of-path in ConsolidatedNavigator) returns `None` we
+        # substitute the configured *noop* button so the game still advances one
+        # frame and downstream systems (StageManager, quest triggers, etc.) keep
+        # running.
+        if final_action is None:
+            final_action = getattr(self, 'noop_button_index', 4)
+            print(f"environment.py: step(): final_action was None – substituting noop action {final_action}")
+
         print(f"environment.py: step(): step number is: {self.step_count} ACTION {final_action} running on emulator")
         self.run_action_on_emulator(final_action)
         
@@ -1544,7 +1563,12 @@ class RedGymEnv(Env):
             return
         
         # Validate action is in valid range
-        if action < 0 or action >= len(VALID_ACTIONS) or VALID_ACTIONS[action] is None:
+        # Handle when actions are NoneType
+        try:
+            if action < 0 or action >= len(VALID_ACTIONS) or VALID_ACTIONS[action] is None:
+                print(f"ERROR: Invalid action {action} passed to run_action_on_emulator")
+                return
+        except Exception as e:
             print(f"ERROR: Invalid action {action} passed to run_action_on_emulator")
             return
         
@@ -4497,3 +4521,48 @@ class RedGymEnv(Env):
             "- 👾 : Sprite (NPC)",
         ])
         return "\n".join(md_lines)
+
+    def get_menu_state(self):
+        """Detect the currently active menu state.
+
+        Returns an Enum value from RedRamMenuValues / RedRamSubMenuValues
+        indicating which menu item is currently highlighted.  Falls back to
+        RedRamMenuValues.UNKNOWN_MENU if the cursor location is not mapped.
+        """
+        # Read the current text-menu cursor X,Y location from memory
+        cursor_x = self.read_m(TEXT_MENU_CURSOR_LOCATION[0])
+        cursor_y = self.read_m(TEXT_MENU_CURSOR_LOCATION[1])
+        cursor_key = (cursor_x, cursor_y)
+
+        # 1. Check main & battle menus first
+        if cursor_key in TEXT_MENU_CURSOR_LOCATIONS:
+            val = TEXT_MENU_CURSOR_LOCATIONS[cursor_key]
+            return val, val.name
+
+        # 2. Check PC Pokémon sub-menus
+        if cursor_key in PC_POKE_MENU_CURSOR_LOCATIONS:
+            val = PC_POKE_MENU_CURSOR_LOCATIONS[cursor_key]
+            return val, val.name
+
+        # 3. Check PC item sub-menus
+        if cursor_key in PC_ITEM_MENU_CURSOR_LOCATIONS:
+            val = PC_ITEM_MENU_CURSOR_LOCATIONS[cursor_key]
+            return val, val.name
+
+        # 4. If in battle, but cursor_key not mapped, return generic battle state
+        if self.read_m("wIsInBattle"):
+            # If we are in battle but cursor not mapped, provide UNKNOWN but mark battle
+            val = (
+                RedRamMenuValues.BATTLE_MENU_FIGHT
+                if cursor_key in BATTLE_MENU_STATES
+                else RedRamMenuValues.UNKNOWN_MENU
+            )
+            return val, val.name
+
+        # Default – unknown menu
+        val = RedRamMenuValues.UNKNOWN_MENU
+        return val, val.name
+    
+    def _is_pokecenter(self, map_id: int) -> bool:
+        return map_id in {41, 58, 64, 68, 81, 89, 133, 141, 154, 171, 147, 182}
+  

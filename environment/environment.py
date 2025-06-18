@@ -1196,11 +1196,57 @@ class RedGymEnv(Env):
         self._minimap_warp_obs = None
 
     
-    def update_map_history(self) -> None:        
-        if self.map_history[-1] != self.read_m("wCurMap"):
-            self.map_history.append(self.read_m("wCurMap"))
-            # Only log map history changes when an action is taken (during step execution)
-            action_taken = hasattr(self, 'step_count') and hasattr(self, '_last_map_history_logged_step') and getattr(self, 'step_count', 0) != getattr(self, '_last_map_history_logged_step', -1)
+    def update_map_history(self) -> None:
+        """Append the current map ID to ``self.map_history`` once the player has
+        fully finished a warp.
+
+        During the few frames while Pokémon Red is executing a warp the memory
+        values for ``wCurMap``, ``wXCoord`` and ``wYCoord`` briefly read as
+        Pallet Town (ID 0) with coordinates (0, 0).  These transient snapshots
+        should *not* be treated as real map transitions because they would
+        pollute the previous-map tracking used by the quest system (e.g. Quest 31
+        expecting 47 → 51).
+
+        Heuristic: if ``wCurMap`` is 0 **and** the local X/Y coordinates are both
+        zero, ignore this frame unless the player actually ends up in Pallet
+        Town (i.e. the last confirmed map was already 0).
+        """
+
+        cur_map = self.read_m("wCurMap")
+
+        # Filter out the bogus (0,0,0) frame that appears mid-warp
+        if cur_map == 0:
+            x, y, _ = self.get_game_coords()
+            if x == 0 and y == 0 and (self.map_history and self.map_history[-1] != 0):
+                # Debug trace for skipped phantom frame
+                print("environment.py: update_map_history(): Skipping transient Pallet-Town frame during warp")
+                return
+
+        # Permanently filter out *any* Pallet Town (ID 0) reads that occur
+        # after the game has moved away from Pallet Town for the very first
+        # time.  The initial starting map may legitimately be 0, but once the
+        # player transitions to a non-zero map we treat subsequent solitary 0
+        # reads as noise generated mid-warp.
+
+        if cur_map == 0 and self.map_history:
+            # If the last confirmed map *was not* Pallet Town, ignore this
+            # reading outright – regardless of the local X/Y values – because
+            # Pallet Town is geographically disconnected from the rest of the
+            # world and should never appear in the middle of a warp chain.
+            if self.map_history[-1] != 0:
+                # Verbose trace to aid debugging
+                print("environment.py: update_map_history(): Ignoring stray Pallet Town map-ID (0) – last map was", self.map_history[-1])
+                return
+
+        if not self.map_history or self.map_history[-1] != cur_map:
+            self.map_history.append(cur_map)
+
+            # Optional debug logging (throttled to one line per step)
+            action_taken = (
+                hasattr(self, 'step_count') and
+                hasattr(self, '_last_map_history_logged_step') and
+                getattr(self, 'step_count', 0) != getattr(self, '_last_map_history_logged_step', -1)
+            )
             if action_taken:
                 print(f"environment.py: update_map_history(): MAP_TRACKING: Updated map_history: {list(self.map_history)}")
                 self._last_map_history_logged_step = getattr(self, 'step_count', 0)
@@ -1322,9 +1368,18 @@ class RedGymEnv(Env):
                     final_action = converted_action
                     print(f"🎯 PATH_FOLLOW_ACTION converted to movement action {final_action}")
                 else:
-                    # raise Exception("🎯 environment.py: step(): PATH_FOLLOW_ACTION conversion failed, using fallback UP action")
-                    print(f"🎯 PATH_FOLLOW_ACTION conversion failed, using fallback B action")
-                    final_action = 5  # B action as fallback
+                    # If conversion fails we want to keep the player moving so they can
+                    # still interact with nearby warp tiles (e.g. doorways).  Falling
+                    # back to the B-button does **not** move the avatar and often
+                    # leaves the navigator stuck.  Instead we issue the navigator's
+                    # configured *noop* movement which defaults to the UP direction
+                    # and is a safe choice on most maps (it either bumps into a wall
+                    # or steps onto a door tile directly in front of the character).
+                    print(f"🎯 PATH_FOLLOW_ACTION conversion failed – using navigator noop movement instead of B-button")
+                    if hasattr(self, 'navigator') and self.navigator:
+                        final_action = self.navigator._get_noop_action()
+                    else:
+                        final_action = 3  # Fall back to UP if navigator unavailable
             else:
                 raise Exception("🎯 environment.py: step(): RAISE ERROR: NO CONSOLIDATED NAVIGATOR AVAILABLE - using fallback B action")
                 print(f"🎯 NO CONSOLIDATED NAVIGATOR AVAILABLE - using fallback B action")

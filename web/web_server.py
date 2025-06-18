@@ -313,15 +313,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             box-sizing: border-box;
         }
 
-        /* Ensure body doesn't create unnecessary scrollbars */
-        body {
+        html, body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: #0a0a0a;
             color: #ffffff;
-            overflow: hidden; /* Prevent body scroll when zoomed */
-            height: 100vh;
+            overflow: hidden; /* prevent window scrollbars entirely */
             margin: 0;
             font-size: 20px;
+            height: 100vh;
+            width: 100%;
         }
 
         .mono {
@@ -332,11 +332,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .stream-container {
             display: grid;
             grid-template-columns: minmax(400px, 1fr) 2fr minmax(400px, 1fr);
-            grid-template-rows: auto 1fr 180px;
-            height: 100vh; /* Change from min-height to height */
+            /* Row 2 must never push beyond viewport; minmax(0,1fr) lets it shrink */
+            grid-template-rows: auto minmax(0, 1fr) auto;
+            min-height: 100vh;
             background-color: #1a1a1a;
             gap: 1px;
-            overflow: hidden; /* Prevent container overflow */
+            overflow: hidden;
+            height: 100%;
         }
 
         /* Header */
@@ -393,6 +395,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow-y: auto;
             border-right: 1px solid #1a1a1a;
             min-width: 400px; /* Minimum width */
+            min-height: 0; /* permit grid row to shrink */
         }
 
         .actions-header {
@@ -501,6 +504,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             gap: 20px;
             overflow: hidden;
             height: 100%;
+            min-height: 0; /* allow shrink */
         }
 
         /* Game screen area */
@@ -606,6 +610,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: #1a1a1a;
             overflow: hidden;
             min-width: 400px;
+            min-height: 0; /* allow row to shrink instead of forcing page growth */
             max-height: 100%; /* Constrain height */
         }
         
@@ -828,15 +833,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         /* Grok Status Section */
         .grok-status-section {
-            flex: 1;
-            min-height: 0;
+            flex: 1 1 auto; /* allow flexbox to shrink if necessary */
+            min-height: 0; /* critical: permits shrinking inside sidebar */
             background: #111;
             border: 2px solid #333;
             border-radius: 8px;
             padding: 20px;
             display: flex;
             flex-direction: column;
-            overflow: hidden; /* Add this to contain children */
+            overflow: hidden; /* contain children without expanding */
         }
 
         #grokStatus {
@@ -858,6 +863,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow-wrap: break-word; /* Add this */
             min-height: 0; /* Add this */
             max-width: 100%; /* Add this */
+            max-height: 100%; /* prevent element from growing beyond container */
+            /* Hide default scrollbars; scrolling handled in JS for smooth effect */
+            scrollbar-width: none; /* Firefox */
+        }
+        
+        #grokThinking::-webkit-scrollbar,
+        #grokResponse::-webkit-scrollbar {
+            display: none; /* Chrome, Safari */
         }
         
         .grok-message {
@@ -885,9 +898,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         /* Team section styling */
         .team-display-area {
-            padding: 20px;
+            padding: 12px;
             background: #0a0a0a;
-            border-top: 1px solid #1a1a1a;
+            border-top: 10px solid #1a1a1a;
             overflow: hidden;
         }
 
@@ -902,15 +915,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .pokemon-card {
             background: #111;
             border: 1px solid #2a2a2a;
-            border-radius: 8px;
-            padding: 14px; /* Increased from 10px */
+            border-radius: 4px;
+            padding: 4px; /* Increased from 10px */
             transition: all 0.2s ease;
             cursor: pointer;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: space-between;
-            min-height: 550px; /* Increased from 200px */
+            min-height: 220px; /* Much smaller card */
+            height: 100%;
         }
 
         .pokemon-card:hover {
@@ -934,8 +948,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .pokemon-sprite {
             width: 100%;
             height: 100%;
-            max-width: 440px; /* Increased from 64px */
-            max-height: 440px;
+            max-width: 96px; /* Increased from 64px */
+            max-height: 96px;
             image-rendering: pixelated;
             filter: brightness(1.1) contrast(1.1);
             object-fit: contain;
@@ -1137,13 +1151,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             grid-column: 1 / -1;
             background: #0a0a0a;
             border-top: 1px solid #1a1a1a;
-            padding: 32px 40px; /* Doubled from 16px 30px */
+            padding: 22px; /* distance from left edge of window */
             display: flex;
             justify-content: space-between;
             align-items: center;
             grid-row: 3;
             flex-wrap: wrap;
-            min-height: 180px; /* Ensure minimum height */
+            height: 100%;
         }
 
         .bottom-stats {
@@ -1302,6 +1316,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 14px; /* Doubled from 0.7rem */
             color: #9ca3af;
         }
+
+        /* Compact team area */
+        .team-display-area {
+            max-height: none;
+            overflow: visible;
+        }
+        .pokemon-card {
+            min-height: 280px; /* Much smaller card */
+        }
+        .pokemon-sprite {
+            max-width: 128px;
+            max-height: 128px;
+        }
     </style>
     <script>
         const CONFIG = {{ CONFIG | tojson }};
@@ -1387,7 +1414,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                      style="position: absolute; inset: 0; pointer-events: none;"></div>
             </div>
             <section class="team-display-area" style="grid-column: 1 / span 2; grid-row: 2;">
-                <h2 class="section-title" style="text-align: center; margin-bottom: 20px;">Active Team</h2>
+                <h2 class="section-title" style="text-align: center; margin-bottom: 10px;">Active Team</h2>
                 <div class="team-grid" id="pokemon-team">
                     <div class="pokemon-card empty-slot">—</div>
                     <div class="pokemon-card empty-slot">—</div>
@@ -1659,7 +1686,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Load player sprite frames
         async function loadPlayerSprites() {
-            const spriteData = { 'Down': 0, 'Up': 3, 'Left': 6, 'Right': 8 };
+            // Use standing-facing frames so the sprite appears centred and
+            // static when the player is not moving.  See ui/render_to_global
+            // for the authoritative frame indices.
+            const spriteData = { 'Down': 1, 'Up': 4, 'Left': 6, 'Right': 8 };
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = 16;
             tempCanvas.height = 16;
@@ -1777,6 +1807,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const spriteEl = document.getElementById('playerSprite');
             spriteEl.style.left = `${centerX - TILE_SIZE/2}px`;
             spriteEl.style.top  = `${centerY - TILE_SIZE/2}px`;
+            spriteEl.style.transform = 'translate(-50%, -50%)';
             const frameUrl = gameState.spriteFrameUrls[facing] || gameState.spriteFrameUrls['Down'];
             if (frameUrl) {
                 spriteEl.style.width = `${TILE_SIZE}px`;
@@ -1784,6 +1815,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 spriteEl.style.backgroundImage = `url(${frameUrl})`;
                 spriteEl.style.backgroundSize = 'contain';
                 spriteEl.style.backgroundRepeat = 'no-repeat';
+                spriteEl.style.backgroundPosition = 'center';
             }
         }
 
@@ -1817,8 +1849,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             const centerX = W/2, centerY = H/2;
             const spriteEl = document.getElementById('playerSprite');
-            spriteEl.style.left = `${centerX - TILE_SIZE/2}px`;
-            spriteEl.style.top  = `${centerY - TILE_SIZE/2}px`;
+            spriteEl.style.left = `${centerX}px`;
+            spriteEl.style.top  = `${centerY}px`;
+            spriteEl.style.transform = 'translate(-50%, -50%)';
             const frameUrl = gameState.spriteFrameUrls[facing] || gameState.spriteFrameUrls['Down'];
             if (frameUrl) {
                 spriteEl.style.width = `${TILE_SIZE}px`;
@@ -1826,6 +1859,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 spriteEl.style.backgroundImage = `url(${frameUrl})`;
                 spriteEl.style.backgroundSize = 'contain';
                 spriteEl.style.backgroundRepeat = 'no-repeat';
+                spriteEl.style.backgroundPosition = 'center';
             }
             // Update map position display when using global coordinates
             const mapPosEl = document.getElementById('mapPosition');
@@ -1924,11 +1958,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 thinkingEl.textContent = (match ? match[1].trim() : thinking);
                 thinkingEl.style.display = 'block';
                 waitingEl.style.display = 'none';
+                startAutoScroll(thinkingEl);
             } else thinkingEl.style.display = 'none';
             if (response) {
                 responseEl.textContent = response;
                 responseEl.style.display = 'block';
                 waitingEl.style.display = 'none';
+                startAutoScroll(responseEl);
             } else responseEl.style.display = 'none';
             if (!thinking && !response) waitingEl.style.display = 'block';
         }
@@ -1957,20 +1993,43 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return map[speciesName.toLowerCase()] || ['normal'];
         }
 
+        // Pokemon species name mapping for PokeAPI compatibility
+        function getPokemonAPIName(speciesName) {
+            if (!speciesName) return '';
+            // Normalize: lower-case, convert underscores to spaces, collapse whitespace
+            const norm = speciesName.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+            const apiNameMap = {
+                'nidoran♂': 'nidoran-m',
+                'nidoran♂': 'nidoran-m', // alt encoding safety
+                'nidoran♀': 'nidoran-f',
+                'nidoran m': 'nidoran-m',
+                'nidoran f': 'nidoran-f',
+                'nidoran_m': 'nidoran-m',
+                'nidoran_f': 'nidoran-f',
+                'mr. mime': 'mr-mime',
+                'mr mime': 'mr-mime',
+                "farfetch'd": 'farfetchd',
+                'farfetchd': 'farfetchd'
+            };
+            if (apiNameMap[norm]) return apiNameMap[norm];
+            // Replace spaces with dashes for generic fallback (e.g., 'ho oh' -> 'ho-oh')
+            return norm.replace(/\s+/g, '-');
+        }
+
         // Update Pokemon team
         async function updatePokemonTeam(partyData) {
             const teamContainer = document.getElementById('pokemon-team');
             teamContainer.innerHTML = '';
             for (const p of partyData) {
                 try {
-                    const key = p.speciesName.toLowerCase();
-                    let spriteUrl = localStorage.getItem(`pokemon_sprite_${key}`);
+                    const apiName = getPokemonAPIName(p.speciesName);
+                    let spriteUrl = localStorage.getItem(`pokemon_sprite_${apiName}`);
                     if (!spriteUrl) {
-                        const resp = await fetch(`https://pokeapi.co/api/v2/pokemon/${key}`);
+                        const resp = await fetch(`https://pokeapi.co/api/v2/pokemon/${apiName}`);
                         if (resp.ok) {
                             const d = await resp.json();
                             spriteUrl = d.sprites.front_default;
-                            localStorage.setItem(`pokemon_sprite_${key}`, spriteUrl);
+                            localStorage.setItem(`pokemon_sprite_${apiName}`, spriteUrl);
                         }
                     }
                     teamContainer.appendChild(createPokemonCardFromGameData(p, spriteUrl));
@@ -2235,6 +2294,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             lastSseTime = Date.now();
         };
+
+        // ------------------------------------------------------------------
+        // Smooth auto-scroll helper – scrolls element downward 1 px every 30 ms
+        // until bottom is reached, then stops (avoids distracting bounce).
+        // ------------------------------------------------------------------
+        function startAutoScroll(el) {
+            if (!el) return;
+            // Reset any previous run
+            if (el._scrollTimer) clearInterval(el._scrollTimer);
+            el.scrollTop = 0;
+            if (el.scrollHeight <= el.clientHeight + 4) return; // nothing to scroll
+
+            el._scrollTimer = setInterval(() => {
+                el.scrollTop += 1; // 1 px per tick ≈ 33 px/s (at 30 ms)
+                if (el.scrollTop + el.clientHeight >= el.scrollHeight) {
+                    clearInterval(el._scrollTimer);
+                    el._scrollTimer = null;
+                }
+            }, 30);
+        }
     </script>
 
 </body>

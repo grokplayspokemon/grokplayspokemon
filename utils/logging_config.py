@@ -278,11 +278,24 @@ class PokemonLogger:
         global _current_map_id, _previous_map_ids
         
         if _current_map_id is not None and _current_map_id != current_map_id:
-            # Add previous map to history
-            _previous_map_ids.append(_current_map_id)
-            # Keep only last 2 previous maps
-            if len(_previous_map_ids) > 2:
-                _previous_map_ids = _previous_map_ids[-2:]
+            # Filter out stray Pallet-Town (ID 0) frames that can appear mid-warp.
+            # Only add Pallet Town once at the very beginning; ignore any solitary
+            # 0 inserts that come after the game has already moved to a non-zero
+            # map because these transient reads pollute quest "previous map"
+            # logic and confuse log inspection.
+
+            is_stray_pallet = (
+                _current_map_id == 0 and  # Pallet Town
+                current_map_id != 0 and    # We transitioned away from 0
+                _previous_map_ids and      # We already have map history
+                _previous_map_ids[-1] != 0 # Last confirmed map was not 0
+            )
+
+            if not is_stray_pallet:
+                _previous_map_ids.append(_current_map_id)
+                # Keep only last 2 previous maps
+                if len(_previous_map_ids) > 2:
+                    _previous_map_ids = _previous_map_ids[-2:]
         
         _current_map_id = current_map_id
         

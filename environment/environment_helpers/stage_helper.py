@@ -380,9 +380,43 @@ STAGE_DICT = {
         'events': [],
         'blockings': [],
         'scripted_movements': [
-            {'condition': {'global_coords': (270, 89),
-                          'item_check': {'item': 'POTION', 'has': False}},
+            {'condition': {'global_coords': (270, 89)},
              'action': 'a'},
+            {'condition': {
+                'global_coords': (297, 118),
+                'dialog_present': False,
+                'health_fraction': 1,                
+                },
+            'action': 'down'
+            },
+            
+        ]
+    },
+    33: {
+        'events': [],
+        'blockings': [],
+        'scripted_movements': [
+            {'condition': {
+                'global_coords': (183, 87),
+                'pending_a_presses': '>0',               # Set number of pending A presses
+                'decrement_pending_a_presses': True         # Decrement pending A counter
+                },
+             'action': 'a'},
+            {'condition': {
+                'global_coords': (183, 87),
+                'dialog_present': False,
+                'health_fraction': 1,                
+                },
+            'action': 'down'
+            },
+            
+        ]
+    },
+    37: {
+        'events': [],
+        'blockings': [],
+        'scripted_movements': [
+            {'condition': {'global_coords': (167, 67)}, 'action': 'a'}
         ]
     },
     # Add more stages as needed
@@ -439,6 +473,11 @@ class StageManager:
         
         # Stage 4 helper flag – ensures RIGHT is queued only once at Oak greeting tile
         self._oak_greet_right_sent: bool = False
+        
+        # ------------------------------------------------------------------
+        # Track previous quantities of items in the bag
+        # ------------------------------------------------------------------
+        self._previous_quantities: Dict[int, int] = {}
         
         # Action mapping for scripted movements
         self.action_mapping = {
@@ -621,21 +660,19 @@ class StageManager:
             return auto_act
             
         # ------------------------------------------------------------------
-        # Handle PATH_FOLLOW_ACTION first, regardless of scripted movements
-        # (preserves original navigation delegation logic).
+        # IMPORTANT CHANGE: We *defer* PATH_FOLLOW_ACTION conversion until
+        # *after* evaluating scripted-movement rules.  This lets stage-
+        # specific overrides (e.g. pressing "A" at the Route-2 potion tree)
+        # take precedence when the user is holding key "5".  If none of the
+        # scripted rules fire we fall back to normal path-following at the
+        # bottom of the method.
         # ------------------------------------------------------------------
         from environment.environment import PATH_FOLLOW_ACTION
         if action == PATH_FOLLOW_ACTION:
-            print(f"StageManager: Converting PATH_FOLLOW_ACTION to quest-appropriate movement")
-
-            # Debug: Check if quest manager is available
+            print(f"StageManager: Converting deferred PATH_FOLLOW_ACTION to quest movement")
             if hasattr(self.env, 'quest_manager') and self.env.quest_manager:
                 current_quest = getattr(self.env.quest_manager, 'current_quest_id', None)
                 print(f"StageManager: Current quest ID from quest manager: {current_quest}")
-            else:
-                print("StageManager: No quest manager available on environment – passing through original action")
-                return action
-
             return self._convert_path_follow_to_movement(action)
             
         if not self.scripted_movements:
@@ -1018,6 +1055,26 @@ class StageManager:
                         print(f"StageManager DEBUG: Unknown species '{species_name}' in pokemon_caught condition")
                         return False
 
+            # ----------------------------------------------------------
+            # PARTY HP FRACTION CHECK (health_fraction)
+            # ----------------------------------------------------------
+            # Accepts a float (0.0–1.0) or int 0/1.  Useful to verify the
+            # whole party is fully healed before leaving a Poké Center or
+            # ensure healing is needed before triggering the nurse dialog.
+            # ----------------------------------------------------------
+            if 'health_fraction' in condition:
+                try:
+                    desired_frac = float(condition['health_fraction'])
+                    current_frac = float(getattr(self.env, 'read_hp_fraction', lambda: 1)())
+                    if abs(current_frac - desired_frac) > 1e-3:  # allow tiny numeric error
+                        print(
+                            f"StageManager DEBUG: health_fraction check failed – current {current_frac:.2f} != {desired_frac:.2f}"
+                        )
+                        return False
+                except Exception as _e:
+                    print('StageManager DEBUG: health_fraction check error –', _e)
+                    return False
+
             return True
             
         except Exception as e:
@@ -1294,6 +1351,31 @@ class StageManager:
                 self.scripted_movements.clear()
         except Exception as e:
             print('StageManager: Error while evaluating Poké Ball quantity:', e)
+        
+        # --------------------------------------------------------------
+        # QUEST 026 ▸ Potion pickup monitoring
+        # --------------------------------------------------------------
+        # While Stage 26 is active, the scripted movement rule forces
+        # "A" presses at global coordinates (270,89) until the hidden
+        # Potion is collected. Once _compare_items_quantity('POTION')
+        # returns True (indicating the item quantity changed), we clear
+        # all Stage-26 automation and advance to a neutral stage.
+        # --------------------------------------------------------------
+        try:
+            if self.stage == 26 and self._compare_items_quantity('POTION'):
+                print("StageManager: Potion acquired – Stage 26 completed. Restoring normal behaviour.")
+
+                # Clear any queued auto-actions to prevent stray inputs
+                self._auto_action_queue.clear()
+
+                # Remove Stage-26 scripted movements and blockings
+                self.clear_scripted_movements()
+                self.blockings.clear()
+
+                # Advance to undefined stage (no STAGE_DICT entry = no automation)
+                self.stage = 27
+        except Exception as e:
+            print('StageManager: Error in Stage-26 Potion monitoring:', e)
 
     # ------------------------------------------------------------------
     # Quest/condition helpers
@@ -1563,39 +1645,94 @@ class StageManager:
         gy, gx = local_to_global(x, y, map_id)
         print(f'StageManager: _heal_at_poke_center gy={gy} gx={gx}')
         dlg = self.env.get_active_dialog() or ''
+        
         if x == 3 and self.env._is_pokecenter(map_id) and (y == 3 or y == 4 or y == 5 or y == 6 or y == 7 or y == 8):
             # compute distance from door
             door_y = 7
             counter_y = 2
             dist_from_door = abs(y - door_y)
             dist_from_counter = abs(counter_y - y)
-            if 'Thank you!' in dlg or 'We hope to see' in dlg or 'your' in dlg:
+            
+            # Reset flag when auto action queue is empty to allow new sequences
+            if getattr(self, '_heal_at_poke_center_seq_enqueued', False) and len(self._auto_action_queue) == 0:
+                self._heal_at_poke_center_seq_enqueued = False
+            
+            # Handle specific exit dialogs that need 'b' presses
+            if ('Thank you!' in dlg or 'We hope to see' in dlg) and not 'fighting fit' in dlg:
                 if not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
-                    actions_seq = ['b'] * 8 # arbitrary number to clear dialogs
-                    print(f'StageManager: _heal_at_poke_center actions_seq={actions_seq}')
+                    actions_seq = ['b'] * 2  # Reduced to 2 as requested
+                    print(f'StageManager: _heal_at_poke_center exit dialog actions_seq={actions_seq}')
                     for btn in actions_seq:
                         if len(self._auto_action_queue) < self._auto_action_queue.maxlen: 
                             self._queue_auto_action(btn)
+                    self._heal_at_poke_center_seq_enqueued = True
+                return
+            
             print(f'StageManager: _heal_at_poke_center party_hp_fraction={self.env.read_hp_fraction()}')
+            
+            # Need healing
             if self.env.read_hp_fraction() != 1:
                 if not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
                     print(f'StageManager: _heal_at_poke_center party_hp_fraction={self.env.read_hp_fraction()}')
-                    actions_seq = ['up'] * dist_from_counter + ['a'] * 10
+                    actions_seq = ['up'] * dist_from_counter + ['a'] * 2  # Changed from 10 to 2
                     print(f'StageManager: _heal_at_poke_center actions_seq={actions_seq}')
                     for btn in actions_seq:
                         if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
                             self._queue_auto_action(btn)
+                    self._heal_at_poke_center_seq_enqueued = True
+            
+            # Full health - move away from counter (1 step toward door)
             elif self.env.read_hp_fraction() == 1:
-                return
-                if not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
+                # Only move if we're at the exact counter interaction position (y == 2)
+                if y == 2 and not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
                     print(f'StageManager: _heal_at_poke_center party_hp_fraction={self.env.read_hp_fraction()}')
-                    actions_seq = ['down'] * dist_from_door
+                    # Move 1 step toward door (down)
+                    actions_seq = ['down'] * 1
                     print(f'StageManager: _heal_at_poke_center actions_seq={actions_seq}')
                     for btn in actions_seq:
                         if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
                             self._queue_auto_action(btn)
+                    self._heal_at_poke_center_seq_enqueued = True
+    
+        # ------------------------------------------------------------------
+        # Early-Warp Assistance – if we're outside Pewter Poké Center (map_id 2
+        # standing on the tile south of the entrance at local (x=16, y=18))
+        # and Pokémon aren't fully healed, queue an UP press so we step onto
+        # the warp and enter the Center before running the normal heal logic.
+        # ------------------------------------------------------------------
+        if map_id == 2 and self.env.read_hp_fraction() != 1 and not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
+            # Accept either of the two tiles directly south of the entrance
+            if x == 16 and y in (17, 18) and len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                self._queue_auto_action('up')
                 self._heal_at_poke_center_seq_enqueued = True
-            else:
-                self._heal_at_poke_center_seq_enqueued = False
-                print(f'StageManager: _heal_at_poke_center _heal_at_poke_center_seq_enqueued={self._heal_at_poke_center_seq_enqueued}')
-            return
+                return
+    
+    def _compare_items_quantity(self, item_name: str) -> bool:
+        """Detect a change in the quantity of an item in the bag over multiple steps."""
+        if not (hasattr(self.env, 'item_handler') and self.env.item_handler):
+            return False
+        
+        item_id = ITEM_NAME_TO_ID_DICT.get(item_name)
+        if item_id is None:
+            return False
+        
+        # Initialize or update the previous quantities dictionary
+        if not hasattr(self, '_previous_quantities'):
+            self._previous_quantities = {}
+        
+        bag_items = self.env.item_handler.get_items_in_bag()
+        quantities = self.env.item_handler.get_items_quantity_in_bag()
+        
+        for idx, iid in enumerate(bag_items):
+            if iid == item_id:
+                current_quantity = quantities[idx]
+                previous_quantity = self._previous_quantities.get(item_id, current_quantity)
+                
+                # Update the stored quantity for the next comparison
+                self._previous_quantities[item_id] = current_quantity
+                
+                # Return True if there is a change in quantity
+                return current_quantity != previous_quantity
+        
+        # If the item is not found, assume no change
+        return False

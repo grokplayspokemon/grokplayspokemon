@@ -9,7 +9,7 @@ import logging
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import asdict
 import time
-from agent.grok_tool_implementations import AVAILABLE_TOOLS_LIST, press_buttons, follow_nav_path, exit_menu, ask_friend, handle_battle, enter_name
+from agent.grok_tool_implementations import AVAILABLE_TOOLS_LIST, press_buttons, follow_nav_path, exit_dialog, ask_friend, handle_battle, enter_name
 from openai import OpenAI
 from utils.logging_config import get_pokemon_logger, setup_logging, LineCountRotatingFileHandler
 from pathlib import Path
@@ -112,7 +112,7 @@ class SimpleAgent:
         self.tool_implementations = {
             "press_buttons": press_buttons,
             "follow_nav_path": follow_nav_path,
-            "exit_menu": exit_menu,
+            "exit_dialog": exit_dialog,
             "ask_friend": ask_friend,
             "handle_battle": handle_battle,
             "enter_name": enter_name
@@ -403,7 +403,7 @@ class SimpleAgent:
             prompt_start = ""
 
         # Ensure tool availability note (helps Grok discover ask_friend)
-        context_parts.append("Available helper tools: ask_friend, enter_name, press_buttons, follow_nav_path, exit_menu, handle_battle.")
+        context_parts.append("Available helper tools: ask_friend, enter_name, press_buttons, follow_nav_path, exit_dialog, handle_battle.")
 
         # If we already have a suggested name pending, remind Grok
         if self._pending_name:

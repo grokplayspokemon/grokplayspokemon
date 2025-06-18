@@ -545,6 +545,19 @@ class ConsolidatedNavigator:
                         qm = getattr(self.env, 'quest_manager', None)
                         if qm and hasattr(qm, 'quest_completed_status'):
                             qm.quest_completed_status[str(current_quest).zfill(3)] = True
+                            # Also update the cached quest status and force the next
+                            # lookup to refresh so get_current_quest() advances to
+                            # the subsequent quest without waiting for the 100 ms
+                            # cache-expiry window.  These attributes are created on
+                            # demand inside QuestManager so guard them defensively.
+                            if hasattr(qm, '_cached_quest_status'):
+                                qm._cached_quest_status[str(current_quest).zfill(3)] = True
+                            # Reset the last-check timestamp to force a refresh on
+                            # the very next call (the one we make immediately
+                            # below).  This avoids the one-frame stall that was
+                            # preventing the quest from advancing.
+                            if hasattr(qm, '_last_status_check'):
+                                qm._last_status_check = 0
                     except Exception as e:
                         print(f"ConsolidatedNavigator: Could not mark quest {current_quest} complete: {e}")
 
@@ -639,22 +652,36 @@ class ConsolidatedNavigator:
                             best_dist, best = d, (wx, wy)
 
                     if best is not None:
-                        # If we're already standing on the warp tile then pressing DOWN
-                        # (action 0) will activate the warp; otherwise walk towards the tile.
-                        if local_pos == best:
-                            return 0  # DOWN to trigger warp
+                        # Compute delta to warp tile
+                        wx, wy = best
+                        dx_warp = wx - local_pos[0]
+                        dy_warp = wy - local_pos[1]
 
-                        dx, dy = best[0] - x, best[1] - y
-                        # Prefer vertical motion first when approaching a warp tile.  For
-                        # indoor exits the critical step is usually to **step down onto**
-                        # the bottom-row door tile; choosing horizontal first can nudge the
-                        # avatar in front of an NPC and block the warp indefinitely.
-                        if dy != 0:
-                            return 0 if dy > 0 else 3  # DOWN / UP
-                        elif dx != 0:
-                            return 2 if dx > 0 else 1  # RIGHT / LEFT
-                        else:
-                            return 0  # default DOWN (shouldn't occur)
+                        # If we are not yet on the warp tile, step toward it
+                        if dx_warp != 0 or dy_warp != 0:
+                            if abs(dy_warp) > abs(dx_warp):
+                                return 0 if dy_warp > 0 else 3  # DOWN / UP
+                            else:
+                                return 2 if dx_warp > 0 else 1   # RIGHT / LEFT
+
+                        # We are standing on the warp tile – choose the press
+                        # direction based on which map edge the tile touches.
+                        #   • y == 0   → UP   (north edge)
+                        #   • y >= 6   → DOWN (south edge)
+                        #   • x == 0   → LEFT (west edge)
+                        #   • x >= 8   → RIGHT (east edge)
+                        # Fallbacks default to UP which is safe for most gates.
+                        if wy == 0:
+                            return 3  # UP
+                        if wy >= 6:
+                            return 0  # DOWN
+                        if wx == 0:
+                            return 1  # LEFT
+                        if wx >= 8:
+                            return 2  # RIGHT
+
+                        # Default: press UP
+                        return 3
 
             # Evaluate both axes, prioritising the one with greater distance but
             # *only if* that direction is considered walkable; otherwise swap.
@@ -947,13 +974,65 @@ class ConsolidatedNavigator:
             if not cur_pos:
                 return False
 
-            # Find nearest coordinate
-            distances = [self._manhattan(cur_pos, coord) for coord in self.sequential_coordinates]
-            nearest_i = distances.index(min(distances))
-            dist = distances[nearest_i]
-            
+            # Prefer snapping to coordinates on the **current map** to avoid the
+            # situation where we warp into a building and then immediately
+            # snap to a (slightly) closer coordinate that belongs to the *old*
+            # map outside – this caused an infinite in-out loop for Pewter Gym
+            # (Quest 039).  We therefore:
+            #   1. Build two distance lists – one filtered to the current map
+            #      and the other across *all* coordinates.
+            #   2. If we have at least one coordinate on the current map we
+            #      choose the nearest among *those*; otherwise we fall back to
+            #      the global nearest (across maps) to preserve previous
+            #      behaviour for single-map quests.
+
+            cur_map_id = self.env.get_game_coords()[2]
+
+            distances_all = [self._manhattan(cur_pos, coord) for coord in self.sequential_coordinates]
+
+            # Filter indices that are on the same map as the player
+            same_map_indices = [i for i, m_id in enumerate(self.coord_map_ids) if m_id == cur_map_id]
+
+            if same_map_indices:
+                distances_same_map = [distances_all[i] for i in same_map_indices]
+                nearest_same_map_i = same_map_indices[distances_same_map.index(min(distances_same_map))]
+                nearest_i = nearest_same_map_i
+                dist = distances_all[nearest_i]
+            else:
+                # Fallback to global nearest
+                nearest_i = distances_all.index(min(distances_all))
+                dist = distances_all[nearest_i]
+
             # Only snap if distance is reasonable
             if dist <= 13:
+                # If the nearest coordinate is the *final* node we need to decide whether this is the
+                # *initial* path alignment (player starts outside the destination) **or** we have *just
+                # finished* walking the path.  Resetting back to the beginning in the latter case causes
+                # an infinite in-out loop (observed for Quest 039 Pewter Gym).
+
+                if nearest_i >= len(self.sequential_coordinates) - 1:
+                    # CASE 1 – Initial alignment: navigator has not advanced along the path yet
+                    # (index still at 0).  We *do* want to rewind so that the agent walks the
+                    # pre-recorded path from the start and enters the building.
+                    if self.current_coordinate_index == 0:
+                        print(
+                            "ConsolidatedNavigator: Nearest coordinate is the final node on initial alignment – "
+                            "resetting index to 0 to follow the full path forward."
+                        )
+                        self.current_coordinate_index = 0
+                        self.movement_failure_count = 0
+                        return True
+
+                    # CASE 2 – Path already executed and we have legitimately reached the last node.
+                    # Keep the index at the final coordinate so the navigator recognises completion and
+                    # does *not* restart the path.
+                    print(
+                        "ConsolidatedNavigator: Reached final coordinate – maintaining index at end of path."
+                    )
+                    self.current_coordinate_index = nearest_i
+                    self.movement_failure_count = 0
+                    return True
+
                 old_index = self.current_coordinate_index
                 # Only snap forward, avoid rewinding index on path with repeating coords
                 if nearest_i > old_index:
@@ -966,6 +1045,13 @@ class ConsolidatedNavigator:
                 self.movement_failure_count = 0
                 if self.current_coordinate_index >= len(self.sequential_coordinates):
                     self.current_coordinate_index = max(0, len(self.sequential_coordinates) - 1)
+
+                # Additional safeguard: after the initial reset we may be called again *before* any movement
+                # occurs.  In that situation we are still standing outside (nearest == final) **but** the
+                # index is already 0.  Advancing to `nearest_i` would immediately skip the whole path.  If
+                # we detect this exact scenario, simply keep the index at 0 and return.
+                if self.current_coordinate_index == 0 and nearest_i >= len(self.sequential_coordinates) - 1:
+                    return True
 
                 return True
             else:

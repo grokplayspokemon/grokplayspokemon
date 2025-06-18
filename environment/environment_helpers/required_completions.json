@@ -737,39 +737,15 @@
         "location_name": "Viridian City",
         "subquest_list": [
             "Complete quest 025.",
-            "Walk back to the middle of Viridian City.",
-            "Heal at the Pokecenter as usual.",
-            "Travel north from the center of Viridian City onto Route 2.",
-            "As you travel north, approach the cuttable tree to your left.",
-            "Press A at the tree to receive a free Potion.",
-            "Return to the main path and continue north until you reach the guardhouse.",
-            "Enter the guardhouse."
+            "Travel north from the center of Viridian City onto Route 2."
         ],
         "end_quest_text": "Nature hike complete. One free Potion richer.",
         "associated_coordinates_file": "026_coords.json",
         "event_triggers": [
             {
-                "type": "coordinates_are",
-                "x_min": 90,
-                "completed": false
-            },
-            {
-                "type": "party_hp_is_full",
-                "completed": false
-            },
-            {
-                "type": "item_received_dialog",
-                "text": "found POTION!",
-                "completed": false
-            },
-            {
-                "type": "current_map_id",
-                "current_map_id": 13,
-                "completed": false
-            },
-            {
-                "type": "current_map_id",
+                "type": "current_map_is_previous_map_was",
                 "current_map_id": 50,
+                "previous_map_id": 13,
                 "completed": false
             }
         ],
@@ -906,19 +882,15 @@
         "associated_coordinates_file": "031_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id",
-                "current_map_id": 47,
-                "completed": false
-            },
-            {
                 "type": "event_completed",
                 "opponent_identifier": "BUG_CATCHER_VF3",
                 "event_name": "EVENT_BEAT_VIRIDIAN_FOREST_TRAINER_2",
                 "completed": false
             },
             {
-                "type": "previous_map_id_was",
-                "current_map_id": 51,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 47,
+                "previous_map_id": 51,
                 "completed": false
             }
         ],
@@ -933,7 +905,6 @@
         "location_id": 13,
         "location_name": "Route 2",
         "subquest_list": [
-            "Complete quest 031.",
             "Proceed north through Route 2 after exiting Viridian Forest.",
             "Continue north and a little east to reach Pewter City.",
             "Find the Poke Center and enter it."
@@ -960,7 +931,6 @@
         "location_id": 58,
         "location_name": "Pewter City Pok\u00e9mon Center",
         "subquest_list": [
-            "Complete quest 032.",
             "Once in Pewter City, enter the Pok\u00e9mon Center (left side of the city).",
             "Walk straight up to Nurse Joy.",
             "Press A to interact and heal your Pok\u00e9mon.",
@@ -971,13 +941,9 @@
         "associated_coordinates_file": "033_coords.json",
         "event_triggers": [
             {
-                "type": "dialog_contains_text",
-                "text": "Your POK\u00e9MON are fighting fit!",
-                "completed": false
-            },
-            {
-                "type": "current_map_id",
-                "current_map_id": 58,
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 2,
+                "previous_map_id": 58,
                 "completed": false
             }
         ],
@@ -1001,8 +967,10 @@
         "associated_coordinates_file": "034_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id",
+                "type": "current_map_is_previous_map_was",
                 "current_map_id": 56,
+                "previous_map_id": 2,
+                "comment": "2 -> 56",
                 "completed": false
             }
         ],
@@ -1025,12 +993,6 @@
         "associated_coordinates_file": "035_coords.json",
         "event_triggers": [
             {
-                "type": "item_is_in_inventory",
-                "item_name": "POTION",
-                "quantity_min": 5,
-                "completed": false
-            },
-            {
                 "type": "current_map_is_previous_map_was",
                 "current_map_id": 2,
                 "previous_map_id": 56,
@@ -1049,7 +1011,6 @@
         "location_id": 2,
         "location_name": "Pewter City",
         "subquest_list": [
-            "Complete quest 035.",
             "Proceed left to clear the Pok\u00e9mart.",
             "Proceed north to clear the Gym.",
             "Proceed left to walk behind the Gym.",

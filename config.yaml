@@ -35,8 +35,8 @@ env:
   infinite_health: false
   infinite_pp_and_move_hack: false
   animate_scripts: true
-  disable_recordings: true
-  record_replays: false
+  disable_recordings: false
+  record_replays: true
 agent:
   llm_provider: grok
   model_name: grok-3-mini

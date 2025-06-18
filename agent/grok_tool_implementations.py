@@ -77,9 +77,6 @@ class NavigateToRequest(BaseModel):
 class EmptyRequest(BaseModel):
     """No input required for this tool."""
     pass
-empty_schema = EmptyRequest.model_json_schema()
-press_buttons_schema = PressButtonsRequest.model_json_schema()
-navigate_to_schema = NavigateToRequest.model_json_schema()
 
 # Add AskFriendRequest model and schema
 class AskFriendRequest(BaseModel):
@@ -92,8 +89,23 @@ class EnterNameRequest(BaseModel):
     name: str = Field(description="Exact name to enter (max 10 characters, letters/numbers only)")
     target: Optional[str] = Field(default="player", description="Either 'player' or 'rival'")
 
-# Generate JSON schema for EnterNameRequest
+class ExitDialogRequest(BaseModel):
+    button: str = Field(default="B", description="Button to press ('A' or 'B') to exit dialog/menu")
+
+# Generate schemas from the Pydantic models
+logger = logging.getLogger(__name__)
+
+# Generate all schemas
+ask_friend_schema = AskFriendRequest.model_json_schema()
+
 enter_name_schema = EnterNameRequest.model_json_schema()
+
+exit_dialog_schema = ExitDialogRequest.model_json_schema()
+
+# Common empty schema for tools with no parameters
+empty_schema = EmptyRequest.model_json_schema()
+press_buttons_schema = PressButtonsRequest.model_json_schema()
+navigate_to_schema = NavigateToRequest.model_json_schema()
 
 def _move_cursor(env: RedGymEnv, from_pos: Tuple[int,int], to_pos: Tuple[int,int]):
     """Helper: move naming-screen cursor using D-Pad presses."""
@@ -284,14 +296,27 @@ def navigate_to(
         error_msg = f"Exception during navigate_to: {str(e)}"
         return error_msg, {"status": "error", "message": error_msg}
 
-def exit_menu(
+# -----------------------------------------------------------------------------
+# exit_dialog TOOL IMPLEMENTATION (replaces exit_menu)
+# -----------------------------------------------------------------------------
+
+def exit_dialog(
     env: RedGymEnv,
     quest_manager: QuestManager,
     navigator: InteractiveNavigator,
-    env_wrapper: EnvWrapper
+    env_wrapper: EnvWrapper,
+    button: str = "B",
 ) -> Tuple[str, Dict[str, Any]]:
-    assert env is not None, "RedGymEnv (env) not provided to exit_menu"
-    logger.info("Executing exit_menu")
+    """Press the A button 1 time (BEING VERY CAREFUL NOT TO RE-TRIGGER THE DIALOG!!) or B button 8 times to close the current dialog.
+
+    When `button` == 'A' the function presses A one time, which accepts or advances the dialog by the smallest possible amount.
+    When 'button' == 'B', B will be pressed 8 times to cancel/back out of menus.
+    """
+
+    assert env is not None, "RedGymEnv (env) not provided to exit_dialog"
+    button = (button or "B").upper()
+    logger.info(f"Executing exit_dialog with button={button}")
+
     try:
         # Using the press_buttons tool for consistency might be too much overhead here.
         # Direct pyboy interaction for a fixed sequence is fine.
@@ -300,29 +325,44 @@ def exit_menu(
             pyboy_instance = env_wrapper.pyboy
         
         if not pyboy_instance:
-            error_msg = "PyBoy instance not available via env or env_wrapper for exit_menu."
+            error_msg = "PyBoy instance not available via env or env_wrapper for exit_dialog."
             logger.error(error_msg)
             return error_msg, {"status": "error", "message": error_msg}
 
-        b_button = WindowEvent.PRESS_BUTTON_B
-        b_release = WindowEvent.RELEASE_BUTTON_B
+        if button == "A":
+            press_ev = WindowEvent.PRESS_BUTTON_A
+            release_ev = WindowEvent.RELEASE_BUTTON_A
+            pyboy_instance.send_input(press_ev)
+            for _f in range(3):
+                pyboy_instance.tick()
+            pyboy_instance.send_input(release_ev)
+            for _f in range(3):
+                pyboy_instance.tick()
+            
+            press_count = 1
+            human_summary = f"Pressed {button} {press_count} times to exit dialog."
+            structured_output = {"status": "success", "button": button, "presses": press_count}
+            return human_summary, structured_output
+        else:
+            press_ev = WindowEvent.PRESS_BUTTON_B
+            release_ev = WindowEvent.RELEASE_BUTTON_B
+
         press_count = 0
-        for i in range(8): # Press 'b' up to 8 times
-            pyboy_instance.send_input(b_button)
-            for _f in range(3): pyboy_instance.tick()
-            pyboy_instance.send_input(b_release)
-            for _f in range(3): pyboy_instance.tick()
-            press_count +=1
-            # Potentially add a check here using `env` if we can determine if out of menu
-            # current_dialog = env.get_current_dialog()
-            # if not env.is_in_menu_prompt_dialog(): break # Fictional env method
+        for _ in range(8):
+            pyboy_instance.send_input(press_ev)
+            for _f in range(3):
+                pyboy_instance.tick()
+            pyboy_instance.send_input(release_ev)
+            for _f in range(3):
+                pyboy_instance.tick()
+            press_count += 1
         
-        human_summary = f"Attempted to exit menu by pressing B {press_count} times."
-        structured_output = {"status": "success", "message": human_summary, "b_presses": press_count}
+        human_summary = f"Pressed {button} {press_count} times to exit dialog."
+        structured_output = {"status": "success", "button": button, "presses": press_count}
         return human_summary, structured_output
     except Exception as e:
-        logger.error(f"Error in exit_menu: {e}", exc_info=True)
-        error_msg = f"Exception during exit_menu: {str(e)}"
+        logger.error(f"Error in exit_dialog: {e}", exc_info=True)
+        error_msg = f"Exception during exit_dialog: {str(e)}"
         return error_msg, {"status": "error", "message": error_msg}
 
 def ask_friend(
@@ -683,10 +723,10 @@ AVAILABLE_TOOLS = [
         "input_schema": press_buttons_schema,
     },
     {
-        "name": "exit_menu",
+        "name": "exit_dialog",
         "type": "function",
-        "description": "Exit any active menu, dialog, or battle sequence by pressing B repeatedly. Use this when stuck in menus or dialog sequences.",
-        "input_schema": empty_schema,
+        "description": "Mash the specified button (A or B) 8 times to accept/cancel and exit the current dialog or menu.",
+        "input_schema": exit_dialog_schema,
     },
     {
         "name": "ask_friend",
@@ -734,12 +774,12 @@ AVAILABLE_TOOLS_LIST = [
         }
     },
     {
-        "name": "exit_menu",
-        "function": exit_menu,
+        "name": "exit_dialog",
+        "function": exit_dialog,
         "declaration": {
-            "name": "exit_menu",
-            "description": "Attempt to exit any active menu, dialog, or battle sequence by pressing the B button repeatedly.",
-            "parameters": empty_schema # No parameters for exit_menu
+            "name": "exit_dialog",
+            "description": "Exit the current dialog or menu by pressing A or B 8 times. Provide 'button' parameter ('A' or 'B').",
+            "parameters": exit_dialog_schema
         }
     },
     {

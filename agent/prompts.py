@@ -14,7 +14,7 @@ Extract information exclusively from RAM data:
     Location & Movement: map_name, map_id, coordinates, facing direction
     Environment: visible_area (current screen) + explored_map (accumulated knowledge)
     Party & Resources: HP, status, PP, inventory, money, Pokédex count
-    Interface State: If dialog is not empty, you are in a conversation with an NPC, in a menu, in a battle, or reading a sign. To dispense with dialogs, call the exit_menu tool and be sure not to press A again on that same coordinate.
+    Interface State: If dialog is not empty, you are in a conversation with an NPC, in a menu, in a battle, or reading a sign. The contents of the dialog represent the game state at that moment. Read the dialog. Compare it to each current Quest objective. Is it necessary to press A? If so, call exit_dialog with argument of A, which will press the A button a bunch, accepting anything the dialog poses to you and also exiting the dialog.
 
 ANALYZE (Strategic Planning)
 
@@ -122,5 +122,5 @@ The battle can be handled by calling the handle_battle tool.
 
 DIALOG_PROMPT = """
 You are in a dialogue or menu. If it's a menu, move the cursor to the item you want and press A, or exit if you don't want anything.
-If it's a dialogue, it's likely a waste of time so just call tool exit_menu.
+If it's a dialogue and you wish to advance through it, call the tool exit_dialog with an argument of "A" (to mash A 8 times and accept) or "B" to back out.
 """

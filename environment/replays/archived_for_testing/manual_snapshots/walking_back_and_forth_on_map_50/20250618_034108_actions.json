@@ -1,0 +1,913 @@
+[
+    {
+        "step": 70062,
+        "action": 3,
+        "original_action": 7,
+        "timestamp": 1750217884.7149415,
+        "source": "manual_filtered"
+    },
+    {
+        "step": 70063,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217884.8773909,
+        "source": "manual"
+    },
+    {
+        "step": 70064,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217884.9500318,
+        "source": "manual"
+    },
+    {
+        "step": 70065,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.0107455,
+        "source": "manual"
+    },
+    {
+        "step": 70066,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.0769494,
+        "source": "manual"
+    },
+    {
+        "step": 70067,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.1433403,
+        "source": "manual"
+    },
+    {
+        "step": 70068,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.2090292,
+        "source": "manual"
+    },
+    {
+        "step": 70069,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.2767262,
+        "source": "manual"
+    },
+    {
+        "step": 70070,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.3438046,
+        "source": "manual"
+    },
+    {
+        "step": 70071,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.4086053,
+        "source": "manual"
+    },
+    {
+        "step": 70072,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.4751332,
+        "source": "manual"
+    },
+    {
+        "step": 70073,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.543194,
+        "source": "manual"
+    },
+    {
+        "step": 70074,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.608896,
+        "source": "manual"
+    },
+    {
+        "step": 70075,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.6752024,
+        "source": "manual"
+    },
+    {
+        "step": 70076,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.7410784,
+        "source": "manual"
+    },
+    {
+        "step": 70077,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.807945,
+        "source": "manual"
+    },
+    {
+        "step": 70078,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.8733773,
+        "source": "manual"
+    },
+    {
+        "step": 70079,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217885.9387586,
+        "source": "manual"
+    },
+    {
+        "step": 70080,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.0046482,
+        "source": "manual"
+    },
+    {
+        "step": 70081,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.070621,
+        "source": "manual"
+    },
+    {
+        "step": 70082,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.1372652,
+        "source": "manual"
+    },
+    {
+        "step": 70083,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.2038267,
+        "source": "manual"
+    },
+    {
+        "step": 70084,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.2701006,
+        "source": "manual"
+    },
+    {
+        "step": 70085,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.3368838,
+        "source": "manual"
+    },
+    {
+        "step": 70086,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.4031265,
+        "source": "manual"
+    },
+    {
+        "step": 70087,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.4751549,
+        "source": "manual"
+    },
+    {
+        "step": 70088,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.53439,
+        "source": "manual"
+    },
+    {
+        "step": 70089,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.602944,
+        "source": "manual"
+    },
+    {
+        "step": 70090,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.6681244,
+        "source": "manual"
+    },
+    {
+        "step": 70091,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.734238,
+        "source": "manual"
+    },
+    {
+        "step": 70092,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.8001904,
+        "source": "manual"
+    },
+    {
+        "step": 70093,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.8665602,
+        "source": "manual"
+    },
+    {
+        "step": 70094,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.9318118,
+        "source": "manual"
+    },
+    {
+        "step": 70095,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217886.99852,
+        "source": "manual"
+    },
+    {
+        "step": 70096,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217887.0667367,
+        "source": "manual"
+    },
+    {
+        "step": 70097,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217887.1322575,
+        "source": "manual"
+    },
+    {
+        "step": 70098,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217887.200231,
+        "source": "manual"
+    },
+    {
+        "step": 70099,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217887.2664874,
+        "source": "manual"
+    },
+    {
+        "step": 70100,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217887.3345835,
+        "source": "manual"
+    },
+    {
+        "step": 70101,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217887.4000387,
+        "source": "manual"
+    },
+    {
+        "step": 70102,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217887.4649384,
+        "source": "manual"
+    },
+    {
+        "step": 70103,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217887.5339482,
+        "source": "manual"
+    },
+    {
+        "step": 70104,
+        "action": 7,
+        "original_action": null,
+        "timestamp": 1750217887.6012788,
+        "source": "manual"
+    },
+    {
+        "step": 70105,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217888.5628161,
+        "source": "manual"
+    },
+    {
+        "step": 70106,
+        "action": 0,
+        "original_action": 4,
+        "timestamp": 1750217888.6311114,
+        "source": "manual_filtered"
+    },
+    {
+        "step": 70107,
+        "action": 0,
+        "original_action": 4,
+        "timestamp": 1750217888.6976523,
+        "source": "manual_filtered"
+    },
+    {
+        "step": 70108,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217889.3269317,
+        "source": "manual"
+    },
+    {
+        "step": 70109,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217889.392759,
+        "source": "manual"
+    },
+    {
+        "step": 70110,
+        "action": 0,
+        "original_action": 4,
+        "timestamp": 1750217890.1532362,
+        "source": "manual_filtered"
+    },
+    {
+        "step": 70111,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217890.2196789,
+        "source": "manual"
+    },
+    {
+        "step": 70112,
+        "action": 3,
+        "original_action": null,
+        "timestamp": 1750217893.7337651,
+        "source": "manual"
+    },
+    {
+        "step": 70113,
+        "action": 0,
+        "original_action": 3,
+        "timestamp": 1750217893.799296,
+        "source": "manual_filtered"
+    },
+    {
+        "step": 70114,
+        "action": 3,
+        "original_action": null,
+        "timestamp": 1750217894.3969054,
+        "source": "manual"
+    },
+    {
+        "step": 70115,
+        "action": 0,
+        "original_action": 3,
+        "timestamp": 1750217894.4630978,
+        "source": "manual_filtered"
+    },
+    {
+        "step": 70116,
+        "action": 3,
+        "original_action": null,
+        "timestamp": 1750217894.9298086,
+        "source": "manual"
+    },
+    {
+        "step": 70117,
+        "action": 0,
+        "original_action": 3,
+        "timestamp": 1750217894.9959462,
+        "source": "manual_filtered"
+    },
+    3,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    1,
+    3,
+    3,
+    3,
+    3,
+    1,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    1,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    1,
+    1,
+    2,
+    {
+        "step": 70160,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217912.5369458,
+        "source": "manual"
+    },
+    {
+        "step": 70161,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217912.603007,
+        "source": "manual"
+    },
+    {
+        "step": 70162,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217913.0033693,
+        "source": "manual"
+    },
+    {
+        "step": 70163,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217913.0712228,
+        "source": "manual"
+    },
+    {
+        "step": 70164,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217913.3024547,
+        "source": "manual"
+    },
+    {
+        "step": 70165,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217913.3696518,
+        "source": "manual"
+    },
+    {
+        "step": 70166,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217913.4353476,
+        "source": "manual"
+    },
+    2,
+    2,
+    2,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    1,
+    3,
+    3,
+    3,
+    3,
+    3,
+    1,
+    1,
+    3,
+    3,
+    1,
+    3,
+    3,
+    3,
+    3,
+    1,
+    3,
+    3,
+    3,
+    3,
+    2,
+    2,
+    2,
+    2,
+    2,
+    3,
+    3,
+    3,
+    {
+        "step": 70211,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217921.9708424,
+        "source": "manual"
+    },
+    {
+        "step": 70212,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217922.037646,
+        "source": "manual"
+    },
+    {
+        "step": 70213,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217922.1037922,
+        "source": "manual"
+    },
+    {
+        "step": 70214,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217922.169732,
+        "source": "manual"
+    },
+    {
+        "step": 70215,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217922.2368665,
+        "source": "manual"
+    },
+    {
+        "step": 70216,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217922.30385,
+        "source": "manual"
+    },
+    {
+        "step": 70217,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217922.3849301,
+        "source": "manual"
+    },
+    {
+        "step": 70218,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217922.4472077,
+        "source": "manual"
+    },
+    {
+        "step": 70219,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217922.5171926,
+        "source": "manual"
+    },
+    {
+        "step": 70220,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217922.5886629,
+        "source": "manual"
+    },
+    {
+        "step": 70221,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217923.6233497,
+        "source": "manual"
+    },
+    {
+        "step": 70222,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217923.68805,
+        "source": "manual"
+    },
+    {
+        "step": 70223,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217923.7545102,
+        "source": "manual"
+    },
+    {
+        "step": 70224,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217923.8204865,
+        "source": "manual"
+    },
+    {
+        "step": 70225,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217924.353229,
+        "source": "manual"
+    },
+    {
+        "step": 70226,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217924.4201458,
+        "source": "manual"
+    },
+    {
+        "step": 70227,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217924.4879527,
+        "source": "manual"
+    },
+    {
+        "step": 70228,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217924.9886646,
+        "source": "manual"
+    },
+    {
+        "step": 70229,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.0534759,
+        "source": "manual"
+    },
+    {
+        "step": 70230,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.120015,
+        "source": "manual"
+    },
+    {
+        "step": 70231,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.1859787,
+        "source": "manual"
+    },
+    {
+        "step": 70232,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.253145,
+        "source": "manual"
+    },
+    {
+        "step": 70233,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.3188946,
+        "source": "manual"
+    },
+    {
+        "step": 70234,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.3852382,
+        "source": "manual"
+    },
+    {
+        "step": 70235,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.4512959,
+        "source": "manual"
+    },
+    {
+        "step": 70236,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.5183985,
+        "source": "manual"
+    },
+    {
+        "step": 70237,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.5828032,
+        "source": "manual"
+    },
+    {
+        "step": 70238,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.6488717,
+        "source": "manual"
+    },
+    {
+        "step": 70239,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.7165613,
+        "source": "manual"
+    },
+    {
+        "step": 70240,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.781981,
+        "source": "manual"
+    },
+    {
+        "step": 70241,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.8484936,
+        "source": "manual"
+    },
+    {
+        "step": 70242,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.9145646,
+        "source": "manual"
+    },
+    {
+        "step": 70243,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217925.9913304,
+        "source": "manual"
+    },
+    {
+        "step": 70244,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217926.0488102,
+        "source": "manual"
+    },
+    {
+        "step": 70245,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217926.1150043,
+        "source": "manual"
+    },
+    {
+        "step": 70246,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217926.1809928,
+        "source": "manual"
+    },
+    {
+        "step": 70247,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217926.2480874,
+        "source": "manual"
+    },
+    {
+        "step": 70248,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217926.3132415,
+        "source": "manual"
+    },
+    {
+        "step": 70249,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217926.3793483,
+        "source": "manual"
+    },
+    {
+        "step": 70250,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217926.4469256,
+        "source": "manual"
+    },
+    {
+        "step": 70251,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217926.51221,
+        "source": "manual"
+    },
+    {
+        "step": 70252,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217926.5803695,
+        "source": "manual"
+    },
+    {
+        "step": 70253,
+        "action": 4,
+        "original_action": null,
+        "timestamp": 1750217926.6470578,
+        "source": "manual"
+    },
+    {
+        "step": 70254,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217926.7798781,
+        "source": "manual"
+    },
+    {
+        "step": 70255,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217926.8469758,
+        "source": "manual"
+    },
+    {
+        "step": 70256,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217926.9124563,
+        "source": "manual"
+    },
+    {
+        "step": 70257,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217927.0116987,
+        "source": "manual"
+    },
+    {
+        "step": 70258,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217928.003122,
+        "source": "manual"
+    },
+    {
+        "step": 70259,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217928.0724244,
+        "source": "manual"
+    },
+    {
+        "step": 70260,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217928.138957,
+        "source": "manual"
+    },
+    {
+        "step": 70261,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217928.2069721,
+        "source": "manual"
+    },
+    {
+        "step": 70262,
+        "action": 5,
+        "original_action": null,
+        "timestamp": 1750217928.2718468,
+        "source": "manual"
+    },
+    3,
+    3,
+    3,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    3,
+    2,
+    3,
+    3,
+    3,
+    0,
+    3,
+    0,
+    3,
+    0,
+    3
+]

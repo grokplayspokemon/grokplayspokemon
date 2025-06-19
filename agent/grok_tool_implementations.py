@@ -725,7 +725,7 @@ AVAILABLE_TOOLS = [
     {
         "name": "exit_dialog",
         "type": "function",
-        "description": "Mash the specified button (A or B) 8 times to accept/cancel and exit the current dialog or menu.",
+        "description": "Call with argument 'B' to press B 8 times to exit a dialog or menu. Call with argument 'A' to press A one time (carefully, because it's easy to get stuck in a loop talking to NPCs!!) in response to a question only, or to pick what menu option the cursor is pointing to.",
         "input_schema": exit_dialog_schema,
     },
     {

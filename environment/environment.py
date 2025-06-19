@@ -1604,6 +1604,10 @@ class RedGymEnv(Env):
             except Exception as e:
                 print(f"environment.py: step(): StageManager update error: {e}")
 
+        local_x, local_y, map_id = self.get_game_coords()
+        global_coords = local_to_global(local_y, local_x, map_id)
+        print(f"environment.py: step(): END OF STEP global location {global_coords}\n\n\n\n")
+
         return obs, reward, done, truncated, info
 
 

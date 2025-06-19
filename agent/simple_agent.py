@@ -208,7 +208,21 @@ class SimpleAgent:
                 return None
         except Exception as _e_name:
             self.agent_file_logger.error(f"Naming-screen logic error: {_e_name}")
-
+        # Force B exit_dialog when specific content appears
+        if dlg_upper and "CONTENTS\n001\nSEEN" in dlg_upper:
+            self.agent_file_logger.info("Detected CONTENTS\n001\nSEEN in dialog, forcing exit_dialog with B")
+            try:
+                exit_dialog(
+                    env=self.reader,
+                    quest_manager=self.quest_manager,
+                    navigator=self.navigator,
+                    env_wrapper=self.env_wrapper,
+                    button="B"
+                )
+            except Exception as e_forced:
+                self.agent_file_logger.error(f"Forced exit_dialog tool call failed: {e_forced}")
+            self.last_api_call = time.time()
+            return None
         # Check cooldown
         current_time = time.time()
         if current_time - self.last_api_call < self.api_cooldown:

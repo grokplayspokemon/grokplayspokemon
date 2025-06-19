@@ -1178,11 +1178,6 @@
         "associated_coordinates_file": "041_coords.json",
         "event_triggers": [
             {
-                "type": "dialog_contains_text",
-                "text": "Your POK\u00e9MON are fighting fit!",
-                "completed": false
-            },
-            {
                 "type": "current_map_is_previous_map_was",
                 "current_map_id": 2,
                 "previous_map_id": 58,
@@ -1238,13 +1233,8 @@
         "associated_coordinates_file": "043_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_id",
-                "current_map_id": 14,
-                "comment": "Player has reached the eastern end of Route 3, ready for Route 4 transition. This may need to be tied to defeating all/most trainers on Route 3 or Nidoran reaching a certain level.",
-                "completed": false
-            },
-            {
                 "type": "coordinates_are",
+                "coord_space": "global",
                 "x_min": 173,
                 "completed": false
             }

@@ -125,8 +125,24 @@ class TriggerEvaluator:
             badge_name = trigger.get('badge_name', '')
             return f"badge_{badge_name}_obtained == True"
         elif ttype == 'coordinates_are':
-            x_min = trigger.get('x_min', 0)
-            return f"player_x >= {x_min}"
+            # global and local coordinates are allowed, but which need to be specified
+            x_min = trigger.get('x_min', None)
+            y_min = trigger.get('y_min', None)
+            x_max = trigger.get('x_max', None)
+            y_max = trigger.get('y_max', None)
+            coord_space = trigger.get('coord_space', trigger.get('coordinate_space', 'local'))  # alias coordinate_space
+
+            if coord_space not in ('local', 'global'):
+                raise ValueError("coordinates_are trigger requires coord_space to be 'local' or 'global'")
+
+            px = 'player_x' if coord_space == 'local' else 'player_global_x'
+            py = 'player_y' if coord_space == 'local' else 'player_global_y'
+
+            return (
+                f"{px} >= {x_min} and {py} >= {y_min} and "
+                f"({px} <= {x_max} or {x_max} is None) and "
+                f"({py} <= {y_max} or {y_max} is None)"
+            )
         else:
             return f"unknown_trigger_type('{ttype}')"
 
@@ -361,24 +377,39 @@ class TriggerEvaluator:
             values_str = f"Badge {target_badge_name}: {'Obtained' if badge_obtained else 'Not Obtained'}"
             debug_str = f"Evaluating: {logic_code} → {result}"
         elif ttype == 'coordinates_are':
-            x_min = trigger.get('x_min', 0)
-            y_min = trigger.get('y_min', 0)
+            x_min = trigger.get('x_min', None)
+            y_min = trigger.get('y_min', None)
             x_max = trigger.get('x_max', None)
             y_max = trigger.get('y_max', None)
             
-            # Get current player coordinates
-            player_x, player_y, map_id = self.env.get_game_coords()
-            
-            # Check if player is within coordinate bounds
-            result = player_x >= x_min
+            coord_space = trigger.get('coord_space', trigger.get('coordinate_space', 'local'))  # alias coordinate_space
+
+            # Get current player coordinates (local)
+            player_x_local, player_y_local, map_id = self.env.get_game_coords()
+
+            # Convert to global if requested
+            if coord_space == 'global':
+                player_y_global, player_x_global = local_to_global(player_y_local, player_x_local, map_id)
+            else:
+                print(f"[TriggerEvaluator] Coordinates are in local space")
+                player_y_global, player_x_global = player_y_local, player_x_local
+
+            # Evaluate bounds (None means unbounded in that direction)
+            result = True
+            if x_min is not None:
+                result = result and (player_x_global >= x_min)
             if y_min is not None:
-                result = result and (player_y >= y_min)
+                result = result and (player_y_global >= y_min)
             if x_max is not None:
-                result = result and (player_x <= x_max)
+                result = result and (player_x_global <= x_max)
             if y_max is not None:
-                result = result and (player_y <= y_max)
-            
-            values_str = f"PlayerPos: ({player_x}, {player_y}), Target: x>={x_min}"
+                result = result and (player_y_global <= y_max)
+
+            coord_type_label = "Global" if coord_space == 'global' else 'Local'
+            values_str = (
+                f"{coord_type_label}PlayerPos: ({player_x_global}, {player_y_global}), "
+                f"Bounds: x[{x_min},{x_max}], y[{y_min},{y_max}]"
+            )
             debug_str = f"Evaluating: {logic_code} → {result}"
         else:
             result = False # Keep default

@@ -419,6 +419,19 @@ STAGE_DICT = {
             {'condition': {'global_coords': (167, 67)}, 'action': 'a'}
         ]
     },
+    40: {
+        'events': [],
+        'blockings': [],
+        'scripted_movements': [
+            {'condition': 
+                {'global_coords': (167, 67),
+                 'dialog_present': False,
+                 'has_badge': '1'
+                 },
+                 'action': 'down'
+                 }
+        ]
+    },
     # Add more stages as needed
 }
 

@@ -499,12 +499,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             grid-row: 2;
             display: grid;
             grid-template-columns: 1fr 1fr;
-            grid-template-rows: 1fr auto;
+            grid-template-rows: 1fr; /* single row; map left, flex column right */
             padding: 20px;
             gap: 20px;
             overflow: hidden;
             height: 100%;
             min-height: 0; /* allow shrink */
+        }
+
+        /* Right half vertical layout (quest + game) */
+        .center-column {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            min-height: 0;
+        }
+        .center-column .game-screen-container {
+            flex: 1 1 0;
         }
 
         /* Game screen area */
@@ -1329,6 +1340,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             max-width: 128px;
             max-height: 128px;
         }
+
+        /* Quest UI container (scrollable) */
+        .quest-webui-container {
+            max-height: 220px;
+            overflow-y: hidden; /* hide scrollbars */
+            position: relative;
+        }
+
+        /* hide scrollbar for webkit */
+        .quest-webui-container::-webkit-scrollbar {
+            display: none;
+        }
+        .quest-webui-container {
+            -ms-overflow-style: none; /* IE/Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
     </style>
     <script>
         const CONFIG = {{ CONFIG | tojson }};
@@ -1389,30 +1416,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
             </div>
         
-            <!--
-            <div class="global-map-container" style="grid-column: 1; grid-row: 1; position: relative; height: 100%;">
-                <h2 class="section-title">Global Map</h2>
-                <div class="map-canvas" id="globalMapWrapper" style="position: absolute; inset: 0;">
-                    <img id="globalMapImage" src="/global-map.png" alt="Global Map"
-                         style="image-rendering: pixelated; width: 100%; height: 100%; object-fit: cover;">
-                    <canvas id="globalMapCanvas"
-                            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; image-rendering: pixelated;"></canvas>
-                </div>
-                <div class="map-info">
-                    <span>Position: <span id="mapPosition">(0, 0)</span></span>
-                    <span>Map: <span id="currentMapName">Unknown</span></span>
-                </div>
-            </div>
-            -->
-            <div class="game-screen-container" style="grid-column: 2; grid-row: 1; position: relative; height: 100%;">
-                <img id="gameScreen" alt="Game Screen" style="width: 100%; height: 100%; object-fit: contain; display: none;">
-                <div class="game-placeholder" id="gamePlaceholder"
-                     style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;">
-                    Waiting for game capture...
-                </div>
-                <div class="speech-bubble-overlay" id="speechBubbleOverlay"
-                     style="position: absolute; inset: 0; pointer-events: none;"></div>
-            </div>
+            <!-- Quest Web UI (moved from sidebar) -->
+            <div class="center-column" style="grid-column: 2 / 3; grid-row: 1;">
+              <!-- Quest Web UI -->
+              <div class="quest-webui-container">
+                 <div class="quest-section" id="questSection" style="display: none;">
+                     <h2 class="section-title" id="questTitle">Current Quest</h2>
+                     <div class="quest-description" id="questDescription"></div>
+                     <ul class="quest-list" id="questTriggers"></ul>
+                     <div class="quest-progress-bar">
+                         <div class="quest-progress-fill" id="questProgress" style="width: 0%"></div>
+                     </div>
+                 </div>
+               </div>
+ 
+              <div class="game-screen-container" style="position: relative; height: 100%;">
+                 <img id="gameScreen" alt="Game Screen" style="width: 100%; height: 100%; object-fit: contain; display: none;">
+                 <div class="game-placeholder" id="gamePlaceholder"
+                      style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;">
+                     Waiting for game capture...
+                 </div>
+                 <div class="speech-bubble-overlay" id="speechBubbleOverlay"
+                      style="position: absolute; inset: 0; pointer-events: none;"></div>
+               </div>
+            </div> <!-- end center-column -->
             <section class="team-display-area" style="grid-column: 1 / span 2; grid-row: 2;">
                 <h2 class="section-title" style="text-align: center; margin-bottom: 10px;">Active Team</h2>
                 <div class="team-grid" id="pokemon-team">
@@ -1430,16 +1457,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         <div class="right-sidebar">
             <!-- Enhanced Sidebar with all sections -->
             <div class="sidebar-section">
-                <!-- Quest Progress -->
-                <div class="quest-section" id="questSection" style="display: none;">
-                    <h2 class="section-title" id="questTitle">Current Quest</h2>
-                    <div class="quest-description" id="questDescription"></div>
-                    <ul class="quest-list" id="questTriggers"></ul>
-                    <div class="quest-progress-bar">
-                        <div class="quest-progress-fill" id="questProgress" style="width: 0%"></div>
-                    </div>
-                </div>
-
                 <!-- Grok Status -->
                 <div class="grok-status-section">
                     <h2 class="section-title">Grok Status</h2>
@@ -1945,6 +1962,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     showSpeechBubble(quest.end_quest_text, 'quest_complete', 5000);
                 }
             }
+
+            // Auto-scroll quest container smoothly like Grok status
+            const questContainer = document.querySelector('.quest-webui-container');
+            if (questContainer) startAutoScroll(questContainer);
         }
 
         // Update Grok status
@@ -2301,18 +2322,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // ------------------------------------------------------------------
         function startAutoScroll(el) {
             if (!el) return;
-            // Reset any previous run
+            // Cancel previous timer if still running
             if (el._scrollTimer) clearInterval(el._scrollTimer);
-            el.scrollTop = 0;
+            // Only reset to top if we're already very close to the top (fresh content)
+            if (el.scrollTop < 4) el.scrollTop = 0;
             if (el.scrollHeight <= el.clientHeight + 4) return; // nothing to scroll
 
-            el._scrollTimer = setInterval(() => {
-                el.scrollTop += 1; // 1 px per tick ≈ 33 px/s (at 30 ms)
+            const tick = () => {
+                // Increment position
+                el.scrollTop += 1;
+                // Reached bottom?
                 if (el.scrollTop + el.clientHeight >= el.scrollHeight) {
                     clearInterval(el._scrollTimer);
                     el._scrollTimer = null;
+                    // Pause, then reset and restart
+                    el._scrollPause = setTimeout(() => {
+                        el.scrollTop = 0;
+                        clearTimeout(el._scrollPause);
+                        el._scrollPause = null;
+                        startAutoScroll(el); // recurse to restart
+                    }, 2000); // 2-second pause
                 }
-            }, 30);
+            };
+
+            el._scrollTimer = setInterval(tick, 30);
         }
     </script>
 

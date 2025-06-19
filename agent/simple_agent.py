@@ -22,6 +22,7 @@ from environment.environment_helpers.navigator import InteractiveNavigator
 from environment.wrappers.env_wrapper import EnvWrapper
 from environment.environment import RedGymEnv
 from pyboy.utils import WindowEvent
+from collections import deque
 
 # Use the centralized PokemonLogger for agent logs
 agent_logger = get_pokemon_logger()
@@ -120,6 +121,18 @@ class SimpleAgent:
         
         # Track previous GameState to describe outcome of last action
         self._prev_state: Optional[GameState] = None
+        
+        # Ring buffer of the last 5 steps **taken when not in a dialog**.  Each element is a
+        # dict{location: (map_id,x,y), facing: str, action: str}
+        self._recent_non_dialog: deque = deque(maxlen=5)
+
+        # Track the first frame of every dialog that was initiated so we can detect
+        # repeated dialog attempts on the same square (potential loop indicator).
+        # Each entry is (map_id,x,y) -> count of times dialog started there in this session
+        self._dialog_start_counter: dict[tuple,int] = {}
+
+        # Keep last known facing direction so we can report it even when Grok presses A/B
+        self._last_facing: str = "down"
         
     # --------------------------------------------------------------
     # Helper functions to recognise naming screens based on dialog
@@ -264,6 +277,15 @@ class SimpleAgent:
             agent_logger.log_system_event("GROK_GET_ACTION_RESULT", {"action": action, "response": self.last_response})
             # Also log final action to agent.log
             self.agent_file_logger.info(f"GROK_FINAL_ACTION: action={action} response={self.last_response}")
+
+            # ----------------------------------------------------------
+            # Update our recent-step and dialog-start bookkeeping
+            # ----------------------------------------------------------
+            try:
+                self._update_step_history(game_state, action)
+            except Exception as _hist_err:
+                self.agent_file_logger.error(f"History update failed: {_hist_err}")
+
             # Store current state for next iteration diffing
             self._prev_state = game_state
             return action
@@ -430,6 +452,29 @@ class SimpleAgent:
                 context_parts.append(
                     f"Friend suggested the name '{self._pending_name}'. Call enter_name(name='{self._pending_name}', target='rival') to type it."
                 )
+
+        # ------------------------------------------------------------------
+        # NEW: Embed recent non-dialog steps & dialog-start loop metrics
+        # ------------------------------------------------------------------
+        if self._recent_non_dialog:
+            recent_lines = []
+            for idx, step in enumerate(list(self._recent_non_dialog)[-5:]):
+                (m,x,y) = step["loc"]
+                recent_lines.append(
+                    f"{idx+1}: ({x},{y}) on map {m} facing {step['facing']} -> action {step['action']}"
+                )
+            context_parts.append("Recent non-dialog steps: " + "; ".join(recent_lines))
+
+        # How many times has dialog been started on the current tile this session?
+        curr_key = (
+            game_state.location.get("map_id"),
+            game_state.location.get("x"),
+            game_state.location.get("y"),
+        )
+        if curr_key in self._dialog_start_counter:
+            context_parts.append(
+                f"Dialog initiated on this tile {self._dialog_start_counter[curr_key]} time(s) so far (possible loop indicator)."
+            )
 
         # Build the full prompt
         prompt = f"""{prompt_start}
@@ -894,3 +939,44 @@ When you are ready, call the correct tool per the instructions.
             "total_cost": f"${self.total_cost:.4f}",
             "api_calls": self.api_calls_count,
         }
+
+    # ------------------------------------------------------------------
+    # INTERNAL: Book-keeping for recent steps & dialog starts
+    # ------------------------------------------------------------------
+    def _update_step_history(self, game_state: GameState, last_action: int | None):
+        """Maintain:
+        1. Deque of last 5 non-dialog steps with facing & action
+        2. Counter of how many times a dialog has been initiated on a given tile
+        """
+
+        # Map action id → facing direction
+        _face_map = {0: "down", 1: "left", 2: "right", 3: "up"}
+        if last_action is not None and last_action in _face_map:
+            self._last_facing = _face_map[last_action]
+
+        loc_key = (
+            game_state.location.get("map_id"),
+            game_state.location.get("x"),
+            game_state.location.get("y"),
+        )
+
+        # Detect dialog start (transition from no-dialog to dialog)
+        if self._prev_state and self._prev_state.dialog is None and game_state.dialog:
+            # Increment counter for this tile
+            self._dialog_start_counter[loc_key] = self._dialog_start_counter.get(loc_key, 0) + 1
+            # We *do not* push this into recent_non_dialog deque because spec says
+            # to capture only the step **at the beginning** of the dialog for loop-tracking.
+            return
+
+        # Only record steps when NOT in dialog (per spec)
+        if game_state.dialog:
+            return
+
+        # Append non-dialog step snapshot
+        self._recent_non_dialog.append(
+            {
+                "loc": loc_key,
+                "facing": self._last_facing,
+                "action": VALID_ACTIONS_STR[last_action] if last_action is not None and last_action < len(VALID_ACTIONS_STR) else str(last_action),
+            }
+        )

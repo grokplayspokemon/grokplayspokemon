@@ -330,19 +330,44 @@ def exit_dialog(
             return error_msg, {"status": "error", "message": error_msg}
 
         if button == "A":
-            press_ev = WindowEvent.PRESS_BUTTON_A
-            release_ev = WindowEvent.RELEASE_BUTTON_A
-            pyboy_instance.send_input(press_ev)
-            for _f in range(3):
-                pyboy_instance.tick()
-            pyboy_instance.send_input(release_ev)
-            for _f in range(3):
-                pyboy_instance.tick()
-            
-            press_count = 1
-            human_summary = f"Pressed {button} {press_count} times to exit dialog."
-            structured_output = {"status": "success", "button": button, "presses": press_count}
-            return human_summary, structured_output
+            # Only press A ONE time, and only if the current dialog contains "YES"
+            dlg_text = ""
+            try:
+                dlg_text = env.get_active_dialog() if hasattr(env, "get_active_dialog") else env.read_dialog()
+                dlg_text = dlg_text or ""
+            except Exception:
+                pass
+
+            if "YES" in dlg_text.upper():
+                # Safe to accept with A
+                press_ev = WindowEvent.PRESS_BUTTON_A
+                release_ev = WindowEvent.RELEASE_BUTTON_A
+                pyboy_instance.send_input(press_ev)
+                for _ in range(3):
+                    pyboy_instance.tick()
+                pyboy_instance.send_input(release_ev)
+                for _ in range(3):
+                    pyboy_instance.tick()
+                press_count = 1
+                human_summary = "Pressed A once to accept 'YES' in dialog."
+                structured_output = {"status": "success", "button": "A", "presses": press_count}
+                return human_summary, structured_output
+            else:
+                # Fall back to pressing B to safely close dialog
+                press_ev = WindowEvent.PRESS_BUTTON_B
+                release_ev = WindowEvent.RELEASE_BUTTON_B
+                press_count = 0
+                for _ in range(8):
+                    pyboy_instance.send_input(press_ev)
+                    for _f in range(3):
+                        pyboy_instance.tick()
+                    pyboy_instance.send_input(release_ev)
+                    for _f in range(3):
+                        pyboy_instance.tick()
+                    press_count += 1
+                human_summary = "Pressed B {press_count} times to close dialog (no 'YES' detected)."
+                structured_output = {"status": "success", "button": "B", "presses": press_count}
+                return human_summary, structured_output
         else:
             press_ev = WindowEvent.PRESS_BUTTON_B
             release_ev = WindowEvent.RELEASE_BUTTON_B

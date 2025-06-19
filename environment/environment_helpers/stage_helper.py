@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional
 from collections import deque
 from environment.data.environment_data.tilesets import Tilesets
 from environment.data.recorder_data.global_map import GLOBAL_MAP_SHAPE, local_to_global
+import re
 
 # Stage-specific configuration with both blocking and scripted movement
 #             ['block', 'ROUTE_5', 'UNDERGROUND_PATH_ROUTE_5@1',],
@@ -432,6 +433,41 @@ STAGE_DICT = {
                  }
         ]
     },
+    46: {
+        'events': [],
+        'blockings': [],
+        'scripted_movements': [
+            {'condition': 
+                {'global_coords': (151, 152),
+                 'dialog_present': False,
+                 'health_fraction': 1,
+                 }, 
+                'action': 'down'},
+            {'condition': 
+                {'global_coords': (153, 157),
+                 },
+                'stop_condition': {'party_pokemon_species_is': 'MAGIKARP'},
+                'action': 'down'},
+            {'condition': 
+                {'global_coords': (154, 157),
+                 }, 
+                'stop_condition': {'party_pokemon_species_is': 'MAGIKARP'},
+                'action': 'right',
+                },
+            {'condition': 
+                {'global_coords': (154, 158),
+                 }, 
+                'stop_condition': {'party_pokemon_species_is': 'MAGIKARP'},
+                'action': 'right',
+                },
+            {'condition': 
+                {'global_coords': (154, 159),
+                 }, 
+                'stop_condition': {'party_pokemon_species_is': 'MAGIKARP'},
+                'action': 'a',
+                },            
+        ]
+    },
     # Add more stages as needed
 }
 
@@ -813,11 +849,26 @@ class StageManager:
         # a noop so downstream systems stay idle.
         # ------------------------------------------------------------------
         try:
-            if (action == self.action_mapping.get('a') and  # It *is* an A-press
-                not (self.env.get_active_dialog() or '').strip() and  # No dialog visible
-                self._quest001_completed()):
-                print("StageManager: Suppressing stray 'A' press – Quest 001 completed, no active dialog")
-                return self._get_noop_action()
+            if action == self.action_mapping.get('a'):
+                active_dialog = (self.env.get_active_dialog() or '').replace("\n", " ").strip()
+
+                # Case 1: No dialog visible after Quest 001 completion
+                if (not active_dialog) and self._quest001_completed():
+                    print("StageManager: Suppressing stray 'A' press – Quest 001 completed, no active dialog")
+                    return self._get_noop_action()
+
+                # Case 2: Any dialog active where the word 'YES' is NOT present –
+                # pressing 'A' risks looping.  Convert to a 'B' press to advance/close.
+                if active_dialog and 'YES' not in active_dialog.upper():
+                    print("StageManager: Replacing 'A' press with 'B' – dialog active without 'YES'")
+                    return self.action_mapping.get('b', self._get_noop_action())
+
+                # Case 3: Naming-screen keyboard displayed (contains the row text).
+                # If we reach here 'YES' is not in dialog by definition, but we still want to
+                # suppress loops – same behaviour as above.
+                if re.search(r"[\u25ba>]?\s*A\s+B\s+C\s+D\s+E\s+F\s+G\s+H\s+I", active_dialog, re.IGNORECASE):
+                    print("StageManager: Replacing 'A' press with 'B' – naming screen keyboard active")
+                    return self.action_mapping.get('b', self._get_noop_action())
         except Exception as e:
             print("StageManager: Error in stray-A suppression logic:", e)
         
@@ -1086,6 +1137,31 @@ class StageManager:
                         return False
                 except Exception as _e:
                     print('StageManager DEBUG: health_fraction check error –', _e)
+                    return False
+
+            # ----------------------------------------------------------
+            # PARTY POKÉMON SPECIES CHECK
+            # ----------------------------------------------------------
+            if 'party_pokemon_species_is' in condition:
+                target_species_name = condition['party_pokemon_species_is']
+                try:
+                    from environment.data.environment_data.species import Species
+                    party = self.env.party.party[:self.env.party.party_size]
+                    species_found = False
+                    for p in party:
+                        try:
+                            species_name_from_party = Species(p.Species).name
+                            if species_name_from_party == target_species_name:
+                                species_found = True
+                                break
+                        except Exception:
+                            # Skip invalid or empty party slots
+                            continue
+                    if not species_found:
+                        print(f"StageManager DEBUG: party_pokemon_species_is check failed – '{target_species_name}' not in party")
+                        return False
+                except Exception as _e:
+                    print('StageManager DEBUG: Error in party_pokemon_species_is check –', _e)
                     return False
 
             return True

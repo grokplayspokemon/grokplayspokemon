@@ -909,9 +909,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         /* Team section styling */
         .team-display-area {
-            padding: 12px;
+            padding: 0px;
             background: #0a0a0a;
-            border-top: 10px solid #1a1a1a;
+            border-top: 0px solid #1a1a1a;
             overflow: hidden;
         }
 
@@ -1162,27 +1162,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             grid-column: 1 / -1;
             background: #0a0a0a;
             border-top: 1px solid #1a1a1a;
-            padding: 22px; /* distance from left edge of window */
+            padding: 12px 22px; /* reduce vertical padding */
             display: flex;
             justify-content: space-between;
             align-items: center;
             grid-row: 3;
-            flex-wrap: wrap;
-            height: 100%;
+            flex-wrap: nowrap; /* prevent line breaks */
+            max-height: 72px; /* cap bar height */
+            overflow-y: hidden;
+            overflow-x: hidden !important;
+            gap: 24px;
+        }
+
+        .bottom-bar::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .bottom-stat {
+            white-space: nowrap; /* keep each stat on one line */
+            flex: 0 0 auto; /* prevent shrinking text vertically */
         }
 
         .bottom-stats {
             display: flex;
-            gap: 32px; /* Increased from 20px */
-            flex-wrap: wrap;
-            align-items: baseline;
-            flex: 1;
-        }
-
-        .bottom-stat {
-            display: flex;
-            align-items: baseline;
-            gap: 10px; /* Increased from 6px */
+            gap: 24px;
+            flex-wrap: nowrap;
+            align-items: center;
+            flex: 1 1 auto;
+            overflow: hidden;
         }
 
         .bottom-stat-label {
@@ -1356,6 +1363,400 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             -ms-overflow-style: none; /* IE/Edge */
             scrollbar-width: none;  /* Firefox */
         }
+
+
+        .global-map-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            pointer-events: none; /* clicks go through */
+            z-index: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- UI ADJUSTMENTS (2025-06-19) ------------------------------------- */
+        /* Hide the legacy embedded global-map and quest UI containers */
+        .global-map-container,
+        .quest-webui-container {
+            display: none !important;
+        }
+
+        /* Remove the original wrapper around the game screen */
+        .game-screen-container {
+            display: none !important;
+        }
+
+        /* Also hide placeholder / overlays tied to that container */
+        #gamePlaceholder,
+        .speech-bubble-overlay {
+            display: none !important;
+        }
+
+        /* Place the actual game screen image at bottom-right of viewport */
+        #gameScreen {
+            position: fixed !important;
+            bottom: 20px;
+            right: 20px;
+            width: 30vw;            /* responsive width */
+            max-width: 600px;
+            height: auto !important;
+            z-index: 3000;          /* ensure above map background */
+            display: none;          /* default hidden until image loads */
+            border: 2px solid #444;
+            background: #000;
+        }
+        /* --------------------------------------------------------------------- */
+        
+        /* Re-purpose the game-screen container as a simple fixed panel */
+        .game-screen-container {
+            position: fixed !important;
+            bottom: 20px;
+            right: 20px;
+            width: 30vw;            /* responsive width */
+            max-width: 600px;
+            height: auto;
+            background: transparent !important;
+            border: none !important;
+            padding: 0 !important;
+            z-index: 3000;
+            display: flex !important;   /* keep element visible */
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Hide the placeholder and speech bubbles */
+        #gamePlaceholder,
+        .speech-bubble-overlay {
+            display: none !important;
+        }
+
+        /* Place the game screen inside the fixed panel */
+        #gameScreen {
+            width: 100% !important;
+            height: auto !important;
+            border: 2px solid #444;
+            background: #000;
+            object-fit: contain;
+        }
+
+        /* --- UI ADJUSTMENTS (2025-06-19b) ------------------------------------ */
+        /* Ensure footer (bottom-bar) is visible above overlays */
+        .bottom-bar {
+            display: flex !important;
+            z-index: 2500;
+            background: rgba(0,0,0,0.8);
+        }
+
+        /* Grok thinking overlay – translucent box top-left */
+        #grokThinking {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            max-width: 30vw;
+            background: rgba(0,0,0,0.6);
+            padding: 12px 16px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            z-index: 3500;
+            display: block !important;
+            overflow-y: auto;
+            color: #fff;
+        }
+
+        /* Hide Grok control buttons */
+        .agent-controls { display: none !important; }
+
+        /* Party team column – fixed left of game screen */
+        .team-display-area {
+            position: fixed !important;
+            bottom: 20px;
+            right: calc(20px + 30vw + 40px); /*  game screen width + gap */
+            width: 140px;
+            max-height: 60vh;
+            overflow-y: auto;
+            background: transparent !important;
+            border: none !important;
+            padding: 0 !important;
+            z-index: 3000;
+        }
+        .team-grid {
+            display: flex !important;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .pokemon-card {
+            display: flex !important;
+            flex-direction: row;
+            align-items: center;
+            background: transparent !important;
+            border: none !important;
+            padding: 0 !important;
+            min-height: unset !important;
+        }
+        /* Bars column */
+        .pokemon-card-stats-footer {
+            display: flex;
+            flex-direction: column;
+            width: 60px;
+            margin-right: 6px;
+        }
+        .hp-bar, .exp-bar {
+            width: 100% !important;
+        }
+        /* Hide extra text/info */
+        .pokemon-card-info-wrapper { display: none !important; }
+
+        /* Sprite */
+        .pokemon-sprite-container {
+            width: 64px !important;
+            height: 64px !important;
+            background: transparent !important;
+            padding: 0 !important;
+        }
+
+        /* Hide empty slots */
+        .empty-slot { display: none !important; }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI ADJUSTMENTS (2025-06-19d) ------------------------------------ */
+        /* Further lift of game screen to avoid footer overlap fully */
+        .game-screen-container {
+            bottom: 92px; /* footer approx 72px + 20px gap */
+        }
+
+        /* Bring team column even closer */
+        .team-display-area {
+            right: calc(20px + 30vw + 5px);
+        }
+
+        /* Sprite should be to the RIGHT of bars */
+        .pokemon-card {
+            flex-direction: row-reverse;
+        }
+        .pokemon-card-stats-footer {
+            width: 60px;
+            margin-left: 6px;
+            margin-right: 0;
+        }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI ADJUSTMENTS (2025-06-19e) ------------------------------------ */
+        /* 1. Lift game screen slightly above footer */
+        .game-screen-container {
+            bottom: 1140px; /* raise to clear footer fully */
+        }
+
+        /* 2. Bring team column tight to game screen and lift similarly */
+        .team-display-area {
+            bottom: 60px;
+            right: calc(20px + 30vw + 10px);
+        }
+
+        /* 3. Ensure sprite appears on LEFT? user: pokemon to LEFT of bars previously, wants to RIGHT? They said pokemon should be to the LEFT of the health and exp bars (then earlier we reversed). Now re-check: earlier still left of bars; they want sprite left of bars? Wait they said earlier 'Pokemon should be to the LEFT of health and exp bars'— then we reversed; they said still left? Actually original: 'pokemon should be to the LEFT of the health and exp bars'. We misread earlier. Let's keep sprite left of bars (default row).*/
+        .pokemon-card {
+            flex-direction: row;
+        }
+        .pokemon-card-stats-footer {
+            width: 60px;
+            margin-right: 6px;
+            margin-left: 0;
+        }
+
+        /* 4. Subtle per-sprite breathing animations (scale only, no translate/rotate) */
+        .pokemon-sprite { will-change: transform; animation: none; }
+        @keyframes breatheA { 0%,100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+        @keyframes breatheB { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+        @keyframes breatheC { 0%,100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+        .team-grid .pokemon-card:nth-child(1) .pokemon-sprite { animation: breatheA 4s ease-in-out infinite; }
+        .team-grid .pokemon-card:nth-child(2) .pokemon-sprite { animation: breatheB 5s ease-in-out infinite; }
+        .team-grid .pokemon-card:nth-child(3) .pokemon-sprite { animation: breatheC 3.5s ease-in-out infinite; }
+        .team-grid .pokemon-card:nth-child(4) .pokemon-sprite { animation: breatheA 4.5s ease-in-out infinite; }
+        .team-grid .pokemon-card:nth-child(5) .pokemon-sprite { animation: breatheB 5.5s ease-in-out infinite; }
+        .team-grid .pokemon-card:nth-child(6) .pokemon-sprite { animation: breatheC 6s ease-in-out infinite; }
+
+        /* 5. Prevent any overflow-induced scrollbar flicker */
+        .team-display-area::-webkit-scrollbar { width: 6px; }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI PATCH (2025-06-20b) ----------------------------------------- */
+        /* Hide the Active Team heading permanently */
+        .team-display-area h2 { display: none !important; }
+
+        /* Ensure footer never shows horizontal scrollbar */
+        .bottom-bar { overflow-x: hidden !important; }
+        .bottom-bar::-webkit-scrollbar { display:none; }
+
+        /* Place sprite to RIGHT of bars (bars left) */
+        .pokemon-card { flex-direction: row-reverse !important; }
+        .pokemon-card-stats-footer { margin-left: 6px !important; margin-right:0 !important; }
+
+        /* Enlarge sprite visuals */
+        .pokemon-sprite-container {
+            width: 128px !important;
+            height: 128px !important;
+        }
+        .pokemon-sprite {
+            max-width: 128px !important;
+            max-height: 128px !important;
+        }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI PATCH (2025-06-20c) ----------------------------------------- */
+        /* Expand team panel width to accommodate bars + sprite */
+        .team-display-area {
+            width: 220px !important;   /* sprite 128 + bars 64 + gaps */
+            background: rgba(0,0,0,0.6) !important;
+            border-radius: 8px;
+            padding: 6px !important;
+        }
+        .pokemon-card-stats-footer { width: 74px !important; }
+        .hp-bar, .exp-bar { width: 100% !important; }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI PATCH (2025-06-20d) ----------------------------------------- */
+        .game-screen-container { bottom: 1240px !important; }
+        /* --------------------------------------------------------------------- */
+        /* --- UI PATCH (2025-06-20e) absolute override ----------------------- */
+        #gameScreen {
+            position: fixed !important;
+            bottom: 60px !important; /* clear footer */
+            right: 5px !important;
+        }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI PATCH (2025-06-21) ----------------------------------------- */
+        /* Gradient backdrop for team panel: opaque center, fades horizontal */
+        .team-display-area {
+            background: radial-gradient(ellipse at center, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.6) 40%, rgba(0,0,0,0) 100%) !important;
+        }
+
+        /* Elevate header so it's always visible */
+        .header { z-index: 4000 !important; }
+
+        /* Ensure overall map background stays below */
+        .global-map-background { z-index: 0 !important; }
+
+        /* Reveal pokemon info wrapper (names / types) */
+        .pokemon-card-info-wrapper { display: block !important; flex-basis: 100%; margin-top: 4px; text-align: center; }
+        .pokemon-name { font-size: 16px; font-weight:600; }
+        .pokemon-species-name { font-size: 14px; color:#bbb; }
+        .pokemon-types-row { justify-content:center; }
+
+        /* Keep sprite right, bars left */
+        .pokemon-card { flex-direction: row-reverse !important; align-items: flex-start; }
+        .pokemon-card-stats-footer { width: 74px !important; margin-left:6px !important; margin-right:0 !important; }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI PATCH (2025-06-21b) better fade & width --------------------- */
+        .team-display-area {
+            width: 260px !important;  /* extra space for text/bars */
+            background: radial-gradient(ellipse at center, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.65) 35%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%) !important;
+        }
+        .pokemon-card-stats-footer { width: 90px !important; }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI PATCH (2025-06-21c) gradient + width ------------------------ */
+        .team-display-area {
+            width: 420px !important; /* ample space for bars */
+            background: linear-gradient(90deg,
+                      rgba(0,0,0,0) 0%,
+                      rgba(0,0,0,0.75) 15%,
+                      rgba(0,0,0,0.85) 50%,
+                      rgba(0,0,0,0.75) 85%,
+                      rgba(0,0,0,0) 100%) !important;
+        }
+        .pokemon-card-stats-footer { width: 110px !important; }
+        .pokemon-card { overflow: visible !important; }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI PATCH (2025-06-21d) sprite container flex ------------------- */
+        .pokemon-sprite-container {
+            display: flex !important;
+            flex-direction: column;
+            align-items: center;
+            height: auto !important;
+        }
+        .pokemon-sprite-container .hp-bar { width: 100% !important; margin-top:4px; }
+        .pokemon-sprite-container .hp-text { font-size: 14px; margin-top:2px; }
+        .pokemon-status { font-size: 14px; }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI PATCH (2025-06-22) fades & exp bar ------------------------- */
+        .team-display-area { position: relative !important; }
+        .team-display-area::before,
+        .team-display-area::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 40px;
+            pointer-events: none;
+            background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 100%);
+            z-index: 0; /* behind content */
+        }
+        .team-display-area::before { top: 0; transform: scaleY(-1); }
+        .team-display-area::after  { bottom: 0; }
+
+        /* shorten EXP bar */
+        .exp-bar { width: 50% !important; margin: 0 auto 4px; }
+
+        /* shift info section towards sprite (right side) */
+        .pokemon-card-info-wrapper { margin-left: auto; margin-right: 8px; width: 100%; text-align: right; }
+
+        /* Fade grokThinking top/bottom */
+        #grokThinking { position: fixed; max-height: calc(100vh - 40px); overflow: hidden; }
+        #grokThinking::before, #grokThinking::after {
+            content:""; position:absolute; left:0; width:100%; height:120px; pointer-events:none;
+            background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 100%);
+        }
+        #grokThinking::before { top:0; transform: scaleY(-1); }
+        #grokThinking::after  { bottom:0; }
+        /* --------------------------------------------------------------------- */
+        /* --- UI PATCH (2025-06-22b) ensure team visible -------------------- */
+        .team-display-area { overflow: visible !important; z-index: 3200 !important; }
+        /* --------------------------------------------------------------------- */
+        /* --- UI PATCH (2025-06-22c) restore fixed placement ----------------- */
+        .team-display-area {
+            position: fixed !important;
+            bottom: 60px !important;
+            right: calc(20px + 30vw + 10px) !important;
+            z-index: 3200 !important;
+            overflow: visible !important;
+        }
+        /* --------------------------------------------------------------------- */
+
+        /* --- UI PATCH (2025-06-22e) fix team position & thinking fade ------- */
+        /* Grok Thinking: transparent panel with horizontal fade overlay */
+        #grokThinking {
+            background: transparent !important;   /* no solid block */
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            max-width: 30vw;
+            padding: 12px 16px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            z-index: 3500;
+            overflow-y: auto;
+            color: #fff;
+        }
+        #grokThinking::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Move team panel horizontally (no vertical shift) */
+        .team-display-area {
+            bottom: 60px !important;                       /* keep same vertical pos */
+            right: calc(5px + 30vw + 5px) !important;      /* closer gap: 5px beyond game screen */
+        }
+        /* --------------------------------------------------------------------- */
     </style>
     <script>
         const CONFIG = {{ CONFIG | tojson }};
@@ -1363,6 +1764,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 </head>
 
 <body>
+    <!--
+    <div class="global-map-background">
+        <img id="globalMapBackground" src="/global-map.png" style="width:100%;height:100%;object-fit:cover;opacity:0.2;" />
+    </div>
+    -->
+    <div class="global-map-background">
+        <div id="globalMapWrapper" style="width: 100%; height: 100%; position: relative;">
+            <img id="globalMapImage" src="/global-map.png" alt="Global Map" style="position: absolute; image-rendering: pixelated;">
+            <canvas id="globalMapCanvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></canvas>
+            <div id="playerSprite" class="player-sprite"></div>
+        </div>
+    </div>
     <div class="stream-container">
         <header class="header">
             <h1 class="title"><strong>GROK</strong> Plays Pokémon Red</h1>
@@ -1430,18 +1843,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                  </div>
                </div>
  
-              <div class="game-screen-container" style="position: relative; height: 100%;">
-                 <img id="gameScreen" alt="Game Screen" style="width: 100%; height: 100%; object-fit: contain; display: none;">
-                 <div class="game-placeholder" id="gamePlaceholder"
-                      style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;">
-                     Waiting for game capture...
-                 </div>
-                 <div class="speech-bubble-overlay" id="speechBubbleOverlay"
-                      style="position: absolute; inset: 0; pointer-events: none;"></div>
-               </div>
+              <div class="game-screen-container" style="position: fixed; bottom: 120px !important; right: 0; width: 600px; max-width: 100%;">
+                 <img id="gameScreen" alt="Game Screen" style="width: 100%; height: auto;">
+              </div>
             </div> <!-- end center-column -->
             <section class="team-display-area" style="grid-column: 1 / span 2; grid-row: 2;">
-                <h2 class="section-title" style="text-align: center; margin-bottom: 10px;">Active Team</h2>
+                <h2 class="section-title" style="text-align: center; margin-bottom: 10px; display: none !important;">Active Team</h2>
                 <div class="team-grid" id="pokemon-team">
                     <div class="pokemon-card empty-slot">—</div>
                     <div class="pokemon-card empty-slot">—</div>
@@ -1461,7 +1868,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="grok-status-section">
                     <h2 class="section-title">Grok Status</h2>
                     <div id="grokStatus">
-                        <div id="grokThinking" class="grok-message grok-thinking" style="display: none;"></div>
+                        <div id="grokThinking" class="grok-message grok-thinking" style="display: none; position: fixed; max-height: calc(100vh - 120px); overflow: hidden;">
+                            <div class="fade-top"></div>
+                            <div class="fade-bottom"></div>
+                        </div>
                         <div id="grokResponse" class="grok-message grok-response" style="display: none;"></div>
                         <div id="grokCost" class="grok-cost" style="display: none;">
                             <div class="grok-cost-header">Token Usage</div>
@@ -1815,6 +2225,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             left = Math.min(0, Math.max(minLeft, left));
 
             img.style.transform = `translate(${left}px, ${top}px)`;
+            // Sync background map translation with the foreground map
+            const bgImg = document.getElementById('globalMapBackground');
+            if (bgImg) bgImg.style.transform = img.style.transform;
             canvas.width = W;
             canvas.height = H;
 
@@ -1860,6 +2273,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             top  = Math.min(0, Math.max(minTop , top ));
 
             img.style.transform = `translate(${left}px, ${top}px)`;
+            // Sync background map translation with the foreground map
+            const bgImg = document.getElementById('globalMapBackground');
+            if (bgImg) bgImg.style.transform = img.style.transform;
             canvas.width = W;
             canvas.height = H;
             drawQuestCoordinates(ctx, left, top);
@@ -2085,6 +2501,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <img src="${spriteUrl||'https://placehold.co/64x64/333/666?text=No+Sprite'}" 
                         alt="${speciesName}" class="pokemon-sprite"
                         onerror="this.src='https://placehold.co/64x64/333/666?text=Error';this.onerror=null;">
+                    <div class="hp-bar"><div class="hp-fill ${hpClass}" style="width:${hpPct}%"></div></div>
+                    <div class="hp-text mono">${pokemon.hp}/${pokemon.maxHp}</div>
+                    <div class="pokemon-status${statusClass}" style="margin-top:2px;">${status}</div>
                 </div>
                 <div class="pokemon-card-info-wrapper">
                     <div class="pokemon-card-main-info">
@@ -2097,13 +2516,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                     </div>
                     <div class="pokemon-types-row"><div class="pokemon-types">${typesHtml}</div></div>
-                </div>
-                <div class="pokemon-card-stats-footer">
-                    <div class="hp-bar"><div class="hp-fill ${hpClass}" style="width:${hpPct}%"></div></div>
-                    <div class="pokemon-card-bottom-details">
-                        <div class="hp-text">${pokemon.hp}/${pokemon.maxHp}</div>
-                        <div class="pokemon-status${statusClass}">${status}</div>
-                    </div>
                     <div class="exp-bar"><div class="exp-fill" style="width:${expPct}%"></div></div>
                     <div class="exp-text mono">EXP: ${curExp.toLocaleString()} / ${expToNext.toLocaleString()}</div>
                 </div>

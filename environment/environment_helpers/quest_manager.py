@@ -345,10 +345,14 @@ class QuestManager:
             action = self.env.stage_manager.scripted_stage_blocking(action)
         
         # Apply scripted movement via stage_manager.scripted_stage_movement()
-        if hasattr(self.env, 'stage_manager') and hasattr(self.env.stage_manager, 'scripted_stage_movement'):
+        # SKIP stage manager overrides for PATH_FOLLOW_ACTION - navigation should have full control
+        from environment.environment import PATH_FOLLOW_ACTION
+        if action != PATH_FOLLOW_ACTION and hasattr(self.env, 'stage_manager') and hasattr(self.env.stage_manager, 'scripted_stage_movement'):
             print(f"QuestManager: Applying scripted stage movement for action {action}")
             action = self.env.stage_manager.scripted_stage_movement(action)
             print(f"QuestManager: Scripted stage movement returned action {action}")
+        elif action == PATH_FOLLOW_ACTION:
+            print(f"QuestManager: Skipping stage manager for PATH_FOLLOW_ACTION - navigation has full control")
 
         # CRITICAL FIX: If stage manager converted PATH_FOLLOW_ACTION to a movement action,
         # do NOT apply hardcoded quest overrides that could break path following

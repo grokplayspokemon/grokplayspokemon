@@ -295,16 +295,16 @@ def monitor_status_queue(status_queue):
             print(f"Error in status queue monitor: {e}")
             time.sleep(0.1)
 
-# Complete HTML template from the artifact
+# Complete HTML template with ultra-premium bezel design
 HTML_TEMPLATE = '''<!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Grok Plays Pokémon - Stream</title>
+    <title>Grok Plays Pokémon - Ultra Premium Bezel</title>
     <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=VT323&display=swap"
         rel="stylesheet">
     <style>
         * {
@@ -313,400 +313,493 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             box-sizing: border-box;
         }
 
-        html, body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background-color: #0a0a0a;
-            color: #ffffff;
-            overflow: hidden; /* prevent window scrollbars entirely */
-            margin: 0;
-            font-size: 20px;
+        html {
+            width: 100vw;
             height: 100vh;
-            width: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            background: #000 !important;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            perspective: 2000px;
+            overflow: hidden !important;
+            color: #ffffff;
+            font-size: 20px;
+            position: fixed !important;
+            left: 0 !important;
+            right: 0 !important;
+            top: 0 !important;
+            bottom: 0 !important;
+        }
+
+        /* Animated gradient background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(ellipse at center, 
+                rgba(120, 119, 198, 0.3) 0%, 
+                rgba(255, 119, 198, 0.1) 25%, 
+                rgba(120, 219, 255, 0.05) 50%, 
+                transparent 70%);
+            animation: nebula 20s ease-in-out infinite;
+            pointer-events: none;
+            z-index: -2;
+        }
+
+        @keyframes nebula {
+            0%, 100% { transform: rotate(0deg) scale(1); opacity: 0.5; }
+            50% { transform: rotate(180deg) scale(1.5); opacity: 0.8; }
         }
 
         .mono {
             font-family: 'JetBrains Mono', monospace;
         }
 
-        /* Main layout with 3 columns - Updated for flexible sidebars */
-        .stream-container {
-            display: grid;
-            grid-template-columns: minmax(400px, 1fr) 2fr minmax(400px, 1fr);
-            /* Row 2 must never push beyond viewport; minmax(0,1fr) lets it shrink */
-            grid-template-rows: auto minmax(0, 1fr) auto;
-            min-height: 100vh;
-            background-color: #1a1a1a;
-            gap: 1px;
-            overflow: hidden;
+        /* Main TV container with 3D transform - ABSOLUTE FULL SCREEN */
+        .tv-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            transform-style: preserve-3d;
+            animation: float 6s ease-in-out infinite;
+            z-index: 10;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0) rotateX(0) rotateY(0); }
+            50% { transform: translateY(-3px) rotateX(0.2deg) rotateY(0.2deg); }
+        }
+
+        /* Minimalist bezel - NO PADDING, TRANSPARENT BACKGROUND */
+        .tv-bezel {
+            position: relative;
+            width: 100%;
             height: 100%;
+            background: transparent; /* Let global map show through */
+            padding: 0; /* Remove all padding */
+            overflow: hidden;
         }
 
-        /* Header */
-        .header {
-            grid-column: 1 / -1;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 20px 30px;
-            background: #0a0a0a;
-            border-bottom: 1px solid #1a1a1a;
+        /* Holographic shimmer effect */
+        .tv-bezel::before {
+            content: '';
+            position: absolute;
+            top: -100%;
+            left: -100%;
+            width: 300%;
+            height: 300%;
+            background: linear-gradient(45deg,
+                transparent 30%,
+                rgba(255, 255, 255, 0.1) 50%,
+                transparent 70%);
+            transform: rotate(45deg);
+            animation: shimmer 4s ease-in-out infinite;
+            pointer-events: none;
         }
 
-        .title {
-            font-size: 48px; /* Doubled from 36px */
-            font-weight: 300;
-            letter-spacing: -0.5px;
+        @keyframes shimmer {
+            0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+            100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
         }
 
-        .title strong {
-            font-weight: 600;
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .live-badge {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 24px; /* Increased from 8px 16px */
-            background: #dc2626;
+        /* Game screen container - COMPACT, NO BLACK BACKGROUND */
+        .screen-wrapper {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: auto; /* Fit content */
+            height: auto; /* Fit content */
+            background: transparent; /* No black background */
             border-radius: 4px;
-            font-size: 20px; /* Doubled from 12px */
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            overflow: hidden;
+            box-shadow: 
+                0 0 20px rgba(0, 0, 0, 0.8), /* Subtle shadow around game screen */
+                0 0 40px rgba(120, 119, 198, 0.2);
+            z-index: 20;
         }
 
-        .live-dot {
-            width: 12px; /* Increased from 8px */
-            height: 12px;
-            background: #fff;
+        .game-screen {
+            position: relative;
+            width: auto;
+            height: auto;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 24px;
+        }
+
+        /* Premium LED strip */
+        .led-strip {
+            position: absolute;
+            bottom: -1px;
+            left: 20%;
+            right: 20%;
+            height: 2px;
+            background: linear-gradient(90deg,
+                transparent,
+                #00ffff 20%,
+                #ff00ff 50%,
+                #00ffff 80%,
+                transparent);
+            filter: blur(1px);
+            animation: led-flow 3s linear infinite;
+            box-shadow: 0 0 20px currentColor;
+        }
+
+        @keyframes led-flow {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        /* Brand logo - TOP BLACK BEZEL AREA */
+        .brand {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: calc((100vh - 432px) / 2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            font-weight: 200;
+            letter-spacing: 12px;
+            background: rgba(0, 0, 0, 0.95);
+            color: #00ff41;
+            font-family: 'VT323', monospace;
+            text-shadow: 0 0 20px #00ff41;
+            z-index: 50;
+            border-bottom: 2px solid #00ff41;
+        }
+
+        @keyframes glow-text {
+            from { filter: drop-shadow(0 0 20px rgba(120, 119, 198, 0.5)); }
+            to { filter: drop-shadow(0 0 30px rgba(255, 119, 198, 0.8)); }
+        }
+
+        /* Holographic status orb */
+        .status-orb {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            width: 16px;
+            height: 16px;
+            background: radial-gradient(circle at 30% 30%, 
+                #fff, 
+                #00ffff 40%, 
+                #0080ff 60%, 
+                #4000ff);
             border-radius: 50%;
-            animation: pulse 1s ease-in-out infinite;
+            box-shadow: 
+                0 0 30px #00ffff,
+                0 0 60px #0080ff,
+                inset 0 0 10px rgba(255, 255, 255, 0.5);
+            animation: orb-pulse 2s ease-in-out infinite;
         }
 
-        /* Left sidebar - Grok's Actions */
-        .left-sidebar {
-            grid-column: 1;
-            grid-row: 2;
-            background: #0a0a0a;
-            padding: 20px;
-            overflow-y: auto;
-            border-right: 1px solid #1a1a1a;
-            min-width: 400px; /* Minimum width */
-            min-height: 0; /* permit grid row to shrink */
+        @keyframes orb-pulse {
+            0%, 100% { 
+                transform: scale(1);
+                box-shadow: 
+                    0 0 30px #00ffff,
+                    0 0 60px #0080ff,
+                    inset 0 0 10px rgba(255, 255, 255, 0.5);
+            }
+            50% { 
+                transform: scale(1.2);
+                box-shadow: 
+                    0 0 40px #00ffff,
+                    0 0 80px #0080ff,
+                    inset 0 0 15px rgba(255, 255, 255, 0.8);
+            }
         }
 
-        .actions-header {
-            font-size: 28px; /* Doubled from 18px */
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #999;
-            margin-bottom: 20px;
+        /* Ambient light strips on sides */
+        .ambient-light {
+            position: absolute;
+            top: 20%;
+            width: 2px;
+            height: 60%;
+            background: linear-gradient(to bottom,
+                transparent,
+                rgba(120, 119, 198, 0.6),
+                rgba(255, 119, 198, 0.6),
+                rgba(120, 219, 255, 0.6),
+                transparent);
+            filter: blur(8px);
+            opacity: 0.5;
+            animation: pulse-light 4s ease-in-out infinite;
         }
 
-        .action-log {
-            display: flex;
-            flex-direction: column;
-            gap: 16px; /* Increased from 12px */
+        .ambient-light.left {
+            left: -20px;
         }
 
-        .action-entry {
-            background: #111;
-            border: 1px solid #2a2a2a;
-            border-radius: 8px;
-            padding: 16px; /* Increased from 12px */
-            animation: slideIn 0.3s ease;
+        .ambient-light.right {
+            right: -20px;
         }
 
-        @keyframes slideIn {
-            from {
+        @keyframes pulse-light {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.8; }
+        }
+
+        /* Ultra-thin speaker grilles */
+        .speaker-grille {
+            position: absolute;
+            bottom: 35px;
+            width: 60px;
+            height: 1px;
+            background: repeating-linear-gradient(90deg,
+                transparent,
+                transparent 2px,
+                rgba(255, 255, 255, 0.1) 2px,
+                rgba(255, 255, 255, 0.1) 3px);
+        }
+
+        .speaker-grille.left {
+            left: 40px;
+        }
+
+        .speaker-grille.right {
+            right: 40px;
+        }
+
+        /* Invisible touch controls */
+        .touch-zone {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 120px;
+            height: 40px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .touch-zone:hover::after {
+            content: '⚡';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 20px;
+            animation: electric 0.5s ease-out;
+        }
+
+        @keyframes electric {
+            0% { opacity: 0; transform: translate(-50%, -50%) scale(0); }
+            50% { opacity: 1; transform: translate(-50%, -50%) scale(1.5); }
+            100% { opacity: 0; transform: translate(-50%, -50%) scale(2); }
+        }
+
+        /* Particle effects */
+        .particle {
+            position: fixed;
+            pointer-events: none;
+            opacity: 0;
+            animation: particle-rise 10s linear infinite;
+        }
+
+        @keyframes particle-rise {
+            0% {
                 opacity: 0;
-                transform: translateX(-20px);
+                transform: translateY(100vh) translateX(0) scale(0);
             }
-            to {
+            10% {
                 opacity: 1;
-                transform: translateX(0);
+                transform: translateY(90vh) translateX(10px) scale(1);
+            }
+            90% {
+                opacity: 1;
+                transform: translateY(10vh) translateX(-10px) scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(0) translateX(0) scale(0);
             }
         }
 
-        .action-time {
-            font-size: 18px; /* Doubled from 11px */
-            color: #666;
-            margin-bottom: 12px; /* Increased from 8px */
+        /* Responsive scaling - MAINTAIN COMPACT DESIGN */
+        @media (max-width: 768px) {
+            .brand {
+                font-size: 18px;
+                letter-spacing: 4px;
+                top: 10px;
+            }
+            
+            #gameScreen {
+                width: 280px; /* Slightly smaller on mobile */
+                height: 252px; /* Maintain aspect ratio */
+            }
+            
+            .status-orb {
+                top: 10px;
+                right: 10px;
+                width: 10px;
+                height: 10px;
+            }
         }
 
-        .action-button {
-            display: inline-flex;
-            align-items: center;
-            gap: 10px; /* Increased from 8px */
-            padding: 10px 20px; /* Increased from 6px 12px */
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 6px;
-            font-size: 22px; /* Doubled from 13px */
-            font-weight: 500;
-            margin-bottom: 12px; /* Increased from 8px */
-        }
-
-        .action-icon {
-            width: 28px; /* Increased from 20px */
-            height: 28px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #2a2a2a;
-            border-radius: 4px;
-            font-size: 20px; /* Increased from 14px */
-        }
-
-        /* Action type specific colors */
-        .action-up { border-color: #3b82f6; }
-        .action-up .action-icon { background: #3b82f6; color: #fff; }
-        
-        .action-down { border-color: #8b5cf6; }
-        .action-down .action-icon { background: #8b5cf6; color: #fff; }
-        
-        .action-left { border-color: #ec4899; }
-        .action-left .action-icon { background: #ec4899; color: #fff; }
-        
-        .action-right { border-color: #10b981; }
-        .action-right .action-icon { background: #10b981; color: #fff; }
-        
-        .action-a { border-color: #f59e0b; }
-        .action-a .action-icon { background: #f59e0b; color: #000; }
-        
-        .action-b { border-color: #ef4444; }
-        .action-b .action-icon { background: #ef4444; color: #fff; }
-        
-        .action-start { border-color: #6366f1; }
-        .action-start .action-icon { background: #6366f1; color: #fff; }
-        
-        .action-path { border-color: #14b8a6; }
-        .action-path .action-icon { background: #14b8a6; color: #fff; }
-
-        .action-reason {
-            font-size: 20px; /* Doubled from 12px */
-            color: #999;
-            line-height: 1.4;
-        }
-
-        /* Center content area */
-        .center-content {
-            grid-column: 2;
-            grid-row: 2;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            grid-template-rows: 1fr; /* single row; map left, flex column right */
-            padding: 20px;
-            gap: 20px;
-            overflow: hidden;
-            height: 100%;
-            min-height: 0; /* allow shrink */
-        }
-
-        /* Right half vertical layout (quest + game) */
-        .center-column {
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            min-height: 0;
-        }
-        .center-column .game-screen-container {
-            flex: 1 1 0;
-        }
-
-        /* Game screen area */
-        .game-area {
-            flex: 1;
-            display: flex;
-            flex-direction: row;
-            position: relative;
-        }
-
-        .game-screen-container {
-            flex: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: #111;
-            border: 2px solid #333;
-            border-radius: 8px;
-            overflow: hidden;
-            position: relative;
-            max-width: 800px;
-            margin: 0 auto;
-            width: 100%;
-        }
-
+        /* Game screen styling - COMPACT SIZE */
         #gameScreen {
-            width: 100%;
-            height: 100%;
+            width: 320px; /* Fixed game screen size */
+            height: 288px; /* Fixed game screen size */
             object-fit: contain;
             image-rendering: pixelated;
             image-rendering: -moz-crisp-edges;
             image-rendering: crisp-edges;
+            border: 2px solid rgba(255, 255, 255, 0.1); /* Subtle border to define the game area */
+            background: #000; /* Keep game screen background black */
+            border-radius: 4px;
         }
 
-        .game-placeholder {
-            color: #666;
-            font-size: 28px; /* Doubled from 18px */
-        }
-
-        /* Speech Bubble */
-        .speech-bubble-overlay {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            max-width: 400px;
-            z-index: 1000;
+        /* Global map background - FORCE FULL SCREEN */
+        .global-map-background {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
             pointer-events: none;
-        }
-
-        .speech-bubble {
-            background: rgba(255, 248, 220, 0.95);
-            border: 8px solid #FFA500;
-            border-radius: 15px;
-            padding: 20px 28px; /* Increased from 15px 20px */
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-            opacity: 0;
-            transform: scale(0.8) translateY(-20px);
-            transition: all 0.3s ease;
-            position: relative;
-        }
-
-        .speech-bubble.show {
-            opacity: 1;
-            transform: scale(1) translateY(0);
-        }
-
-        .speech-bubble.quest-complete {
-            background: rgba(144, 238, 144, 0.95);
-            border-color: #228B22;
-        }
-
-        .speech-bubble::after {
-            content: '';
-            position: absolute;
-            bottom: -15px;
-            left: 30px;
-            width: 0;
-            height: 0;
-            border-style: solid;
-            border-width: 15px 10px 0 10px;
-            border-color: transparent;
-            border-top-color: inherit;
-        }
-
-        .speech-bubble-text {
-            color: #8B4513;
-            font-size: 24px; /* Doubled from 16px */
-            font-weight: 600;
-            line-height: 1.4;
-        }
-
-        .quest-complete .speech-bubble-text {
-            color: #006400;
-        }
-
-        /* Right sidebar */
-        .right-sidebar {
-            grid-column: 3;
-            grid-row: 2;
-            display: flex;
-            flex-direction: column;
-            gap: 1px;
-            background: #1a1a1a;
+            z-index: 1;
+            width: 100vw !important;
+            height: 100vh !important;
             overflow: hidden;
-            min-width: 400px;
-            min-height: 0; /* allow row to shrink instead of forcing page growth */
-            max-height: 100%; /* Constrain height */
+            opacity: 1.0;
+            background: #1a3a2a !important; /* Dark green background to fill any gaps */
         }
         
-        .sidebar-section {
-            background: #0a0a0a;
-            padding: 20px;
-            overflow-y: auto;
-            overflow-x: hidden; /* Hide horizontal overflow */
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-            flex-grow: 1;
-            min-height: 0; /* Allow shrinking */
-        }
-
-        .section-title {
-            font-size: 24px; /* Doubled from 16px */
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #999;
-            margin-bottom: 12px;
-        }
-                
-        /* Global Map Container */
-        .global-map-container {
-            height: 300px;
-            overflow: hidden;
-            position: relative;
-            background: #0a0a0a;
-            padding: 20px;
-            border-top: 1px solid #1a1a1a;
-        }
-
-        .global-map-section {
-            background: #111;
-            border: 2px solid #333;
-            border-radius: 8px;
-            padding: 15px;
-            height: 100%;
-            position: relative;
-        }
-
-        .map-canvas {
-            width: 100%;
-            height: 85%;
-            background: #0a0a0a;
-            border: 1px solid #222;
-            border-radius: 4px;
-            position: relative;
-            overflow: hidden;
-            margin-bottom: 10px;
-        }
-
-        #globalMapWrapper {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-        }
-
-        #globalMapImage {
+        #globalMapBackground {
             position: absolute;
+            width: auto;
+            height: auto;
+            object-fit: none;
+            opacity: 1.0;
             image-rendering: pixelated;
             transform-origin: top left;
-            transition: none; /* Remove transition for instant movement */
+            filter: saturate(1.4) contrast(1.1) brightness(0.9);
+            min-width: 150vw;
+            min-height: 150vh;
         }
 
-        #globalMapCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 10;
+        /* Hidden elements - keeping for JavaScript compatibility */
+        .left-sidebar,
+        .right-sidebar,
+        .center-content,
+        .global-map-container,
+        .quest-webui-container,
+        .header-team-display,
+        .title-overlay {
+            display: none !important;
         }
 
-        .map-info {
-            display: flex;
-            justify-content: space-between;
-            font-size: 18px;
-            color: #999;
-            padding: 0 5px;
+        /* Electronic Terminal Footer - BOTTOM BLACK BEZEL AREA */
+        .bottom-bar {
+            position: fixed !important;
+            bottom: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            height: calc((100vh - 432px) / 2) !important;
+            background: rgba(0, 0, 0, 0.95) !important;
+            border-top: 2px solid #00ff41 !important;
+            border-radius: 0 !important;
+            padding: 20px !important;
+            font-family: 'VT323', monospace !important;
+            font-size: 18px !important;
+            color: #00ff41 !important;
+            text-shadow: 0 0 5px #00ff41 !important;
+            box-shadow: 
+                0 0 20px rgba(0, 255, 65, 0.3),
+                inset 0 0 20px rgba(0, 0, 0, 0.5) !important;
+            z-index: 30 !important;
+            display: flex !important;
+            flex-wrap: wrap !important;
+            gap: 20px !important;
+            align-items: center !important;
+            justify-content: center !important;
         }
+
+        .bottom-bar::before {
+            content: "▶ GROK SYSTEM STATUS" !important;
+            position: absolute !important;
+            top: -12px !important;
+            left: 15px !important;
+            background: rgba(0, 0, 0, 0.9) !important;
+            padding: 2px 8px !important;
+            font-size: 12px !important;
+            border: 1px solid #00ff41 !important;
+            border-radius: 4px !important;
+        }
+
+        .bottom-bar .bottom-stat {
+            font-family: 'VT323', monospace !important;
+            white-space: nowrap !important;
+            margin: 0 !important;
+        }
+
+        .bottom-bar .bottom-stat-label {
+            color: #00aa2e !important;
+            font-size: 14px !important;
+            text-transform: uppercase !important;
+        }
+
+        .bottom-bar .bottom-stat-value {
+            color: #00ff41 !important;
+            font-size: 16px !important;
+            font-weight: normal !important;
+            text-shadow: 0 0 8px #00ff41 !important;
+        }
+
+        .bottom-bar .bottom-stat-value.cost {
+            color: #ffff00 !important;
+            text-shadow: 0 0 8px #ffff00 !important;
+        }
+
+        /* Terminal cursor animation */
+        .bottom-bar::after {
+            content: "█" !important;
+            position: absolute !important;
+            right: 15px !important;
+            top: 50% !important;
+            transform: translateY(-50%) !important;
+            animation: terminal-blink 1s step-end infinite !important;
+            color: #00ff41 !important;
+        }
+
+        @keyframes terminal-blink {
+            50% { opacity: 0; }
+        }
+
+        /* Keep utility classes for JavaScript */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+
+
+
+
+
+
+
+                
+        
                 
 
         /* Global Map Container - commented out duplicate */
@@ -803,7 +896,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: flex-start;
             gap: 14px; /* Increased from 10px */
             padding: 12px 16px; /* Increased from 8px 12px */
-            background: #0a0a0a;
+            background: #000000;
             border-radius: 6px;
             transition: all 0.3s ease;
         }
@@ -907,60 +1000,50 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow-wrap: break-word;
         }
 
-        /* Team section styling */
-        .team-display-area {
-            padding: 0px;
-            background: #0a0a0a;
-            border-top: 0px solid #1a1a1a;
-            overflow: hidden;
-        }
-
-        /* Team section */
-        .team-grid {
-            display: grid;
-            grid-template-columns: repeat(6, 1fr);
-            gap: 16px; /* Increased from 12px */
-            width: 100%;
+        /* Header team display - now positioned above game screen */
+        .header-team-display {
+            position: fixed;
+            top: 120px; /* Below header */
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            z-index: 6000;
+            background: rgba(0,0,0,0.8);
+            padding: 10px;
+            border-radius: 8px;
         }
 
         .pokemon-card {
-            background: #111;
+            background: rgba(17, 17, 17, 0.9);
+            backdrop-filter: blur(10px);
             border: 1px solid #2a2a2a;
             border-radius: 4px;
-            padding: 4px; /* Increased from 10px */
+            padding: 4px;
             transition: all 0.2s ease;
             cursor: pointer;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: space-between;
-            min-height: 220px; /* Much smaller card */
-            height: 100%;
+            justify-content: center;
+            min-height: 100px; /* Increased from 80px */
+            width: 100px; /* Keep at 100px */
+            position: relative;
+            z-index: 1001;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
 
         .pokemon-card:hover {
-            background: #181818;
+            background: rgba(24, 24, 24, 0.95);
             border-color: #444;
             transform: translateY(-2px);
-        }
-
-        .pokemon-sprite-container {
-            width: 100%;
-            aspect-ratio: 1/1;
-            background: linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.08));
-            border-radius: 6px;
-            padding: 12px; /* Increased from 8px */
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 12px; /* Increased from 8px */
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
         }
 
         .pokemon-sprite {
-            width: 100%;
-            height: 100%;
-            max-width: 96px; /* Increased from 64px */
-            max-height: 96px;
+            width: 72px; /* Increased from 64px */
+            height: 72px;
             image-rendering: pixelated;
             filter: brightness(1.1) contrast(1.1);
             object-fit: contain;
@@ -998,20 +1081,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .pokemon-name {
-            font-size: 18px; /* Doubled from 11px */
-            font-weight: 600;
-            text-transform: uppercase;
-            color: #e0e0e0;
-            line-height: 1.1;
+            font-size: 16px !important;
+            font-weight: 600 !important;
+            text-transform: uppercase !important;
+            color: #ff00ff !important;
+            line-height: 1.1 !important;
+            font-family: 'VT323', monospace !important;
+            text-shadow: 0 0 3px #ff00ff !important;
         }
 
         .pokemon-species-name {
-            font-size: 16px; /* Doubled from 10px */
-            font-weight: 500;
-            color: #bbb;
-            text-transform: capitalize;
-            margin-top: 4px; /* Increased from 2px */
-            line-height: 1.1;
+            font-size: 14px !important;
+            font-weight: 500 !important;
+            color: #ff77c6 !important;
+            text-transform: capitalize !important;
+            margin-top: 4px !important;
+            line-height: 1.1 !important;
+            font-family: 'VT323', monospace !important;
         }
 
         .pokemon-level {
@@ -1021,27 +1107,45 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             line-height: 1.1;
         }
 
-        .pokemon-types-row {
-            width: 100%;
+        .pokemon-name-level-row {
             display: flex;
-            justify-content: center;
-            margin-bottom: 10px; /* Increased from 6px */
-            min-height: 30px; /* Increased from 20px */
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            margin-bottom: 0px;
         }
 
-        .pokemon-types {
-            display: flex;
-            gap: 6px; /* Increased from 4px */
-            align-items: center;
+        .pokemon-name-above {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #e0e0e0;
+            line-height: 1;
+        }
+
+        .pokemon-level-inline {
+            font-size: 10px;
+            color: #e0e0e0;
+            font-weight: 600;
+            line-height: 1;
+        }
+
+        .pokemon-nickname-below {
+            font-size: 8px;
+            font-weight: 500;
+            color: #bbb;
+            text-align: center;
+            margin-bottom: 0px;
+            line-height: 1;
         }
 
         .type-badge {
-            font-size: 14px; /* Doubled from 9px */
-            padding: 4px 10px; /* Increased from 2px 6px */
-            border-radius: 4px;
+            font-size: 6px; /* Very small for header */
+            padding: 1px 3px;
+            border-radius: 2px;
             text-transform: uppercase;
             font-weight: 600;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.3px;
         }
 
         .pokemon-card-stats-footer {
@@ -1050,12 +1154,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .hp-bar {
-            height: 12px; /* Increased from 8px */
+            height: 6px; /* Smaller for header */
             background: #2a2a2a;
-            border-radius: 4px; /* Increased from 3px */
+            border-radius: 2px;
             overflow: hidden;
             width: 100%;
-            margin-bottom: 6px; /* Increased from 4px */
+            margin-bottom: 0px;
         }
 
         .hp-fill {
@@ -1080,19 +1184,42 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             margin-bottom: 10px; /* Increased from 6px */
         }
 
+        .hp-and-badges-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            margin-top: 0px;
+        }
+
         .hp-text {
-            font-size: 16px; /* Doubled from 10px */
+            font-size: 8px; /* Much smaller for header */
             color: #aaa;
             font-variant-numeric: tabular-nums;
-            line-height: 1.1;
+            line-height: 1;
+        }
+
+        .type-status-badges {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .pokemon-types {
+            display: flex;
+            gap: 4px;
+            align-items: center;
         }
 
         .pokemon-status {
-            font-size: 16px; /* Doubled from 10px */
+            font-size: 6px; /* Very small for header */
             font-weight: 600;
             color: #aaa;
             text-transform: uppercase;
-            line-height: 1.1;
+            line-height: 1;
+            padding: 1px 2px;
+            border-radius: 1px;
+            background: rgba(255, 255, 255, 0.1);
         }
 
         /* Status colors */
@@ -1147,7 +1274,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         /* Empty slot */
         .empty-slot {
-            background: #0a0a0a;
+            background: #000000;
             border: 1px dashed #1a1a1a;
             display: flex;
             align-items: center;
@@ -1160,18 +1287,54 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         /* Bottom stats bar - Much taller */
         .bottom-bar {
             grid-column: 1 / -1;
-            background: #0a0a0a;
-            border-top: 1px solid #1a1a1a;
-            padding: 12px 22px; /* reduce vertical padding */
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(64, 64, 64, 0.6);
+            border-image: linear-gradient(90deg, 
+                rgba(32, 32, 32, 0.8) 0%, 
+                rgba(64, 64, 64, 0.8) 50%, 
+                rgba(32, 32, 32, 0.8) 100%) 1;
+            padding: 12px 48px; /* Account for TV bezel */
             display: flex;
             justify-content: space-between;
             align-items: center;
             grid-row: 3;
-            flex-wrap: nowrap; /* prevent line breaks */
-            max-height: 72px; /* cap bar height */
+            flex-wrap: nowrap;
+            max-height: 72px;
             overflow-y: hidden;
             overflow-x: hidden !important;
             gap: 24px;
+            position: relative;
+            margin: 0 24px 24px 24px; /* Inset from TV bezel */
+            border-radius: 0 0 8px 8px;
+            box-shadow: 
+                0 -2px 16px rgba(0, 0, 0, 0.5),
+                0 1px 0 rgba(255, 255, 255, 0.05) inset,
+                0 -1px 0 rgba(64, 64, 64, 0.3) inset;
+        }
+
+        /* Futuristic glow effect behind footer */
+        .bottom-bar::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 300%;
+            height: 100%;
+            background: linear-gradient(90deg, 
+                transparent 0%, 
+                rgba(32, 32, 32, 0.2) 25%, 
+                rgba(64, 64, 64, 0.3) 50%, 
+                rgba(32, 32, 32, 0.2) 75%, 
+                transparent 100%);
+            animation: footerScan 10s ease-in-out infinite reverse;
+            z-index: -1;
+        }
+
+        /* Scanning animation for footer (slightly different timing) */
+        @keyframes footerScan {
+            0%, 100% { transform: translateX(0); opacity: 0.2; }
+            50% { transform: translateX(10%); opacity: 0.6; }
         }
 
         .bottom-bar::-webkit-scrollbar {
@@ -1369,76 +1532,45 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             position: fixed;
             top: 0;
             left: 0;
-            pointer-events: none; /* clicks go through */
+            pointer-events: none;
             z-index: 0;
             width: 100vw;
             height: 100vh;
             overflow: hidden;
         }
-
-        /* --- UI ADJUSTMENTS (2025-06-19) ------------------------------------- */
-        /* Hide the legacy embedded global-map and quest UI containers */
-        .global-map-container,
-        .quest-webui-container {
-            display: none !important;
-        }
-
-        /* Remove the original wrapper around the game screen */
-        .game-screen-container {
-            display: none !important;
-        }
-
-        /* Also hide placeholder / overlays tied to that container */
-        #gamePlaceholder,
-        .speech-bubble-overlay {
-            display: none !important;
-        }
-
-        /* Place the actual game screen image at bottom-right of viewport */
-        #gameScreen {
-            position: fixed !important;
-            bottom: 20px;
-            right: 20px;
-            width: 30vw;            /* responsive width */
-            max-width: 600px;
-            height: auto !important;
-            z-index: 3000;          /* ensure above map background */
-            display: none;          /* default hidden until image loads */
-            border: 2px solid #444;
-            background: #000;
-        }
-        /* --------------------------------------------------------------------- */
         
-        /* Re-purpose the game-screen container as a simple fixed panel */
-        .game-screen-container {
-            position: fixed !important;
-            bottom: 20px;
-            right: 20px;
-            width: 30vw;            /* responsive width */
-            max-width: 600px;
+        #globalMapBackground {
+            position: absolute;
+            width: auto;
             height: auto;
-            background: transparent !important;
-            border: none !important;
-            padding: 0 !important;
-            z-index: 3000;
-            display: flex !important;   /* keep element visible */
-            justify-content: center;
-            align-items: center;
+            object-fit: none;
+            opacity: 1.0;
+            image-rendering: pixelated;
+            transform-origin: top left;
+            filter: saturate(1.4) contrast(1.1);
         }
 
-        /* Hide the placeholder and speech bubbles */
-        #gamePlaceholder,
-        .speech-bubble-overlay {
+        /* --- GAME SCREEN VISIBILITY FIX ------------------------------------- */
+        /* Hide legacy UI containers */
+        .global-map-container,
+        .quest-webui-container,
+        .left-sidebar,
+        .right-sidebar,
+        .center-content {
             display: none !important;
         }
 
-        /* Place the game screen inside the fixed panel */
-        #gameScreen {
-            width: 100% !important;
-            height: auto !important;
-            border: 2px solid #444;
-            background: #000;
-            object-fit: contain;
+        /* FORCE GAME SCREEN VISIBILITY - Inline styles override this anyway */
+
+        /* Ensure game screen container doesn't interfere */
+        .game-screen-container {
+            display: none !important;
+        }
+
+        /* Hide placeholders */
+        #gamePlaceholder,
+        .speech-bubble-overlay {
+            display: none !important;
         }
 
         /* --- UI ADJUSTMENTS (2025-06-19b) ------------------------------------ */
@@ -1449,71 +1581,114 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: rgba(0,0,0,0.8);
         }
 
-        /* Grok thinking overlay – translucent box top-left */
-        #grokThinking {
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            max-width: 30vw;
-            background: rgba(0,0,0,0.6);
-            padding: 12px 16px;
-            border: 1px solid #444;
-            border-radius: 6px;
-            z-index: 3500;
-            display: block !important;
-            overflow-y: auto;
-            color: #fff;
+        /* Hide left sidebar completely */
+        .left-sidebar {
+            display: none !important;
         }
+
+        /* Hide Grok thinking completely */
+        #grokThinking {
+            display: none !important;
+        }
+
+        /* Remove left sidebar header */
 
         /* Hide Grok control buttons */
         .agent-controls { display: none !important; }
 
-        /* Party team column – fixed left of game screen */
+        /* Hide team display area background */
         .team-display-area {
-            position: fixed !important;
-            bottom: 20px;
-            right: calc(20px + 30vw + 40px); /*  game screen width + gap */
-            width: 140px;
-            max-height: 60vh;
-            overflow-y: auto;
-            background: transparent !important;
-            border: none !important;
-            padding: 0 !important;
-            z-index: 3000;
+            display: none !important;
         }
+
+        /* Remove team display area header */
         .team-grid {
+            position: fixed !important;
+            bottom: calc(calc((100vh - 432px) / 2) + 20px) !important; /* Above footer */
+            right: 20px !important;
             display: flex !important;
-            flex-direction: column;
-            gap: 12px;
+            flex-direction: row !important; /* Horizontal layout */
+            gap: 15px !important;
+            z-index: 4000 !important;
+            pointer-events: none; /* Allow clicks through container */
+            /* Debug: temporary border to see positioning */
+            border: 2px solid #ff0000 !important;
+            min-height: 50px !important;
+            min-width: 200px !important;
         }
         .pokemon-card {
             display: flex !important;
-            flex-direction: row;
-            align-items: center;
-            background: transparent !important;
-            border: none !important;
-            padding: 0 !important;
-            min-height: unset !important;
+            flex-direction: column !important; /* Stack vertically within each card */
+            align-items: center !important;
+            background: rgba(20, 20, 20, 0.9) !important;
+            border: 2px solid rgba(255, 0, 255, 0.6) !important;
+            border-radius: 12px !important;
+            padding: 20px !important;
+            min-height: 160px !important; /* Bigger cards */
+            min-width: 140px !important; /* Bigger cards */
+            transition: all 0.3s ease !important;
+            pointer-events: auto; /* Allow clicks on individual cards */
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7) !important;
         }
-        /* Bars column */
+        .pokemon-card:hover {
+            background: rgba(40, 20, 40, 0.95) !important;
+            border-color: rgba(255, 0, 255, 0.8) !important;
+            box-shadow: 0 6px 30px rgba(255, 0, 255, 0.4) !important;
+            transform: translateY(-5px) !important;
+        }
+        /* Bars column - adjusted for vertical card layout */
         .pokemon-card-stats-footer {
             display: flex;
             flex-direction: column;
-            width: 60px;
-            margin-right: 6px;
+            width: 100% !important;
+            margin-right: 0 !important;
+            margin-top: 10px !important;
         }
         .hp-bar, .exp-bar {
             width: 100% !important;
+            height: 8px !important;
+            border-radius: 4px !important;
+            margin-bottom: 8px !important;
         }
-        /* Hide extra text/info */
-        .pokemon-card-info-wrapper { display: none !important; }
+        .hp-fill {
+            border-radius: 4px !important;
+        }
+        .exp-fill {
+            border-radius: 4px !important;
+            background: #ff00ff !important;
+        }
+        .hp-text {
+            font-size: 14px !important;
+            color: #ff00ff !important;
+            font-family: 'VT323', monospace !important;
+            text-shadow: 0 0 3px #ff00ff !important;
+        }
+        /* Show Pokemon info for floating cards */
+        .pokemon-card-info-wrapper { 
+            display: flex !important; 
+            flex-direction: column !important;
+            align-items: center !important;
+            text-align: center !important;
+            width: 100% !important;
+        }
 
-        /* Sprite */
+        /* Sprite - bigger for floating cards */
         .pokemon-sprite-container {
-            width: 64px !important;
-            height: 64px !important;
-            background: transparent !important;
-            padding: 0 !important;
+            width: 120px !important;
+            height: 120px !important;
+            background: rgba(0, 0, 0, 0.6) !important;
+            border-radius: 10px !important;
+            padding: 10px !important;
+            border: 2px solid rgba(255, 0, 255, 0.5) !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            margin-bottom: 10px !important;
+        }
+        .pokemon-sprite {
+            width: 100px !important;
+            height: 100px !important;
+            image-rendering: pixelated !important;
         }
 
         /* Hide empty slots */
@@ -1618,13 +1793,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         /* --- UI PATCH (2025-06-20d) ----------------------------------------- */
         .game-screen-container { bottom: 1240px !important; }
         /* --------------------------------------------------------------------- */
-        /* --- UI PATCH (2025-06-20e) absolute override ----------------------- */
-        #gameScreen {
-            position: fixed !important;
-            bottom: 60px !important; /* clear footer */
-            right: 5px !important;
-        }
-        /* --------------------------------------------------------------------- */
+        /* Duplicate rule removed - game screen styling consolidated above */
 
         /* --- UI PATCH (2025-06-21) ----------------------------------------- */
         /* Gradient backdrop for team panel: opaque center, fades horizontal */
@@ -1657,18 +1826,44 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .pokemon-card-stats-footer { width: 90px !important; }
         /* --------------------------------------------------------------------- */
 
-        /* --- UI PATCH (2025-06-21c) gradient + width ------------------------ */
+        /* --- Pokemon Team: Retro TV Interface Style --------------------- */
         .team-display-area {
-            width: 420px !important; /* ample space for bars */
-            background: linear-gradient(90deg,
-                      rgba(0,0,0,0) 0%,
-                      rgba(0,0,0,0.75) 15%,
-                      rgba(0,0,0,0.85) 50%,
-                      rgba(0,0,0,0.75) 85%,
-                      rgba(0,0,0,0) 100%) !important;
+            width: 420px !important;
+            background: 
+                /* Retro monitor bezel effect */
+                linear-gradient(135deg, rgba(80,80,80,0.3) 0%, rgba(40,40,40,0.4) 25%, rgba(20,20,20,0.6) 50%, rgba(40,40,40,0.4) 75%, rgba(80,80,80,0.3) 100%),
+                /* Main background */
+                linear-gradient(90deg,
+                    rgba(0,0,0,0) 0%,
+                    rgba(0,0,0,0.75) 15%,
+                    rgba(0,0,0,0.85) 50%,
+                    rgba(0,0,0,0.75) 85%,
+                    rgba(0,0,0,0) 100%) !important;
+            border: 2px solid rgba(100,100,100,0.2);
+            border-radius: 12px;
+            box-shadow: 
+                inset 0 0 0 1px rgba(150,150,150,0.1),
+                inset 0 0 0 3px rgba(50,50,50,0.3),
+                0 4px 16px rgba(0,0,0,0.4);
         }
-        .pokemon-card-stats-footer { width: 110px !important; }
-        .pokemon-card { overflow: visible !important; }
+        .pokemon-card-stats-footer { 
+            width: 110px !important;
+            background: rgba(20,20,20,0.3);
+            border-radius: 4px;
+            padding: 4px;
+            border: 1px solid rgba(100,100,100,0.1);
+        }
+        .pokemon-card { 
+            overflow: visible !important;
+            background: rgba(40,40,40,0.2) !important;
+            border-radius: 8px;
+            padding: 6px !important;
+            margin: 4px 0;
+            border: 1px solid rgba(100,100,100,0.1);
+            box-shadow: 
+                inset 0 1px 0 rgba(255,255,255,0.05),
+                0 2px 8px rgba(0,0,0,0.3);
+        }
         /* --------------------------------------------------------------------- */
 
         /* --- UI PATCH (2025-06-21d) sprite container flex ------------------- */
@@ -1717,46 +1912,77 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         /* --- UI PATCH (2025-06-22b) ensure team visible -------------------- */
         .team-display-area { overflow: visible !important; z-index: 3200 !important; }
         /* --------------------------------------------------------------------- */
-        /* --- UI PATCH (2025-06-22c) restore fixed placement ----------------- */
+        /* --- TEAM DISPLAY OVERRIDE - ELECTRONIC TERMINAL STYLE --- */
         .team-display-area {
             position: fixed !important;
-            bottom: 60px !important;
-            right: calc(20px + 30vw + 10px) !important;
+            top: 80px !important;
+            right: 20px !important;
+            width: 200px !important;
+            max-height: calc(100vh - 200px) !important;
+            overflow-y: auto !important;
+            background: rgba(0, 0, 0, 0.85) !important;
+            backdrop-filter: blur(10px) !important;
+            border: 2px solid #7877C6 !important;
+            border-radius: 8px !important;
+            padding: 10px !important;
             z-index: 3200 !important;
-            overflow: visible !important;
+            box-shadow: 
+                0 0 20px rgba(120, 119, 198, 0.3),
+                inset 0 0 20px rgba(0, 0, 0, 0.5) !important;
+            border-image: linear-gradient(90deg, #7877C6, #FF77C6, #78C7FF) 1 !important;
         }
         /* --------------------------------------------------------------------- */
 
-        /* --- UI PATCH (2025-06-22e) fix team position & thinking fade ------- */
-        /* Grok Thinking: transparent panel with horizontal fade overlay */
-        #grokThinking {
-            background: transparent !important;   /* no solid block */
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            max-width: 30vw;
-            padding: 12px 16px;
-            border: 1px solid #444;
-            border-radius: 6px;
-            z-index: 3500;
-            overflow-y: auto;
-            color: #fff;
-        }
-        #grokThinking::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(90deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.6) 30%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
-            pointer-events: none;
-            z-index: -1;
+        /* --- UI PATCH (2025-06-23c) walk-pause-flip cycle ------------------- */
+        /* Long walk sequence, pause, quick flip (<0.5s), walk back, pause, flip */
+        /* Small travel distance for compact header cards */
+
+        @keyframes walkCycleA {
+            /* Start left, facing left - walk right */
+            0%   { transform: translateX(-15px) scaleX(-1) scale(1); }
+            /* Walk to right position */
+            35%  { transform: translateX( 15px) scaleX(-1) scale(1.03); }
+            /* Pause at right */
+            40%  { transform: translateX( 15px) scaleX(-1) scale(1.03); }
+            /* Quick flip to face left (3% = ~0.3s of 10s cycle) */
+            43%  { transform: translateX( 15px) scaleX(1) scale(1.03); }
+            /* Walk left */
+            78%  { transform: translateX(-15px) scaleX(1) scale(1); }
+            /* Pause at left */
+            83%  { transform: translateX(-15px) scaleX(1) scale(1); }
+            /* Quick flip to face right */
+            86%  { transform: translateX(-15px) scaleX(-1) scale(1); }
+            /* Hold position until cycle restart */
+            100% { transform: translateX(-15px) scaleX(-1) scale(1); }
         }
 
-        /* Move team panel horizontally (no vertical shift) */
-        .team-display-area {
-            bottom: 60px !important;                       /* keep same vertical pos */
-            right: calc(5px + 30vw + 5px) !important;      /* closer gap: 5px beyond game screen */
+        @keyframes walkCycleB {
+            /* Start right, facing right - walk left */
+            0%   { transform: translateX( 15px) scaleX(1) scale(1); }
+            /* Walk to left position */
+            35%  { transform: translateX(-15px) scaleX(1) scale(1.02); }
+            /* Pause at left */
+            40%  { transform: translateX(-15px) scaleX(1) scale(1.02); }
+            /* Quick flip to face right */
+            43%  { transform: translateX(-15px) scaleX(-1) scale(1.02); }
+            /* Walk right */
+            78%  { transform: translateX( 15px) scaleX(-1) scale(1); }
+            /* Pause at right */
+            83%  { transform: translateX( 15px) scaleX(-1) scale(1); }
+            /* Quick flip to face left */
+            86%  { transform: translateX( 15px) scaleX(1) scale(1); }
+            /* Hold position until cycle restart */
+            100% { transform: translateX( 15px) scaleX(1) scale(1); }
         }
-        /* --------------------------------------------------------------------- */
+
+        /* Different period lengths per slot for variety */
+        .header-team-display .pokemon-card:nth-child(1) .pokemon-sprite { animation: walkCycleA 10s linear infinite; }
+        .header-team-display .pokemon-card:nth-child(2) .pokemon-sprite { animation: walkCycleB 9.5s linear infinite; }
+        .header-team-display .pokemon-card:nth-child(3) .pokemon-sprite { animation: walkCycleA 11s linear infinite; }
+        .header-team-display .pokemon-card:nth-child(4) .pokemon-sprite { animation: walkCycleB 10.5s linear infinite; }
+        .header-team-display .pokemon-card:nth-child(5) .pokemon-sprite { animation: walkCycleA 9s linear infinite; }
+        .header-team-display .pokemon-card:nth-child(6) .pokemon-sprite { animation: walkCycleB 11.5s linear infinite; }
+        /* ------------------------------------------------------------------- */
     </style>
     <script>
         const CONFIG = {{ CONFIG | tojson }};
@@ -1764,144 +1990,137 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 </head>
 
 <body>
-    <!--
+    <!-- Full-size global map background, centered on player -->
     <div class="global-map-background">
-        <img id="globalMapBackground" src="/global-map.png" style="width:100%;height:100%;object-fit:cover;opacity:0.2;" />
+        <img id="globalMapBackground" src="/global-map.png" alt="Global Map">
     </div>
-    -->
-    <div class="global-map-background">
-        <div id="globalMapWrapper" style="width: 100%; height: 100%; position: relative;">
-            <img id="globalMapImage" src="/global-map.png" alt="Global Map" style="position: absolute; image-rendering: pixelated;">
-            <canvas id="globalMapCanvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></canvas>
-            <div id="playerSprite" class="player-sprite"></div>
-        </div>
-    </div>
-    <div class="stream-container">
-        <header class="header">
-            <h1 class="title"><strong>GROK</strong> Plays Pokémon Red</h1>
-            <div style="display: flex; align-items: center; gap: 32px;">
-                <div style="display: flex; gap: 24px; font-size: 20px; color: #999;">
-                    <div>
-                        <span>Session</span>
-                        <span class="mono" style="color: #fff; margin-left: 12px;">#0847</span>
-                    </div>
-                    <div>
-                        <span>Uptime</span>
-                        <span class="mono" style="color: #fff; margin-left: 12px;" id="uptime">00:00:00</span>
-                    </div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 24px;">
-                    <div class="agent-controls">
-                        <button id="start-btn" onclick="startAgent()">Start Grok</button>
-                        <button id="pause-btn" onclick="pauseAgent()" disabled>Pause Grok</button>
-                        <button id="stop-btn" onclick="stopAgent()" disabled>Stop Grok</button>
-                    </div>
-                    <div class="live-badge">
-                        <div class="live-dot"></div>
-                        LIVE
-                    </div>
-                </div>
-            </div>
-        </header>
 
-        <!-- Left sidebar - Grok's Actions -->
-        <div class="left-sidebar">
-            <h2 class="actions-header">Grok's Actions</h2>
-            <div class="action-log" id="actionLog">
-                <!-- Actions will be populated here -->
-            </div>
-        </div>
-
-        <!-- Center content with game and team -->
-        <div class="center-content">
-            <div class="global-map-container" style="grid-column: 1; grid-row: 1; position: relative; height: 100%;">
-                <h2 class="section-title">Global Map</h2>
-                <div class="global-map-section">
-                    <div class="map-canvas" id="globalMapWrapper">
-                        <img id="globalMapImage" src="/global-map.png" alt="Global Map">
-                        <canvas id="globalMapCanvas"></canvas>
-                        <div id="playerSprite" class="player-sprite"></div>
-                    </div>
-                    <div class="map-info">
-                        <span>Position: <span id="mapPosition">(0, 0)</span></span>
-                        <span>Map: <span id="currentMapName">Unknown</span></span>
+    <!-- TV Container -->
+    <div class="tv-container">
+        <div class="tv-bezel">
+            <!-- Ambient light effects -->
+            <div class="ambient-light left"></div>
+            <div class="ambient-light right"></div>
+            
+                        <!-- Main screen -->
+            <div class="screen-wrapper">
+                <div class="game-screen">
+                    <!-- Game screen moved to body level -->
+                    <!-- Fallback content when no game screen is available -->
+                    <div id="gamePlaceholder" style="text-align: center; opacity: 0.8;">
+                        <div style="font-size: 14px; text-transform: uppercase; letter-spacing: 4px; margin-bottom: 10px;">
+                            Stream Preview
+                        </div>
+                        <div style="font-size: 18px; opacity: 0.6;">
+                            [ Waiting for game content... ]
+                        </div>
                     </div>
                 </div>
             </div>
+            
+            <!-- Premium details -->
+            <div class="led-strip"></div>
+            <div class="status-orb"></div>
+            <div class="speaker-grille left"></div>
+            <div class="speaker-grille right"></div>
+            <div class="touch-zone"></div>
+        </div>
         
-            <!-- Quest Web UI (moved from sidebar) -->
-            <div class="center-column" style="grid-column: 2 / 3; grid-row: 1;">
-              <!-- Quest Web UI -->
-              <div class="quest-webui-container">
-                 <div class="quest-section" id="questSection" style="display: none;">
-                     <h2 class="section-title" id="questTitle">Current Quest</h2>
-                     <div class="quest-description" id="questDescription"></div>
-                     <ul class="quest-list" id="questTriggers"></ul>
-                     <div class="quest-progress-bar">
-                         <div class="quest-progress-fill" id="questProgress" style="width: 0%"></div>
-                     </div>
-                 </div>
-               </div>
- 
-              <div class="game-screen-container" style="position: fixed; bottom: 120px !important; right: 0; width: 600px; max-width: 100%;">
-                 <img id="gameScreen" alt="Game Screen" style="width: 100%; height: auto;">
-              </div>
-            </div> <!-- end center-column -->
-            <section class="team-display-area" style="grid-column: 1 / span 2; grid-row: 2;">
-                <h2 class="section-title" style="text-align: center; margin-bottom: 10px; display: none !important;">Active Team</h2>
-                <div class="team-grid" id="pokemon-team">
-                    <div class="pokemon-card empty-slot">—</div>
-                    <div class="pokemon-card empty-slot">—</div>
-                    <div class="pokemon-card empty-slot">—</div>
-                    <div class="pokemon-card empty-slot">—</div>
-                    <div class="pokemon-card empty-slot">—</div>
-                    <div class="pokemon-card empty-slot">—</div>
-                </div>
-            </section>
+                    <!-- Brand -->
+        <div class="brand">GROK Plays Pokémon</div>
+            </div>
+
+    <!-- Centered game screen - ADJUST THESE VALUES TO MOVE IT -->
+    <div id="gameScreen" style="
+        position: fixed !important;
+        top: calc(50% + 280px) !important;    /* Move DOWN: increase +20px to move further down */
+        left: calc(50% + 280px) !important;   /* Move RIGHT: increase +30px to move further right */
+        transform: translate(-50%, -50%) !important;
+        width: 480px !important;
+        height: 432px !important;
+        background: #000000 !important;
+        border: 2px solid rgba(255, 255, 255, 0.2) !important;
+        color: #ff0000 !important;
+        font-size: 24px !important;
+        font-weight: bold !important;
+        text-align: center !important;
+        line-height: 432px !important;
+        z-index: 9999 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        border-radius: 4px !important;
+        image-rendering: pixelated !important;
+    ">
+        🎮 GAME SCREEN HERE 🎮
+    </div>
+
+        <!-- Hidden Elements (keeping for JS compatibility) -->
+        <div class="left-sidebar" style="display: none;">
+            <div id="grokThinking" class="grok-message grok-thinking" style="display: none;"></div>
+            <div id="grokResponse" class="grok-message grok-response" style="display: none;"></div>
+            <div style="color: #00ff41; font-size: 16px;" id="grokWaiting">Waiting for Grok to think...</div>
         </div>
 
-        <!-- Right sidebar -->
-        <div class="right-sidebar">
-            <!-- Enhanced Sidebar with all sections -->
-            <div class="sidebar-section">
-                <!-- Grok Status -->
-                <div class="grok-status-section">
-                    <h2 class="section-title">Grok Status</h2>
-                    <div id="grokStatus">
-                        <div id="grokThinking" class="grok-message grok-thinking" style="display: none; position: fixed; max-height: calc(100vh - 120px); overflow: hidden;">
-                            <div class="fade-top"></div>
-                            <div class="fade-bottom"></div>
-                        </div>
-                        <div id="grokResponse" class="grok-message grok-response" style="display: none;"></div>
-                        <div id="grokCost" class="grok-cost" style="display: none;">
-                            <div class="grok-cost-header">Token Usage</div>
-                            <div class="grok-cost-info">
-                                <div class="grok-cost-metric">
-                                    <span class="grok-cost-label">API Calls</span>
-                                    <span class="grok-cost-value" id="apiCallsCount">0</span>
-                                </div>
-                                <div class="grok-cost-metric">
-                                    <span class="grok-cost-label">Total Tokens</span>
-                                    <span class="grok-cost-value" id="totalTokens">0</span>
-                                </div>
-                                <div class="grok-cost-metric">
-                                    <span class="grok-cost-label">Last Cost</span>
-                                    <span class="grok-cost-value" id="callCost">$0.00</span>
-                                </div>
-                                <div class="grok-cost-metric">
-                                    <span class="grok-cost-label">Total Cost</span>
-                                    <span class="grok-cost-value" id="totalCost">$0.00</span>
-                                </div>
-                            </div>
-                            <div class="pricing-info">grok-3-mini pricing</div>
-                        </div>
-                        <div style="color: #666; font-size: 20px;" id="grokWaiting">Waiting for Grok to think...</div>
-                    </div>
+        <div class="center-content" style="display: none;">
+            <div class="global-map-container">
+                <div class="map-info">
+                    <span>Position: <span id="mapPosition">(0, 0)</span></span>
+                    <span>Map: <span id="currentMapName">Unknown</span></span>
                 </div>
+            </div>
+            <div class="quest-section" id="questSection" style="display: none;">
+                <h2 class="section-title" id="questTitle">Current Quest</h2>
+                <div class="quest-description" id="questDescription"></div>
+                <ul class="quest-list" id="questTriggers"></ul>
+                <div class="quest-progress-bar">
+                    <div class="quest-progress-fill" id="questProgress" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Team Display Panel - Right Bezel Area -->
+        <div class="team-display-area">
+        </div>
+
+        <!-- Floating Pokemon Team Cards -->
+        <div class="team-grid" id="pokemon-team">
+            <!-- Debug: Test content to verify positioning -->
+            <div style="background: #ff0000; color: #fff; padding: 10px; border-radius: 5px;">TEST CARD 1</div>
+            <div style="background: #00ff00; color: #000; padding: 10px; border-radius: 5px;">TEST CARD 2</div>
+        </div>
+
+        <div class="right-sidebar" style="display: none;">
+            <div id="grokStatus">
+                <div id="grokThinking" class="grok-message grok-thinking" style="display: none;"></div>
+                <div id="grokResponse" class="grok-message grok-response" style="display: none;"></div>
+                <div id="grokCost" class="grok-cost" style="display: none;">
+                    <div class="grok-cost-header">Token Usage</div>
+                    <div class="grok-cost-info">
+                        <div class="grok-cost-metric">
+                            <span class="grok-cost-label">API Calls</span>
+                            <span class="grok-cost-value" id="apiCallsCount">0</span>
+                        </div>
+                        <div class="grok-cost-metric">
+                            <span class="grok-cost-label">Total Tokens</span>
+                            <span class="grok-cost-value" id="totalTokens">0</span>
+                        </div>
+                        <div class="grok-cost-metric">
+                            <span class="grok-cost-label">Last Cost</span>
+                            <span class="grok-cost-value" id="callCost">$0.00</span>
+                        </div>
+                        <div class="grok-cost-metric">
+                            <span class="grok-cost-label">Total Cost</span>
+                            <span class="grok-cost-value" id="totalCost">$0.00</span>
+                        </div>
+                    </div>
+                    <div class="pricing-info">grok-3-mini pricing</div>
+                </div>
+                <div style="color: #666; font-size: 20px;" id="grokWaiting">Waiting for Grok to think...</div>
             </div>
         </div>
         
-        <!-- Complete Bottom Stats Bar -->
+    <!-- Complete Bottom Stats Bar (hidden but keeping for JS) -->
         <footer class="bottom-bar">
             <div class="bottom-stats">
                 <div class="bottom-stat">
@@ -1951,7 +2170,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
             <div class="input-viz" id="inputDisplay"></div>
         </footer>
-    </div>
+
+    <!-- Hidden Elements for compatibility -->
+    <div class="header-team-display" id="header-pokemon-team" style="display: none;"></div>
+    <div class="title-overlay" style="display: none;"></div>
 
     <script>
         // Global state
@@ -1966,7 +2188,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             totalInputTokens: 0,
             totalOutputTokens: 0,
             lifetimeCost: 0,
-            actionHistory: []
+            actionHistory: [],
+            // Track last rendered team JSON to avoid needless re-renders that reset CSS animations
+            lastTeamHash: ''
         };
 
         // Action mappings
@@ -1984,12 +2208,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Update uptime
         setInterval(() => {
-            const elapsed = Date.now() - gameState.startTime;
-            const hours = Math.floor(elapsed / 3600000);
-            const minutes = Math.floor((elapsed % 3600000) / 60000);
-            const seconds = Math.floor((elapsed % 60000) / 1000);
-            document.getElementById('uptime').textContent =
-                `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            const uptimeEl = document.getElementById('uptime');
+            if (uptimeEl) {
+                const elapsed = Date.now() - gameState.startTime;
+                const hours = Math.floor(elapsed / 3600000);
+                const minutes = Math.floor((elapsed % 3600000) / 60000);
+                const seconds = Math.floor((elapsed % 60000) / 1000);
+                uptimeEl.textContent =
+                    `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
         }, 1000);
 
         // New function to extract decision points from thinking
@@ -2041,6 +2268,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // Enhanced addActionToLog function
         function addActionToLog(action, reasoning, type = 'action') {
             const actionLog = document.getElementById('actionLog');
+            if (!actionLog) return; // Skip if element doesn't exist
             const entry = document.createElement('div');
             entry.className = 'action-entry';
 
@@ -2201,111 +2429,86 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             });
         }
 
-        // Update player position and redraw
+        // Update player position and center map
         function updatePlayerPosition(localX, localY, mapId, facing = 'Down') {
             if (!gameState.mapData) return;
             // map_data.json stores coordinates as [X, Y] (col, row) – see render_to_global.py
             const [map_x, map_y] = gameState.mapData[mapId].coordinates;
             const globalX = localX + map_x + PAD;
             const globalY = localY + map_y + PAD;
-            // Convert padded global → pixel coordinates relative to the *unpadded* map.
-            const pixelX  = (globalX - PAD) * TILE_SIZE;
-            const pixelY  = (globalY - PAD) * TILE_SIZE;
-
-            const wrapper = document.getElementById('globalMapWrapper');
-            const img     = document.getElementById('globalMapImage');
-            const canvas  = document.getElementById('globalMapCanvas');
-            const ctx     = canvas.getContext('2d');
-            const W = wrapper.clientWidth, H = wrapper.clientHeight;
-
-            let left = W/2 - pixelX - TILE_SIZE/2;
-            let top  = H/2 - pixelY - TILE_SIZE/2;
-
-            const minLeft = W - img.naturalWidth;
-            left = Math.min(0, Math.max(minLeft, left));
-
-            img.style.transform = `translate(${left}px, ${top}px)`;
-            // Sync background map translation with the foreground map
-            const bgImg = document.getElementById('globalMapBackground');
-            if (bgImg) bgImg.style.transform = img.style.transform;
-            canvas.width = W;
-            canvas.height = H;
-
-            drawQuestCoordinates(ctx, left, top);
-
-            const centerX = W/2, centerY = H/2;
-            const spriteEl = document.getElementById('playerSprite');
-            spriteEl.style.left = `${centerX - TILE_SIZE/2}px`;
-            spriteEl.style.top  = `${centerY - TILE_SIZE/2}px`;
-            spriteEl.style.transform = 'translate(-50%, -50%)';
-            const frameUrl = gameState.spriteFrameUrls[facing] || gameState.spriteFrameUrls['Down'];
-            if (frameUrl) {
-                spriteEl.style.width = `${TILE_SIZE}px`;
-                spriteEl.style.height = `${TILE_SIZE}px`;
-                spriteEl.style.backgroundImage = `url(${frameUrl})`;
-                spriteEl.style.backgroundSize = 'contain';
-                spriteEl.style.backgroundRepeat = 'no-repeat';
-                spriteEl.style.backgroundPosition = 'center';
-            }
+            
+            // Use the same centering logic as updatePlayerGlobal
+            updatePlayerGlobal(globalX, globalY, facing);
         }
 
-        // Directly centre map using already global (padded) coordinates
+        // Center global map on player position
         function updatePlayerGlobal(globalX, globalY, facing='Down') {
-            const wrapper = document.getElementById('globalMapWrapper');
-            const img     = document.getElementById('globalMapImage');
-            const canvas  = document.getElementById('globalMapCanvas');
-            const ctx     = canvas.getContext('2d');
-
-            // Subtract the padding applied in Python so global coordinates align to the
-            // *unpadded* quest-overlay base map exactly like we already do for quest
-            // dots and updatePlayerPosition().
+            // Calculate pixel position on the map
             const pixelX = (globalX - PAD) * TILE_SIZE;
             const pixelY = (globalY - PAD) * TILE_SIZE;
 
-            const W = wrapper.clientWidth, H = wrapper.clientHeight;
-            let left = W/2 - pixelX - TILE_SIZE/2;
-            let top  = H/2 - pixelY - TILE_SIZE/2;
-
-            const minLeft = W - img.naturalWidth;
-            left = Math.min(0, Math.max(minLeft, left));
-            // Ensure we don't pan past the bottom/top edges (was missing before)
-            const minTop  = H - img.naturalHeight;
-            top  = Math.min(0, Math.max(minTop , top ));
-
-            img.style.transform = `translate(${left}px, ${top}px)`;
-            // Sync background map translation with the foreground map
+            // Update background map position to center on player
             const bgImg = document.getElementById('globalMapBackground');
-            if (bgImg) bgImg.style.transform = img.style.transform;
-            canvas.width = W;
-            canvas.height = H;
-            drawQuestCoordinates(ctx, left, top);
-
-            const centerX = W/2, centerY = H/2;
-            const spriteEl = document.getElementById('playerSprite');
-            spriteEl.style.left = `${centerX}px`;
-            spriteEl.style.top  = `${centerY}px`;
-            spriteEl.style.transform = 'translate(-50%, -50%)';
-            const frameUrl = gameState.spriteFrameUrls[facing] || gameState.spriteFrameUrls['Down'];
-            if (frameUrl) {
-                spriteEl.style.width = `${TILE_SIZE}px`;
-                spriteEl.style.height = `${TILE_SIZE}px`;
-                spriteEl.style.backgroundImage = `url(${frameUrl})`;
-                spriteEl.style.backgroundSize = 'contain';
-                spriteEl.style.backgroundRepeat = 'no-repeat';
-                spriteEl.style.backgroundPosition = 'center';
+            if (bgImg) {
+                // Scale factor to match game screen
+                const scale = 3;
+                // Center the map using full viewport dimensions
+                const centerX = window.innerWidth / 2;
+                const centerY = window.innerHeight / 2;
+                const offsetX = centerX - (pixelX * scale);
+                const offsetY = centerY - (pixelY * scale);
+                bgImg.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+                console.log(`Map centered on player: (${globalX}, ${globalY}) -> pixel (${pixelX}, ${pixelY}) -> offset (${offsetX}, ${offsetY})`);
             }
-            // Update map position display when using global coordinates
-            const mapPosEl = document.getElementById('mapPosition');
-            if (mapPosEl) mapPosEl.textContent = `(${globalY},${globalX})`;
         }
 
         // Initial setup
         document.addEventListener('DOMContentLoaded', () => {
+            // DEBUG: Check if game screen exists
+            console.log('=== GAME SCREEN DEBUG ===');
+            let debugGameScreen = document.getElementById('gameScreen');
+            console.log('Game screen found:', !!debugGameScreen);
+            if (debugGameScreen) {
+                console.log('Game screen element:', debugGameScreen);
+                console.log('Game screen styles:', window.getComputedStyle(debugGameScreen));
+                console.log('Game screen position:', debugGameScreen.getBoundingClientRect());
+            }
+            console.log('=== END DEBUG ===');
             const teamContainer = document.getElementById('pokemon-team');
             teamContainer.innerHTML = '';
             for (let i = 0; i < 6; i++) {
                 teamContainer.appendChild(createEmptySlot());
             }
+            
+            // Make sure game screen is visible - FORCE ALL STYLES
+            const gameScreen = document.getElementById('gameScreen');
+            if (gameScreen) {
+                console.log('Game screen element found:', gameScreen);
+                console.log('Current src:', gameScreen.src);
+                console.log('Current computed style:', window.getComputedStyle(gameScreen));
+                
+                // Force all styles using setProperty with important flag
+                gameScreen.style.setProperty('display', 'block', 'important');
+                gameScreen.style.setProperty('visibility', 'visible', 'important');
+                gameScreen.style.setProperty('opacity', '1', 'important');
+                gameScreen.style.setProperty('position', 'fixed', 'important');
+                gameScreen.style.setProperty('top', 'calc(50% + 20px)', 'important');      // MOVE DOWN: change
+                gameScreen.style.setProperty('left', 'calc(50% + 50px)', 'important');     // MOVE RIGHT: change
+                gameScreen.style.setProperty('transform', 'translate(-50%, -50%)', 'important');
+                gameScreen.style.setProperty('width', '480px', 'important');
+                gameScreen.style.setProperty('height', '432px', 'important');
+                gameScreen.style.setProperty('z-index', '9999', 'important');
+                gameScreen.style.setProperty('background', '#000000', 'important');
+                gameScreen.style.setProperty('border', '2px solid rgba(255, 255, 255, 0.1)', 'important');
+                gameScreen.style.setProperty('image-rendering', 'pixelated', 'important');
+                
+                console.log('Game screen forced visible!');
+                console.log('New computed style:', window.getComputedStyle(gameScreen));
+                console.log('New position:', gameScreen.getBoundingClientRect());
+            } else {
+                console.error('Game screen element not found!');
+            }
+            
             loadQuestDefinitions();
             loadPlayerSprites();
             loadMapData();
@@ -2315,6 +2518,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // Show speech bubble
         function showSpeechBubble(text, type = 'quest_start', duration = 4000) {
             const overlay = document.getElementById('speechBubbleOverlay');
+            if (!overlay) {
+                console.log('Speech bubble overlay not found, skipping');
+                return;
+            }
             clearTimeout(gameState.speechBubbleTimer);
             overlay.innerHTML = '';
             const bubble = document.createElement('div');
@@ -2455,8 +2662,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Update Pokemon team
         async function updatePokemonTeam(partyData) {
-            const teamContainer = document.getElementById('pokemon-team');
+            console.log('=== POKEMON TEAM UPDATE ===');
+            console.log('Team data received:', partyData);
+            const teamContainer = document.querySelector('.team-grid');
+            console.log('Team container found:', !!teamContainer);
+            if (teamContainer) {
+                console.log('Team container element:', teamContainer);
+                console.log('Team container computed style:', window.getComputedStyle(teamContainer));
+            }
+            if (!teamContainer) {
+                console.error('Team container not found');
+                return;
+            }
             teamContainer.innerHTML = '';
+            console.log('Processing', partyData.length, 'Pokemon...');
             for (const p of partyData) {
                 try {
                     const apiName = getPokemonAPIName(p.speciesName);
@@ -2473,9 +2692,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 } catch {
                     teamContainer.appendChild(createEmptySlot(`Error: ${p.nickname||'Unknown'}`));
                 }
-            }
-            for (let i = partyData.length; i < 6; i++) {
-                teamContainer.appendChild(createEmptySlot());
             }
         }
 
@@ -2498,26 +2714,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             card.innerHTML = `
                 <div class="pokemon-sprite-container">
+                    <div class="pokemon-name-level-row">
+                        <div class="pokemon-name-above">${speciesName}</div>
+                        <div class="pokemon-level-inline">Lv. ${pokemon.level}</div>
+                    </div>
+                    <div class="pokemon-nickname-below">${nickname}</div>
                     <img src="${spriteUrl||'https://placehold.co/64x64/333/666?text=No+Sprite'}" 
                         alt="${speciesName}" class="pokemon-sprite"
                         onerror="this.src='https://placehold.co/64x64/333/666?text=Error';this.onerror=null;">
                     <div class="hp-bar"><div class="hp-fill ${hpClass}" style="width:${hpPct}%"></div></div>
-                    <div class="hp-text mono">${pokemon.hp}/${pokemon.maxHp}</div>
-                    <div class="pokemon-status${statusClass}" style="margin-top:2px;">${status}</div>
-                </div>
-                <div class="pokemon-card-info-wrapper">
-                    <div class="pokemon-card-main-info">
-                        <div class="pokemon-card-left">
-                            <div class="pokemon-name">${nickname}</div>
-                            <div class="pokemon-species-name">${speciesName}</div>
-                        </div>
-                        <div class="pokemon-card-right">
-                            <div class="pokemon-level">Lv. ${pokemon.level}</div>
+                    <div class="hp-and-badges-row">
+                        <div class="hp-text mono">${pokemon.hp}/${pokemon.maxHp}</div>
+                        <div class="type-status-badges">
+                            <div class="pokemon-types">${typesHtml}</div>
+                            <div class="pokemon-status${statusClass}">${status}</div>
                         </div>
                     </div>
-                    <div class="pokemon-types-row"><div class="pokemon-types">${typesHtml}</div></div>
-                    <div class="exp-bar"><div class="exp-fill" style="width:${expPct}%"></div></div>
-                    <div class="exp-text mono">EXP: ${curExp.toLocaleString()} / ${expToNext.toLocaleString()}</div>
+                </div>
+                <div class="pokemon-card-info-wrapper">
                 </div>
             `;
             return card;
@@ -2582,17 +2796,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             switch (msg.type) {
                 case 'location':
                     gameState.location = msg.data;
-                    document.getElementById('statLocation').textContent   = msg.data.map_name || 'Unknown';
-                    document.getElementById('currentMapName').textContent = msg.data.map_name || 'Unknown';
-                    document.getElementById('statMapId').textContent      = msg.data.map_id   || '0';
-                    document.getElementById('statLocal').textContent      = `(${msg.data.y||0},${msg.data.x||0})`;
-                    document.getElementById('statGlobal').textContent     = `(${msg.data.gy||0},${msg.data.gx||0})`;
+                    const statLocation = document.getElementById('statLocation');
+                    const currentMapName = document.getElementById('currentMapName');
+                    const statMapId = document.getElementById('statMapId');
+                    const statLocal = document.getElementById('statLocal');
+                    const statGlobal = document.getElementById('statGlobal');
+                    const mapPosition = document.getElementById('mapPosition');
+                    
+                    if (statLocation) statLocation.textContent = msg.data.map_name || 'Unknown';
+                    if (currentMapName) currentMapName.textContent = msg.data.map_name || 'Unknown';
+                    if (statMapId) statMapId.textContent = msg.data.map_id || '0';
+                    if (statLocal) statLocal.textContent = `(${msg.data.y||0},${msg.data.x||0})`;
+                    if (statGlobal) statGlobal.textContent = `(${msg.data.gy||0},${msg.data.gx||0})`;
+                    
                     if (msg.data.gx!==undefined && msg.data.gy!==undefined) {
                         // Use precomputed global coordinates when available for highest accuracy
                         updatePlayerGlobal(msg.data.gx, msg.data.gy, gameState.facing);
                     } else if (msg.data.x!==undefined && msg.data.y!==undefined) {
                         updatePlayerPosition(msg.data.x, msg.data.y, msg.data.map_id, gameState.facing);
-                        document.getElementById('mapPosition').textContent = `(${msg.data.gy},${msg.data.gx})`;
+                        if (mapPosition) mapPosition.textContent = `(${msg.data.gy},${msg.data.gx})`;
                     }
                     break;
 
@@ -2635,24 +2857,55 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     break;
 
                 case 'stats':
-                    document.getElementById('statMoney').textContent   = `₽${msg.data.money||0}`;
-                    document.getElementById('statSteps').textContent   = msg.data.steps||0;
-                    document.getElementById('statBadges').textContent  = `${msg.data.badges||0}/8`;
-                    document.getElementById('statSeen').textContent    = msg.data.pokedex_seen||0;
-                    document.getElementById('statCaught').textContent  = msg.data.pokedex_caught||0;
+                    const statMoney = document.getElementById('statMoney');
+                    const statSteps = document.getElementById('statSteps');
+                    const statBadges = document.getElementById('statBadges');
+                    const statSeen = document.getElementById('statSeen');
+                    const statCaught = document.getElementById('statCaught');
+                    
+                    if (statMoney) statMoney.textContent = `₽${msg.data.money||0}`;
+                    if (statSteps) statSteps.textContent = msg.data.steps||0;
+                    if (statBadges) statBadges.textContent = `${msg.data.badges||0}/8`;
+                    if (statSeen) statSeen.textContent = msg.data.pokedex_seen||0;
+                    if (statCaught) statCaught.textContent = msg.data.pokedex_caught||0;
                     break;
 
                 case 'pokemon_team':
-                    await updatePokemonTeam(msg.data);
+                    {
+                        const newHash = JSON.stringify(msg.data);
+                        if (gameState.lastTeamHash !== newHash) {
+                            gameState.lastTeamHash = newHash;
+                            await updatePokemonTeam(msg.data);
+                        }
+                    }
                     break;
 
                 case 'game_screen':
                     const gs = document.getElementById('gameScreen');
                     const ph = document.getElementById('gamePlaceholder');
+                    console.log('GAME SCREEN EVENT RECEIVED!');
+                    console.log('Game screen element:', gs);
+                    console.log('Data received:', msg.data ? 'YES' : 'NO');
                     if (gs && msg.data) {
-                        gs.src = msg.data;
-                        gs.style.display = 'block';
+                        console.log('Setting game screen content...');
+                        // Convert div to img and set src
+                        gs.innerHTML = `<img src="${msg.data}" style="width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated;" alt="Game Screen">`;
+                        // Keep the div styling - CHANGE THESE VALUES TO MOVE THE GAME SCREEN
+                        gs.style.setProperty('display', 'flex', 'important');
+                        gs.style.setProperty('visibility', 'visible', 'important');
+                        gs.style.setProperty('opacity', '1', 'important');
+                        gs.style.setProperty('position', 'fixed', 'important');
+                        gs.style.setProperty('top', 'calc(50% + 20px)', 'important');      // MOVE DOWN: change
+                        gs.style.setProperty('left', 'calc(50% + 50px)', 'important');     // MOVE RIGHT: change
+                        gs.style.setProperty('transform', 'translate(-50%, -50%)', 'important');
+                        gs.style.setProperty('width', '480px', 'important');
+                        gs.style.setProperty('height', '432px', 'important');
+                        gs.style.setProperty('z-index', '9999', 'important');
+                        console.log('Game screen updated with data length:', msg.data.length);
+                        console.log('Game screen computed style:', window.getComputedStyle(gs));
                         if (ph) ph.style.display = 'none';
+                    } else {
+                        console.error('Game screen element or data missing!', {element: !!gs, data: !!msg.data});
                     }
                     break;
 
@@ -2697,14 +2950,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 case 'grok_cost':
                     const costEl = document.getElementById('grokCost');
                     if (msg.data) {
-                        document.getElementById('apiCallsCount').textContent = msg.data.api_calls_count||0;
-                        document.getElementById('totalTokens').textContent   = msg.data.total_tokens?.toLocaleString()||0;
-                        document.getElementById('callCost').textContent      = msg.data.call_cost?`$${msg.data.call_cost.toFixed(4)}`:'$0.00';
-                        document.getElementById('totalCost').textContent     = msg.data.total_cost?`$${msg.data.total_cost.toFixed(4)}`:'$0.00';
-                        costEl.style.display = 'block';
-                        document.getElementById('statCallCost').textContent     = msg.data.call_cost?`$${msg.data.call_cost.toFixed(4)}`:'$0.00';
-                        document.getElementById('statLifetimeCost').textContent = msg.data.total_cost?`$${msg.data.total_cost.toFixed(2)}`:'$0.00';
-                    } else costEl.style.display = 'none';
+                        const apiCallsEl = document.getElementById('apiCallsCount');
+                        const totalTokensEl = document.getElementById('totalTokens');
+                        const callCostEl = document.getElementById('callCost');
+                        const totalCostEl = document.getElementById('totalCost');
+                        const statCallCostEl = document.getElementById('statCallCost');
+                        const statLifetimeCostEl = document.getElementById('statLifetimeCost');
+                        
+                        if (apiCallsEl) apiCallsEl.textContent = msg.data.api_calls_count||0;
+                        if (totalTokensEl) totalTokensEl.textContent = msg.data.total_tokens?.toLocaleString()||0;
+                        if (callCostEl) callCostEl.textContent = msg.data.call_cost?`$${msg.data.call_cost.toFixed(4)}`:'$0.00';
+                        if (totalCostEl) totalCostEl.textContent = msg.data.total_cost?`$${msg.data.total_cost.toFixed(4)}`:'$0.00';
+                        if (costEl) costEl.style.display = 'block';
+                        if (statCallCostEl) statCallCostEl.textContent = msg.data.call_cost?`$${msg.data.call_cost.toFixed(4)}`:'$0.00';
+                        if (statLifetimeCostEl) statLifetimeCostEl.textContent = msg.data.total_cost?`$${msg.data.total_cost.toFixed(2)}`:'$0.00';
+                    } else if (costEl) {
+                        costEl.style.display = 'none';
+                    }
                     break;
 
                 case 'action':
@@ -2758,6 +3020,139 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             };
 
             el._scrollTimer = setInterval(tick, 30);
+        }
+
+        // ==============================================================
+        // PREMIUM BEZEL EFFECTS - from Opus design
+        // ==============================================================
+        
+        // Create floating particles
+        function createParticle() {
+            const particle = document.createElement('div');
+            particle.className = 'particle';
+            particle.style.left = Math.random() * 100 + 'vw';
+            particle.style.animationDelay = Math.random() * 10 + 's';
+            particle.style.animationDuration = (8 + Math.random() * 4) + 's';
+            
+            // Random particle appearance
+            const types = ['✦', '✧', '✨', '◆', '●'];
+            particle.textContent = types[Math.floor(Math.random() * types.length)];
+            particle.style.color = `hsl(${Math.random() * 60 + 220}, 100%, 70%)`;
+            particle.style.fontSize = (10 + Math.random() * 10) + 'px';
+            particle.style.textShadow = '0 0 10px currentColor';
+            
+            document.body.appendChild(particle);
+            
+            // Remove particle after animation
+            setTimeout(() => particle.remove(), 10000);
+        }
+        
+        // Generate particles periodically
+        setInterval(createParticle, 2000);
+        
+        // Initial particles
+        for (let i = 0; i < 5; i++) {
+            setTimeout(createParticle, i * 400);
+        }
+        
+        // Interactive touch zone
+        const touchZone = document.querySelector('.touch-zone');
+        if (touchZone) {
+            touchZone.addEventListener('click', function() {
+                const orb = document.querySelector('.status-orb');
+                if (orb) {
+                    orb.style.animation = 'none';
+                    setTimeout(() => {
+                        orb.style.animation = 'orb-pulse 2s ease-in-out infinite';
+                    }, 10);
+                }
+                
+                // Create ripple effect
+                const ripple = document.createElement('div');
+                ripple.style.cssText = `
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    width: 0;
+                    height: 0;
+                    border-radius: 50%;
+                    border: 2px solid rgba(120, 219, 255, 0.6);
+                    animation: ripple 1s ease-out;
+                    pointer-events: none;
+                `;
+                this.appendChild(ripple);
+                setTimeout(() => ripple.remove(), 1000);
+            });
+        }
+        
+        // Add ripple animation
+        const rippleStyle = document.createElement('style');
+        rippleStyle.textContent = `
+            @keyframes ripple {
+                to {
+                    width: 200px;
+                    height: 200px;
+                    border-color: transparent;
+                }
+            }
+        `;
+        document.head.appendChild(rippleStyle);
+        
+        // 3D tilt effect on mouse move for TV container
+        const tvContainer = document.querySelector('.tv-container');
+        let currentX = 0;
+        let currentY = 0;
+        let targetX = 0;
+        let targetY = 0;
+        
+        if (tvContainer) {
+            document.addEventListener('mousemove', (e) => {
+                const rect = tvContainer.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                
+                targetX = (e.clientX - centerX) / (rect.width / 2) * 2;
+                targetY = (e.clientY - centerY) / (rect.height / 2) * 2;
+            });
+            
+            function animate3DTV() {
+                currentX += (targetX - currentX) * 0.05;
+                currentY += (targetY - currentY) * 0.05;
+                
+                tvContainer.style.transform = `
+                    perspective(2000px)
+                    rotateY(${currentX}deg)
+                    rotateX(${-currentY}deg)
+                    translateY(${Math.sin(Date.now() * 0.001) * 10}px)
+                `;
+                
+                requestAnimationFrame(animate3DTV);
+            }
+            
+            animate3DTV();
+        }
+
+        // Premium game screen handling
+        const gameScreen = document.getElementById('gameScreen');
+        const gamePlaceholder = document.getElementById('gamePlaceholder');
+        
+        // Show game screen when data is available, hide placeholder
+        function showGameScreen() {
+            if (gameScreen && gameScreen.src && !gameScreen.src.includes('data:image/svg+xml')) {
+                gameScreen.style.display = 'block';
+                if (gamePlaceholder) gamePlaceholder.style.display = 'none';
+            } else {
+                gameScreen.style.display = 'none';
+                if (gamePlaceholder) gamePlaceholder.style.display = 'block';
+            }
+        }
+        
+        // Monitor for game screen updates
+        if (gameScreen) {
+            gameScreen.addEventListener('load', showGameScreen);
+            // Check initially
+            showGameScreen();
         }
     </script>
 

@@ -1418,6 +1418,109 @@ def main():
 
                 time.sleep(0.05)
                 continue
+            
+        if env.quest_manager.current_quest_id == 46:
+            print(f'play.py: main(): quest_manager.current_quest_id == {env.quest_manager.current_quest_id}')
+            local_x, local_y, map_id = env.get_game_coords()
+            glob_y, glob_x = local_to_global(local_y, local_x, map_id)
+            facing_direction = env._get_direction(env.pyboy.game_area())
+            noop_action = None
+            print(f"play.py: main(): glob_y: {glob_y}, glob_x: {glob_x}, facing_direction: {facing_direction}")
+            print(f"play.py: main(): env.never_run_again: {env.never_run_again}")
+            if glob_y == 151 and glob_x == 152:
+                print(f"play.py: main(): glob_y == 151 and glob_x == 152")
+                if env.never_run_again == False and facing_direction != "up":
+                    noop_action = getattr(env, "up", 3)
+                elif env.never_run_again == False and facing_direction == "up":
+                    noop_action = getattr(env, "a", 4)
+                elif env.never_run_again == True:
+                    noop_action = getattr(env, "down", 0)
+                print(f"play.py: main(): noop_action: {noop_action}")
+                
+            elif glob_y == 152 and glob_x == 152 and env.never_run_again == True:
+                print(f"TRIGERING 152, 152 FACING {facing_direction} {env.never_run_again}")
+                if facing_direction == "down":
+                    noop_action = getattr(env, "right", 2)
+                    print(f"152, 152: {noop_action}")
+                    # raise Exception("play.py: main(): glob_y == 152 and glob_x == 152 and env.never_run_again == True")
+            elif glob_y == 152 and glob_x == 153 and env.never_run_again == True:
+                if facing_direction == "right":
+                    noop_action = getattr(env, "right", 2)
+            elif glob_y == 152 and glob_x == 154 and env.never_run_again == True:
+                if facing_direction == "right":
+                    noop_action = getattr(env, "right", 2)
+            elif glob_y == 152 and glob_x == 155 and env.never_run_again == True:
+                if facing_direction == "right":
+                    noop_action = getattr(env, "right", 2)
+            elif glob_y == 152 and glob_x == 156 and env.never_run_again == True:
+                if facing_direction == "right":
+                    noop_action = getattr(env, "right", 2)
+            elif glob_y == 152 and glob_x == 157 and env.never_run_again == True:
+                if facing_direction == "right":
+                    noop_action = getattr(env, "right", 2)
+            elif glob_y == 152 and glob_x == 158 and env.never_run_again == True:
+                if facing_direction == "right":
+                    noop_action = getattr(env, "right", 2)
+            elif glob_y == 152 and glob_x == 159 and env.never_run_again == True:
+                if facing_direction == "right":
+                    noop_action = getattr(env, "down", 0)
+            elif glob_y == 153 and glob_x == 159 and env.never_run_again == True:
+                if facing_direction == "down" and "MAGIKARP" not in env.read_party():
+                    noop_action = getattr(env, "a", 4)
+                elif facing_direction == "down" and "MAGIKARP" in env.read_party():
+                    if env.step_count % 2 == 0:
+                        noop_action = getattr(env, "b", 5)
+                    else:
+                        noop_action = getattr(env, "left", 1)
+            elif glob_y == 153 and glob_x == 158:
+                if facing_direction == "left":
+                    noop_action = getattr(env, "left", 1)
+            elif glob_y == 153 and glob_x == 157:
+                if facing_direction == "left":
+                    noop_action = getattr(env, "left", 1)
+            elif glob_y == 153 and glob_x == 156:
+                if facing_direction == "left":
+                    noop_action = getattr(env, "left", 1)
+            elif glob_y == 153 and glob_x == 155:
+                if facing_direction == "left":
+                    noop_action = getattr(env, "left", 1) 
+            elif glob_y == 153 and glob_x == 154:
+                if facing_direction == "left":
+                    noop_action = getattr(env, "left", 1)
+            elif glob_y == 153 and glob_x == 153:
+                if facing_direction == "left":
+                    noop_action = getattr(env, "down", 0)
+            elif glob_y == 154 and glob_x == 153:
+                if facing_direction == "down":
+                    noop_action = getattr(env, "down", 0)
+            elif glob_y == 155 and glob_x == 153:
+                if facing_direction == "down":
+                    noop_action = getattr(env, "down", 0)   
+                    
+            time.sleep(0.1)                 
+                
+            print(f"152, 152: after the ifs: {noop_action}")
+
+            if noop_action is not None:
+                obs, reward, terminated, truncated, info, total_steps = execute_action_step(
+                    env,
+                    noop_action,
+                    quest_manager,
+                    navigator,
+                    logger,
+                    total_steps,
+                )
+                print(f"play.py: main(): noop_action for quest 46: got past the execute_action_step {noop_action}")
+                env.pyboy.tick()
+                raw_frame = env.render()
+                processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
+                update_screen(screen, processed_frame_rgb, screen_width, screen_height)
+                # Update UI without advancing game state
+                update_ui_if_needed()
+                loop_clock.tick(30)
+
+                time.sleep(0.05)
+                continue
         
         if current_action is None:
             # When no explicit player/AI action is available we must still

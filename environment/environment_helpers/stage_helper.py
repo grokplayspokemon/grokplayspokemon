@@ -436,37 +436,7 @@ STAGE_DICT = {
     46: {
         'events': [],
         'blockings': [],
-        'scripted_movements': [
-            {'condition': 
-                {'global_coords': (151, 152),
-                 'dialog_present': False,
-                 'health_fraction': 1,
-                 }, 
-                'action': 'down'},
-            {'condition': 
-                {'global_coords': (153, 157),
-                 },
-                'stop_condition': {'party_pokemon_species_is': 'MAGIKARP'},
-                'action': 'down'},
-            {'condition': 
-                {'global_coords': (154, 157),
-                 }, 
-                'stop_condition': {'party_pokemon_species_is': 'MAGIKARP'},
-                'action': 'right',
-                },
-            {'condition': 
-                {'global_coords': (154, 158),
-                 }, 
-                'stop_condition': {'party_pokemon_species_is': 'MAGIKARP'},
-                'action': 'right',
-                },
-            {'condition': 
-                {'global_coords': (154, 159),
-                 }, 
-                'stop_condition': {'party_pokemon_species_is': 'MAGIKARP'},
-                'action': 'a',
-                },            
-        ]
+        'scripted_movements': []
     },
     # Add more stages as needed
 }
@@ -952,7 +922,10 @@ class StageManager:
                     return False
             
             # Check global coordinates
-            if 'global_coords' in condition and global_coords:
+            if 'global_coords' in condition:
+                if not global_coords:
+                    print(f"StageManager DEBUG: global_coords check failed – global coordinates not available")
+                    return False
                 target_global = condition['global_coords']
                 if global_coords != target_global:
                     print(f"StageManager DEBUG: global_coords check failed – at {global_coords}, expected {target_global}")

@@ -782,6 +782,7 @@ class RedGymEnv(Env):
         self.pokecenter_heal = 0
         self.use_ball_count = 0
         self.never_run_again = False
+        self.well_i_dont_give_refunds = False
 
     def render(self) -> npt.NDArray[np.uint8]:
         return self.screen.ndarray
@@ -1255,6 +1256,7 @@ class RedGymEnv(Env):
         self.step_count += 1
         
         self.handle_oak_dialog()
+        self.handle_pokecenter_dialog()
         
         # ANTI-SPAM LOGGING: Only log when values actually change or significant events occur
         # This prevents console spam while preserving important debugging information
@@ -1393,11 +1395,14 @@ class RedGymEnv(Env):
                 print(f"environment.py: step(): StageManager update error: {e}")
 
         # Apply stage-specific scripted movement overrides using the original action
-        if hasattr(self, 'stage_manager') and hasattr(self.stage_manager, 'scripted_stage_movement'):
+        # SKIP stage manager overrides for PATH_FOLLOW_ACTION - navigation should have full control
+        if action != PATH_FOLLOW_ACTION and hasattr(self, 'stage_manager') and hasattr(self.stage_manager, 'scripted_stage_movement'):
             overridden = self.stage_manager.scripted_stage_movement(action)
             if overridden != final_action:
                 final_action = overridden
                 print(f"environment.py: step(): StageManager.scripted_stage_movement override to {final_action}")
+        elif action == PATH_FOLLOW_ACTION:
+            print(f"environment.py: step(): Skipping stage manager override for PATH_FOLLOW_ACTION - navigation has control")
 
         # SAFETY GUARD: Never pass a None action to the emulator. If the navigation
         # logic (e.g., end-of-path in ConsolidatedNavigator) returns `None` we
@@ -3348,61 +3353,74 @@ class RedGymEnv(Env):
         return "\n".join(lines)
 
     def get_valid_moves(self):
-        """Return list of valid cardinal directions for the player this frame.
+        """Return a list of valid cardinal directions ("up", "down", "left", "right")
+        that the player can move **this frame**.
 
-        Uses the full 18×20 collision grid so single‑tile warps/doors are not
-        lost in down‑sampling.  Additionally, certain tile IDs are treated as
-        walkable even if the collision byte is 0 (warp/door tiles in Pokémon
-        Red).
+        Instead of re-implementing the low-level collision semantics here we
+        delegate to ``self.get_collision_map()`` which already returns a
+        fully-validated 9 × 10 numeric grid centred on the player::
+
+            0 – walkable path
+            1 – wall / obstacle / unwalkable
+            2 – sprite / NPC
+            3/4/5/6 – player facing up / down / left / right
+
+        The player is always located at row 4, col 4 of that grid, so we only
+        need to inspect the four neighbouring tiles to decide which moves are
+        possible.  This guarantees that *get_valid_moves* and the on-screen
+        collision map stay in perfect sync.
         """
+        try:
+            collision_map_str = self.get_collision_map()
+            if not collision_map_str:
+                # If we failed to build the collision map fall back to a safe
+                # default of no moves to avoid false positives.
+                return []
 
-        collision = self.pyboy.game_area_collision()  # 18×20 ints (0/1)
-        # The background tilemap (same resolution) lets us identify warps
-        full_map = self.pyboy.game_wrapper._get_screen_background_tilemap()
+            # Extract the first nine lines of the numeric grid (ignore legend).
+            grid_lines = []
+            for line in collision_map_str.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                if line[0] not in "0123456":
+                    # encountered legend -> stop collecting
+                    if grid_lines:
+                        break
+                    continue
+                grid_lines.append(line)
+                if len(grid_lines) == 9:
+                    break
 
-        # Known warp/door tile indices (inside houses, building exits, etc.)
-        WARP_TILE_IDS = {
-            # stair warp tiles
-            0x0A, 0x0B,
-            # interior door top/bottom
-            0x4E, 0x4F,
-            # exterior single‑door top/bottom variants
-            0x50, 0x51, 0x52, 0x53,
-            # house / lab door variants
-            0x5E, 0x5F,
-            0x6E, 0x6F,
-            0x70, 0x71, 0x72, 0x73,
-        }
+            # Parse into 2-D int list.
+            grid = [list(map(int, ln.split())) for ln in grid_lines]
+            if len(grid) != 9 or any(len(r) != 10 for r in grid):
+                return []  # malformed grid
 
-        # Helper to decide if the tile at (r,c) can be entered
-        def is_walkable(r: int, c: int) -> bool:
-            if not (0 <= r < 18 and 0 <= c < 20):
-                return False
-            if collision[r][c] != 0:
-                return True
-            # collision == 0  => normally a wall; allow if warp tile id
-            return full_map[r][c] in WARP_TILE_IDS
+            pr, pc = 4, 4  # player location in grid
+            offsets = {
+                "up":    (pr - 1, pc),
+                "down":  (pr + 1, pc),
+                "left":  (pr, pc - 1),
+                "right": (pr, pc + 1),
+            }
 
-        # Locate player sprite dynamically (works after map scroll)
-        pr, pc = self._get_player_center(full_map)
-        directions = {
-            "up": (pr - 1, pc),
-            "down": (pr + 1, pc),
-            "left": (pr, pc - 1),
-            "right": (pr, pc + 1),
-        }
-
-        valid = [d for d, (r, c) in directions.items() if is_walkable(r, c)]
-
-        # If standing on a warp tile, always allow the direction that leads off‑screen
-        if full_map[pr][pc] in WARP_TILE_IDS:
-            # Determine facing direction to exit (depends on warp orientation)
-            # crude heuristic: if pr < 9 then up exits, if pr > 9 down exits
-            if pr <= 8 and "up" not in valid:
-                valid.append("up")
-            if pr >= 9 and "down" not in valid:
-                valid.append("down")
-        return valid
+            valid_moves = []
+            for d, (r, c) in offsets.items():
+                try:
+                    tile = grid[r][c]
+                except IndexError:
+                    continue
+                # A tile is walkable only when it is marked as 0 (walkable
+                # path).  Everything else (1 = wall, 2 = sprite, etc.) blocks
+                # movement.
+                if tile == 0:
+                    valid_moves.append(d)
+            print(f"environment.py: get_valid_moves(): valid_moves: {valid_moves}")
+            return valid_moves
+        except Exception as e:
+            print(f"get_valid_moves(): error – {e}")
+            return []
 
     def _can_move_between_tiles(self, tile1: int, tile2: int, tileset: str) -> bool:
         """
@@ -4121,7 +4139,16 @@ class RedGymEnv(Env):
         if "J K L M N O P" in dialog:
             self.never_run_again = True
             print(f"Environment: NEW NAME dialog detected, setting never_run_again to True")
-        
+
+    def handle_pokecenter_dialog(self):
+        print(f"environment.py: handle_pokecenter_dialog: self.never_run_again: {self.never_run_again}")
+        dialog = self.read_dialog()
+        if "again!" in dialog:
+            self.never_run_again = True
+            print(f"Environment: again! dialog detected, setting never_run_again to True")
+        if "Well, I don't" in dialog:
+            self.well_i_dont_give_refunds = True
+            print(f"Environment: Well, I don't\ngive refunds! dialog detected, setting well_i_dont_give_refunds to True")
 
     def process_action(self, action: int, source: str = "unknown") -> tuple:
         """
@@ -4134,10 +4161,8 @@ class RedGymEnv(Env):
         Returns:
             tuple: (obs, reward, done, truncated, info)
         """
-        # Run through stage_helper StageManager
-        
-        
-        
+        # Run through stage_helper StageManager       
+                
         # Log source for debugging
         print(f"UNIFIED_ACTION: Source={source}, Action={action}, Step={self.step_count}")
         

@@ -465,26 +465,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             100% { transform: translateX(100%); }
         }
 
-        /* Brand logo - TOP BLACK BEZEL AREA */
-        .brand {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: calc((100vh - 432px) / 2);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 36px;
-            font-weight: 200;
-            letter-spacing: 12px;
-            background: rgba(0, 0, 0, 0.95);
-            color: #00ff41;
-            font-family: 'VT323', monospace;
-            text-shadow: 0 0 20px #00ff41;
-            z-index: 50;
-            border-bottom: 2px solid #00ff41;
-        }
+
+
+
 
         @keyframes glow-text {
             from { filter: drop-shadow(0 0 20px rgba(120, 119, 198, 0.5)); }
@@ -708,42 +691,43 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: none !important;
         }
 
-        /* Electronic Terminal Footer - BOTTOM BLACK BEZEL AREA */
+        /* Electronic Terminal Footer - ATTACHED TO BOTTOM */
         .bottom-bar {
+            background: #000000 !important;
+            border-top: 2px solid #333333 !important;
+            box-shadow: 
+                0 -4px 15px rgba(0, 0, 0, 0.5) !important;
+            padding: 15px 24px !important;
+            display: flex !important;
+            justify-content: flex-start !important;
+            align-items: center !important;
+            flex-wrap: nowrap !important;
+            height: 90px !important;
+            overflow-y: hidden !important;
+            overflow-x: hidden !important;
+            gap: 24px !important;
             position: fixed !important;
             bottom: 0 !important;
             left: 0 !important;
             right: 0 !important;
-            height: calc((100vh - 432px) / 2) !important;
-            background: rgba(0, 0, 0, 0.95) !important;
-            border-top: 2px solid #00ff41 !important;
+            margin: 0 !important;
             border-radius: 0 !important;
-            padding: 20px !important;
+            z-index: 5000 !important;
             font-family: 'VT323', monospace !important;
-            font-size: 18px !important;
-            color: #00ff41 !important;
-            text-shadow: 0 0 5px #00ff41 !important;
-            box-shadow: 
-                0 0 20px rgba(0, 255, 65, 0.3),
-                inset 0 0 20px rgba(0, 0, 0, 0.5) !important;
-            z-index: 30 !important;
+        }
+
+        /* Footer stats container */
+        .bottom-stats {
             display: flex !important;
-            flex-wrap: wrap !important;
-            gap: 20px !important;
+            gap: 24px !important;
+            flex-wrap: nowrap !important;
             align-items: center !important;
-            justify-content: center !important;
+            flex: 1 1 auto !important;
+            overflow: hidden !important;
         }
 
         .bottom-bar::before {
-            content: "▶ GROK SYSTEM STATUS" !important;
-            position: absolute !important;
-            top: -12px !important;
-            left: 15px !important;
-            background: rgba(0, 0, 0, 0.9) !important;
-            padding: 2px 8px !important;
-            font-size: 12px !important;
-            border: 1px solid #00ff41 !important;
-            border-radius: 4px !important;
+            display: none !important;
         }
 
         .bottom-bar .bottom-stat {
@@ -752,37 +736,56 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             margin: 0 !important;
         }
 
-        .bottom-bar .bottom-stat-label {
-            color: #00aa2e !important;
-            font-size: 14px !important;
-            text-transform: uppercase !important;
+        .bottom-stat {
+            white-space: nowrap !important;
+            flex: 0 0 auto !important;
         }
 
-        .bottom-bar .bottom-stat-value {
-            color: #00ff41 !important;
-            font-size: 16px !important;
-            font-weight: normal !important;
-            text-shadow: 0 0 8px #00ff41 !important;
+        .bottom-stat-label {
+            color: #888888 !important;
+            font-size: 26px !important;
+            text-transform: uppercase !important;
+            font-family: 'VT323', monospace !important;
+        }
+
+        .bottom-stat-value {
+            color: #ffffff !important;
+            font-size: 28px !important;
+            font-weight: 400 !important;
+            text-shadow: none !important;
+            font-family: 'VT323', monospace !important;
+            font-variant-numeric: tabular-nums !important;
+        }
+
+        /* Special styling for the title */
+        .title-stat .bottom-stat-label {
+            color: #00ff88 !important;
+            font-size: 38px !important;
+            font-family: 'VT323', monospace !important;
+            text-shadow: 0 0 10px rgba(0, 255, 136, 0.5) !important;
+        }
+
+        .title-stat .bottom-stat-value {
+            color: #ff6600 !important;
+            font-size: 42px !important;
+            font-weight: 400 !important;
+            text-shadow: 0 0 10px rgba(255, 102, 0, 0.5) !important;
+            font-family: 'VT323', monospace !important;
+        }
+
+        .bottom-stat-value.cost {
+            color: #2ecc71 !important;
+            font-weight: 600 !important;
         }
 
         .bottom-bar .bottom-stat-value.cost {
-            color: #ffff00 !important;
-            text-shadow: 0 0 8px #ffff00 !important;
+            color: #478424 !important;
+            text-shadow: 0 0 8px rgba(143, 194, 94, 0.6) !important;
         }
 
         /* Terminal cursor animation */
         .bottom-bar::after {
-            content: "█" !important;
-            position: absolute !important;
-            right: 15px !important;
-            top: 50% !important;
-            transform: translateY(-50%) !important;
-            animation: terminal-blink 1s step-end infinite !important;
-            color: #00ff41 !important;
-        }
-
-        @keyframes terminal-blink {
-            50% { opacity: 0; }
+            display: none !important;
         }
 
         /* Keep utility classes for JavaScript */
@@ -1016,34 +1019,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .pokemon-card {
-            background: rgba(17, 17, 17, 0.9);
-            backdrop-filter: blur(10px);
-            border: 1px solid #2a2a2a;
-            border-radius: 4px;
-            padding: 4px;
+            background: #9ccc65;
+            border: 4px solid #1b5e20;
+            border-radius: 8px;
+            padding: 16px;
             transition: all 0.2s ease;
             cursor: pointer;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 100px; /* Increased from 80px */
-            width: 100px; /* Keep at 100px */
+            min-height: 200px; /* Doubled */
+            width: 200px; /* Doubled */
             position: relative;
             z-index: 1001;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            box-shadow: 
+                0 4px 12px rgba(0, 0, 0, 0.3),
+                inset 0 0 8px rgba(27, 94, 32, 0.3);
+            font-family: 'VT323', monospace;
+            color: #1b5e20;
         }
 
         .pokemon-card:hover {
-            background: rgba(24, 24, 24, 0.95);
-            border-color: #444;
+            background: #aed581;
+            border-color: #2e7d32;
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+            box-shadow: 
+                0 6px 20px rgba(0, 0, 0, 0.4),
+                inset 0 0 12px rgba(27, 94, 32, 0.4);
         }
 
         .pokemon-sprite {
-            width: 72px; /* Increased from 64px */
-            height: 72px;
+            width: 144px; /* Doubled */
+            height: 144px; /* Doubled */
             image-rendering: pixelated;
             filter: brightness(1.1) contrast(1.1);
             object-fit: contain;
@@ -1081,30 +1089,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .pokemon-name {
-            font-size: 16px !important;
-            font-weight: 600 !important;
+            font-size: 32px !important;
+            font-weight: 400 !important;
             text-transform: uppercase !important;
-            color: #ff00ff !important;
+            color: #206323 !important;
             line-height: 1.1 !important;
             font-family: 'VT323', monospace !important;
-            text-shadow: 0 0 3px #ff00ff !important;
+            text-shadow: 0 0 5px rgba(56, 118, 47, 0.4) !important;
         }
 
         .pokemon-species-name {
-            font-size: 14px !important;
-            font-weight: 500 !important;
-            color: #ff77c6 !important;
-            text-transform: capitalize !important;
-            margin-top: 4px !important;
+            font-size: 28px !important;
+            font-weight: 400 !important;
+            color: #38762f !important;
+            text-transform: uppercase !important;
+            margin-top: 8px !important;
             line-height: 1.1 !important;
             font-family: 'VT323', monospace !important;
+            text-shadow: 0 0 5px rgba(71, 132, 36, 0.4) !important;
         }
 
         .pokemon-level {
-            font-size: 18px; /* Doubled from 11px */
-            color: #e0e0e0;
-            font-weight: 600;
+            font-size: 36px; /* Doubled */
+            color: #206323;
+            font-weight: 400;
             line-height: 1.1;
+            font-family: 'VT323', monospace;
+            text-shadow: 0 0 5px rgba(56, 118, 47, 0.4);
         }
 
         .pokemon-name-level-row {
@@ -1116,27 +1127,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .pokemon-name-above {
-            font-size: 10px;
-            font-weight: 600;
+            font-size: 28px;
+            font-weight: 400;
             text-transform: uppercase;
-            color: #e0e0e0;
+            color: #206323;
             line-height: 1;
+            font-family: 'VT323', monospace;
+            text-shadow: 0 0 5px rgba(56, 118, 47, 0.4);
         }
 
         .pokemon-level-inline {
-            font-size: 10px;
-            color: #e0e0e0;
-            font-weight: 600;
+            font-size: 28px;
+            color: #206323;
+            font-weight: 400;
             line-height: 1;
+            font-family: 'VT323', monospace;
+            text-shadow: 0 0 5px rgba(56, 118, 47, 0.4);
         }
 
         .pokemon-nickname-below {
-            font-size: 8px;
-            font-weight: 500;
-            color: #bbb;
+            font-size: 24px;
+            font-weight: 400;
+            color: #478424;
             text-align: center;
             margin-bottom: 0px;
             line-height: 1;
+            font-family: 'VT323', monospace;
+            text-shadow: 0 0 5px rgba(71, 132, 36, 0.4);
         }
 
         .type-badge {
@@ -1193,10 +1210,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .hp-text {
-            font-size: 8px; /* Much smaller for header */
-            color: #aaa;
+            font-size: 28px; /* Doubled */
+            color: #206323;
             font-variant-numeric: tabular-nums;
             line-height: 1;
+            font-family: 'VT323', monospace;
+            text-shadow: 0 0 5px rgba(56, 118, 47, 0.4);
         }
 
         .type-status-badges {
@@ -1212,14 +1231,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         .pokemon-status {
-            font-size: 6px; /* Very small for header */
-            font-weight: 600;
-            color: #aaa;
+            font-size: 24px; /* Doubled */
+            font-weight: 400;
+            color: #206323;
             text-transform: uppercase;
             line-height: 1;
-            padding: 1px 2px;
-            border-radius: 1px;
-            background: rgba(255, 255, 255, 0.1);
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: rgba(32, 99, 35, 0.15);
+            font-family: 'VT323', monospace;
+            text-shadow: 0 0 5px rgba(56, 118, 47, 0.4);
         }
 
         /* Status colors */
@@ -1602,97 +1623,143 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }
 
         /* Remove team display area header */
-        .team-grid {
+        /* Pokemon team container - HIDDEN BACKGROUND */
+        .team-container {
             position: fixed !important;
-            bottom: calc(calc((100vh - 432px) / 2) + 20px) !important; /* Above footer */
-            right: 20px !important;
+            bottom: 100px !important; /* Above footer */
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            width: auto !important; /* Auto width to fit content */
+            height: auto !important; /* Auto height to fit content */
+            background: transparent !important;
+            backdrop-filter: none !important;
+            border: none !important;
+            border-radius: 0 !important;
+            padding: 0 !important;
+            z-index: 4000 !important;
+            box-shadow: none !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+
+        .team-grid {
             display: flex !important;
             flex-direction: row !important; /* Horizontal layout */
-            gap: 15px !important;
-            z-index: 4000 !important;
-            pointer-events: none; /* Allow clicks through container */
-            /* Debug: temporary border to see positioning */
-            border: 2px solid #ff0000 !important;
-            min-height: 50px !important;
-            min-width: 200px !important;
+            gap: 10px !important;
+            justify-content: center !important;
+            align-items: center !important;
+            height: auto !important;
+            width: auto !important;
+            background: transparent !important;
+            border: none !important;
+            padding: 0 !important;
         }
+        
         .pokemon-card {
             display: flex !important;
             flex-direction: column !important; /* Stack vertically within each card */
             align-items: center !important;
-            background: rgba(20, 20, 20, 0.9) !important;
-            border: 2px solid rgba(255, 0, 255, 0.6) !important;
-            border-radius: 12px !important;
-            padding: 20px !important;
-            min-height: 160px !important; /* Bigger cards */
-            min-width: 140px !important; /* Bigger cards */
+            background: #000000 !important;
+            border: 2px solid #333333 !important;
+            border-radius: 8px !important;
+            padding: 8px !important;
+            height: 110px !important; /* Fixed compressed height */
+            width: 130px !important; /* Fixed width */
             transition: all 0.3s ease !important;
-            pointer-events: auto; /* Allow clicks on individual cards */
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7) !important;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5) !important;
+            position: relative !important;
+            overflow: hidden !important;
         }
+        
         .pokemon-card:hover {
-            background: rgba(40, 20, 40, 0.95) !important;
-            border-color: rgba(255, 0, 255, 0.8) !important;
-            box-shadow: 0 6px 30px rgba(255, 0, 255, 0.4) !important;
-            transform: translateY(-5px) !important;
+            background: transparent !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
+            transform: translateY(-2px) !important;
         }
         /* Bars column - adjusted for vertical card layout */
+        .pokemon-card .pokemon-card-stats-footer,
         .pokemon-card-stats-footer {
-            display: flex;
-            flex-direction: column;
+            display: flex !important;
+            flex-direction: column !important;
             width: 100% !important;
             margin-right: 0 !important;
             margin-top: 10px !important;
+            background: transparent !important;
+            border: none !important;
+            padding: 2px !important;
         }
         .hp-bar, .exp-bar {
             width: 100% !important;
-            height: 8px !important;
+            height: 12px !important;
             border-radius: 4px !important;
-            margin-bottom: 8px !important;
+            margin-bottom: 6px !important;
+            margin-top: 4px !important;
+            background: #333 !important;
         }
         .hp-fill {
-            border-radius: 4px !important;
+            border-radius: 2px !important;
         }
         .exp-fill {
-            border-radius: 4px !important;
-            background: #ff00ff !important;
+            border-radius: 2px !important;
+            background: #7877C6 !important;
         }
         .hp-text {
-            font-size: 14px !important;
-            color: #ff00ff !important;
+            font-size: 16px !important;
+            color: white !important;
             font-family: 'VT323', monospace !important;
-            text-shadow: 0 0 3px #ff00ff !important;
+            text-shadow: 1px 1px 2px black, -1px -1px 2px black, 1px -1px 2px black, -1px 1px 2px black !important;
+            white-space: nowrap !important;
         }
         /* Show Pokemon info for floating cards */
+        .pokemon-card .pokemon-card-info-wrapper,
         .pokemon-card-info-wrapper { 
             display: flex !important; 
             flex-direction: column !important;
             align-items: center !important;
             text-align: center !important;
             width: 100% !important;
+            background: transparent !important;
+            border: none !important;
+            padding: 2px !important;
+            margin-top: 2px !important;
         }
 
-        /* Sprite - bigger for floating cards */
+        /* Sprite - compressed for cards */
         .pokemon-sprite-container {
-            width: 120px !important;
-            height: 120px !important;
-            background: rgba(0, 0, 0, 0.6) !important;
-            border-radius: 10px !important;
-            padding: 10px !important;
-            border: 2px solid rgba(255, 0, 255, 0.5) !important;
+            width: 100% !important;
+            height: auto !important;
+            background: none !important;
+            border-radius: 0 !important;
+            padding: 0 !important;
+            border: none !important;
             display: flex !important;
+            flex-direction: column !important;
             align-items: center !important;
-            justify-content: center !important;
-            margin-bottom: 10px !important;
+            justify-content: flex-start !important;
+            margin-bottom: 0 !important;
         }
         .pokemon-sprite {
-            width: 100px !important;
-            height: 100px !important;
+            width: 90px !important;
+            height: 90px !important;
             image-rendering: pixelated !important;
+            object-fit: contain !important;
+            background: none !important;  
+            border: none !important;
+            margin-bottom: 2px !important; /* Reduced from 10px to 2px */
         }
 
-        /* Hide empty slots */
-        .empty-slot { display: none !important; }
+        /* Show empty slots for debugging */
+        .empty-slot { 
+            display: flex !important;
+            background: rgba(60, 60, 60, 0.5) !important;
+            border: 1px dashed rgba(120, 119, 198, 0.3) !important;
+            color: #666 !important;
+            font-size: 12px !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
         /* --------------------------------------------------------------------- */
 
         /* --- UI ADJUSTMENTS (2025-06-19d) ------------------------------------ */
@@ -1769,23 +1836,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         /* Enlarge sprite visuals */
         .pokemon-sprite-container {
-            width: 128px !important;
-            height: 128px !important;
+            width: 160px !important;
+            height: 80px !important;
         }
+        
         .pokemon-sprite {
-            max-width: 128px !important;
-            max-height: 128px !important;
+            max-width: 160px !important;
+            max-height: 160px !important;
         }
         /* --------------------------------------------------------------------- */
 
         /* --- UI PATCH (2025-06-20c) ----------------------------------------- */
         /* Expand team panel width to accommodate bars + sprite */
-        .team-display-area {
+        /*.team-display-area {
             width: 220px !important;   /* sprite 128 + bars 64 + gaps */
             background: rgba(0,0,0,0.6) !important;
             border-radius: 8px;
             padding: 6px !important;
-        }
+        }*/
         .pokemon-card-stats-footer { width: 74px !important; }
         .hp-bar, .exp-bar { width: 100% !important; }
         /* --------------------------------------------------------------------- */
@@ -1801,6 +1869,214 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: radial-gradient(ellipse at center, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.6) 40%, rgba(0,0,0,0) 100%) !important;
         }
 
+        /* =================================================================== */
+         /* ==================== TEAM UI MODIFICATION ZONE ==================== */
+         /* =================================================================== */
+         /* 
+         * ALL POKEMON TEAM UI ELEMENTS ARE IN THIS SECTION
+         * 
+         * KEY ELEMENTS TO MODIFY:
+         * 1. .team-container - Main container position, size, colors
+         * 2. .pokemon-card - Individual card styling, size, spacing
+         * 3. .pokemon-sprite-container - Sprite box size and styling
+         * 4. .pokemon-card-info-wrapper - Pokemon name/level text area
+         * 5. .pokemon-card-stats-footer - HP bars and type badges area
+         * 
+         * POSITIONING: Change 'right' value in .team-container to move left/right
+         * SIZING: Change 'width' in .team-container and 'height' in .pokemon-card
+         * COLORS: Modify 'background', 'border', and text 'color' values
+         */
+         
+         /* COMPLETELY HIDE the old messy header team display system */
+        /* .header-team-display {
+             display: none !important;
+             visibility: hidden !important;
+             position: absolute !important;
+             top: -9999px !important;
+             left: -9999px !important;
+             z-index: -1 !important;
+         } */
+
+                 /* Fix the team container to be properly positioned and sized */
+        /* .team-container {
+             position: fixed !important;
+             bottom: 100px !important;
+             left: 1210px !important;
+             width: 600px !important;
+             height: auto !important;
+             max-height: 600px !important;
+             background: rgba(0, 0, 0, 0.9) !important;
+             border: 2px solid #333 !important;
+             border-radius: 10px !important;
+             padding: 20px !important;
+             z-index: 5000 !important;
+             overflow-y: auto !important;
+             backdrop-filter: blur(10px) !important;
+         } */
+
+                /* Make team grid horizontal and organized */
+        /* .team-grid {
+             display: flex !important;
+             flex-direction: row !important;
+             gap: 15px !important;
+             width: 100% !important;
+             flex-wrap: wrap !important;
+             justify-content: flex-start !important;
+         } */
+
+        
+
+                 /* Sprite container - center */
+        /* .pokemon-sprite-container {
+             width: 160px !important;
+             height: 160px !important;
+             min-width: 160px !important;
+             background: transparent !important;
+             border-radius: 8px !important;
+             padding: 10px !important;
+             display: flex !important;
+             align-items: center !important;
+             justify-content: center !important;
+             margin: 12px 0 !important;
+         } */
+
+         .pokemon-sprite {
+             width: 140px !important;
+             height: 140px !important;
+             image-rendering: pixelated !important;
+             object-fit: contain !important;
+         }
+
+                 /* Info section - full width */
+        /* .pokemon-card-info-wrapper {
+             width: 100% !important;
+             display: flex !important;
+             flex-direction: column !important;
+             align-items: center !important;
+             padding: 0 !important;
+         } */
+
+        .pokemon-name-level-row {
+             display: flex !important;
+             justify-content: space-between !important;
+             align-items: center !important;
+             margin-bottom: 4px !important;
+             width: 100% !important;
+         }
+
+         .pokemon-name-above {
+             font-size: 24px !important;
+             font-weight: bold !important;
+             color: #ffffff !important;
+             font-family: 'VT323', monospace !important;
+             text-transform: uppercase !important;
+         }
+
+         .pokemon-level-inline {
+             font-size: 22px !important;
+             color: #ffffff !important;
+             font-family: 'VT323', monospace !important;
+         }
+
+         .pokemon-nickname-below {
+             font-size: 18px !important;
+             color: #cccccc !important;
+             font-family: 'VT323', monospace !important;
+             margin-bottom: 8px !important;
+             text-align: center !important;
+         }
+
+                 /* Stats section - bottom */
+         .pokemon-card-stats-footer {
+             width: 100% !important;
+             display: flex !important;
+             flex-direction: column !important;
+             align-items: center !important;
+             margin-top: auto !important;
+         }
+
+         .hp-bar {
+             width: 90% !important;
+             height: 10px !important;
+             background: #333 !important;
+             border-radius: 5px !important;
+             margin-bottom: 8px !important;
+             overflow: hidden !important;
+         }
+
+        .hp-fill {
+            height: 100% !important;
+            background: #10b981 !important;
+            border-radius: 3px !important;
+            transition: width 0.3s ease !important;
+        }
+
+        .hp-fill.medium {
+            background: #f59e0b !important;
+        }
+
+        .hp-fill.low {
+            background: #ef4444 !important;
+        }
+
+                 .hp-and-badges-row {
+             display: flex !important;
+             justify-content: space-between !important;
+             align-items: center !important;
+             gap: 8px !important;
+             width: 100% !important;
+             margin-top: 4px !important;
+             font-size: 16px !important;
+         }
+
+         .hp-text {
+             font-size: 16px !important;
+             color: #ffffff !important;
+             font-family: 'VT323', monospace !important;
+         }
+
+         .type-status-badges {
+             display: flex !important;
+             gap: 6px !important;
+             align-items: center !important;
+         }
+
+         .pokemon-types {
+             display: flex !important;
+             gap: 4px !important;
+         }
+
+         .type-badge {
+             font-size: 14px !important;
+             padding: 4px 8px !important;
+             border-radius: 5px !important;
+             font-weight: bold !important;
+             text-transform: uppercase !important;
+         }
+
+         .pokemon-status {
+             font-size: 14px !important;
+             padding: 4px 8px !important;
+             border-radius: 5px !important;
+             background: rgba(100, 100, 100, 0.8) !important;
+             color: #ffffff !important;
+             text-transform: uppercase !important;
+         }
+
+                 /* Empty slot styling */
+         .empty-slot {
+             display: flex !important;
+             align-items: center !important;
+             justify-content: center !important;
+             background: rgba(50, 50, 50, 0.3) !important;
+             border: 1px dashed #666 !important;
+             color: #666 !important;
+             font-size: 18px !important;
+             font-family: 'VT323', monospace !important;
+         }
+        /* -------------------------------------------------------------------------- */
+        }
+
         /* Elevate header so it's always visible */
         .header { z-index: 4000 !important; }
 
@@ -1809,9 +2085,36 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         /* Reveal pokemon info wrapper (names / types) */
         .pokemon-card-info-wrapper { display: block !important; flex-basis: 100%; margin-top: 4px; text-align: center; }
-        .pokemon-name { font-size: 16px; font-weight:600; }
-        .pokemon-species-name { font-size: 14px; color:#bbb; }
+        .pokemon-name { font-size: 16px; font-weight:600; text-align: center !important; }
+        .pokemon-name-above { 
+            font-size: 22px !important; 
+            font-weight: bold !important; 
+            text-align: center !important; 
+            color: #ffffff !important;
+            margin-bottom: 2px !important; /* Reduced from 6px to 2px */
+            font-family: 'VT323', monospace !important;
+        }
+        .pokemon-species-name { font-size: 10px; color:#bbb; text-align: center !important; }
         .pokemon-types-row { justify-content:center; }
+        
+        /* Pokemon stats bottom section */
+        .pokemon-stats-bottom {
+            width: 100% !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            margin-top: auto !important;
+            flex-shrink: 0 !important;
+        }
+        
+        .pokemon-level-right {
+            font-size: 18px !important;
+            color: #ffffff !important;
+            font-weight: bold !important;
+            text-align: right !important;
+            margin-bottom: 2px !important; /* Reduced from 6px to 2px */
+            font-family: 'VT323', monospace !important;
+        }
 
         /* Keep sprite right, bars left */
         .pokemon-card { flex-direction: row-reverse !important; align-items: flex-start; }
@@ -1854,15 +2157,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border: 1px solid rgba(100,100,100,0.1);
         }
         .pokemon-card { 
-            overflow: visible !important;
-            background: rgba(40,40,40,0.2) !important;
-            border-radius: 8px;
-            padding: 6px !important;
-            margin: 4px 0;
-            border: 1px solid rgba(100,100,100,0.1);
-            box-shadow: 
-                inset 0 1px 0 rgba(255,255,255,0.05),
-                0 2px 8px rgba(0,0,0,0.3);
+            overflow: hidden !important;
+            background: #000000 !important;
+            border-radius: 8px !important;
+            padding: 4px !important; /* Reduced from 8px to 4px */
+            margin: 2px 0; /* Reduced from 4px to 2px */
+            border: 2px solid #333333 !important;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5) !important;
+            width: 180px !important;
+            height: 140px !important; /* Reduced from 160px to 140px */
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
         }
         /* --------------------------------------------------------------------- */
 
@@ -1873,9 +2180,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             height: auto !important;
         }
-        .pokemon-sprite-container .hp-bar { width: 100% !important; margin-top:4px; }
-        .pokemon-sprite-container .hp-text { font-size: 14px; margin-top:2px; }
+        .pokemon-sprite-container .hp-bar { width: 100% !important; margin-top:1px; } /* Reduced from 4px to 1px */
+        .pokemon-sprite-container .hp-text { font-size: 14px; margin-top:1px; } /* Reduced from 2px to 1px */
         .pokemon-status { font-size: 14px; }
+        /* Cache bust: 2025-01-24-17:45 - Compressed vertical spacing */
         /* --------------------------------------------------------------------- */
 
         /* --- UI PATCH (2025-06-22) fades & exp bar ------------------------- */
@@ -2026,20 +2334,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="touch-zone"></div>
         </div>
         
-                    <!-- Brand -->
-        <div class="brand">GROK Plays Pokémon</div>
-            </div>
+                        </div>
 
     <!-- Centered game screen - ADJUST THESE VALUES TO MOVE IT -->
     <div id="gameScreen" style="
         position: fixed !important;
-        top: calc(50% + 280px) !important;    /* Move DOWN: increase +20px to move further down */
-        left: calc(50% + 280px) !important;   /* Move RIGHT: increase +30px to move further right */
+        top: calc(50% + 282px) !important;    /* Move DOWN: moved 2px down */
+        left: calc(50% + 278px) !important;   /* Move RIGHT: moved 2px left */
         transform: translate(-50%, -50%) !important;
         width: 480px !important;
         height: 432px !important;
         background: #000000 !important;
-        border: 2px solid rgba(255, 255, 255, 0.2) !important;
+        border: none !important;
         color: #ff0000 !important;
         font-size: 24px !important;
         font-weight: bold !important;
@@ -2083,11 +2389,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         <div class="team-display-area">
         </div>
 
-        <!-- Floating Pokemon Team Cards -->
-        <div class="team-grid" id="pokemon-team">
-            <!-- Debug: Test content to verify positioning -->
-            <div style="background: #ff0000; color: #fff; padding: 10px; border-radius: 5px;">TEST CARD 1</div>
-            <div style="background: #00ff00; color: #000; padding: 10px; border-radius: 5px;">TEST CARD 2</div>
+        <!-- Pokemon Team Container -->
+        <div class="team-container">
+            <div class="team-grid" id="pokemon-team">
+            </div>
         </div>
 
         <div class="right-sidebar" style="display: none;">
@@ -2120,9 +2425,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
         </div>
         
-    <!-- Complete Bottom Stats Bar (hidden but keeping for JS) -->
+    <!-- Complete Bottom Stats Bar -->
         <footer class="bottom-bar">
             <div class="bottom-stats">
+                <div class="bottom-stat title-stat">
+                    <span class="bottom-stat-label">GROK Plays</span>
+                    <span class="bottom-stat-value">Pokémon</span>
+                </div>
                 <div class="bottom-stat">
                     <span class="bottom-stat-label">Location</span>
                     <span class="bottom-stat-value" id="statLocation">Unknown</span>
@@ -2492,14 +2801,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 gameScreen.style.setProperty('visibility', 'visible', 'important');
                 gameScreen.style.setProperty('opacity', '1', 'important');
                 gameScreen.style.setProperty('position', 'fixed', 'important');
-                gameScreen.style.setProperty('top', 'calc(50% + 20px)', 'important');      // MOVE DOWN: change
-                gameScreen.style.setProperty('left', 'calc(50% + 50px)', 'important');     // MOVE RIGHT: change
+                gameScreen.style.setProperty('top', 'calc(50% + 22px)', 'important');      // MOVE DOWN: moved 2px down
+                gameScreen.style.setProperty('left', 'calc(50% + 48px)', 'important');     // MOVE RIGHT: moved 2px left
                 gameScreen.style.setProperty('transform', 'translate(-50%, -50%)', 'important');
                 gameScreen.style.setProperty('width', '480px', 'important');
                 gameScreen.style.setProperty('height', '432px', 'important');
                 gameScreen.style.setProperty('z-index', '9999', 'important');
                 gameScreen.style.setProperty('background', '#000000', 'important');
-                gameScreen.style.setProperty('border', '2px solid rgba(255, 255, 255, 0.1)', 'important');
+                gameScreen.style.setProperty('border', 'none', 'important');
                 gameScreen.style.setProperty('image-rendering', 'pixelated', 'important');
                 
                 console.log('Game screen forced visible!');
@@ -2714,20 +3023,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             card.innerHTML = `
                 <div class="pokemon-sprite-container">
-                    <div class="pokemon-name-level-row">
-                        <div class="pokemon-name-above">${speciesName}</div>
-                        <div class="pokemon-level-inline">Lv. ${pokemon.level}</div>
-                    </div>
+                    <div class="pokemon-name-above">${speciesName}</div>
                     <div class="pokemon-nickname-below">${nickname}</div>
                     <img src="${spriteUrl||'https://placehold.co/64x64/333/666?text=No+Sprite'}" 
                         alt="${speciesName}" class="pokemon-sprite"
                         onerror="this.src='https://placehold.co/64x64/333/666?text=Error';this.onerror=null;">
-                    <div class="hp-bar"><div class="hp-fill ${hpClass}" style="width:${hpPct}%"></div></div>
-                    <div class="hp-and-badges-row">
-                        <div class="hp-text mono">${pokemon.hp}/${pokemon.maxHp}</div>
-                        <div class="type-status-badges">
-                            <div class="pokemon-types">${typesHtml}</div>
-                            <div class="pokemon-status${statusClass}">${status}</div>
+                    <div class="pokemon-stats-bottom">
+                        <div class="pokemon-level-right">Lv. ${pokemon.level}</div>
+                        <div class="hp-bar"><div class="hp-fill ${hpClass}" style="width:${hpPct}%"></div></div>
+                        <div class="hp-and-badges-row">
+                            <div class="hp-text mono">${pokemon.hp}/${pokemon.maxHp}</div>
+                            <div class="type-status-badges">
+                                <div class="pokemon-types">${typesHtml}</div>
+                                <div class="pokemon-status${statusClass}">${status}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2796,12 +3105,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             switch (msg.type) {
                 case 'location':
                     gameState.location = msg.data;
+                    // Update header stats
+                    const headerStatLocation = document.getElementById('headerStatLocation');
+                    const headerStatMapId = document.getElementById('headerStatMapId');
+                    const headerStatLocal = document.getElementById('headerStatLocal');
+                    const headerStatGlobal = document.getElementById('headerStatGlobal');
+                    
+                    // Update footer stats (if they exist)
                     const statLocation = document.getElementById('statLocation');
                     const currentMapName = document.getElementById('currentMapName');
                     const statMapId = document.getElementById('statMapId');
                     const statLocal = document.getElementById('statLocal');
                     const statGlobal = document.getElementById('statGlobal');
                     const mapPosition = document.getElementById('mapPosition');
+                    
+                    if (headerStatLocation) headerStatLocation.textContent = msg.data.map_name || 'Unknown';
+                    if (headerStatMapId) headerStatMapId.textContent = msg.data.map_id || '0';
+                    if (headerStatLocal) headerStatLocal.textContent = `(${msg.data.y||0},${msg.data.x||0})`;
+                    if (headerStatGlobal) headerStatGlobal.textContent = `(${msg.data.gy||0},${msg.data.gx||0})`;
                     
                     if (statLocation) statLocation.textContent = msg.data.map_name || 'Unknown';
                     if (currentMapName) currentMapName.textContent = msg.data.map_name || 'Unknown';
@@ -2857,11 +3178,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     break;
 
                 case 'stats':
+                    // Update header stats
+                    const headerStatMoney = document.getElementById('headerStatMoney');
+                    const headerStatSteps = document.getElementById('headerStatSteps');
+                    const headerStatBadges = document.getElementById('headerStatBadges');
+                    const headerStatCaught = document.getElementById('headerStatCaught');
+                    
+                    // Update footer stats (if they exist)
                     const statMoney = document.getElementById('statMoney');
                     const statSteps = document.getElementById('statSteps');
                     const statBadges = document.getElementById('statBadges');
                     const statSeen = document.getElementById('statSeen');
                     const statCaught = document.getElementById('statCaught');
+                    
+                    if (headerStatMoney) headerStatMoney.textContent = `₽${msg.data.money||0}`;
+                    if (headerStatSteps) headerStatSteps.textContent = msg.data.steps||0;
+                    if (headerStatBadges) headerStatBadges.textContent = `${msg.data.badges||0}/8`;
+                    if (headerStatCaught) headerStatCaught.textContent = msg.data.pokedex_caught||0;
                     
                     if (statMoney) statMoney.textContent = `₽${msg.data.money||0}`;
                     if (statSteps) statSteps.textContent = msg.data.steps||0;
@@ -2895,8 +3228,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         gs.style.setProperty('visibility', 'visible', 'important');
                         gs.style.setProperty('opacity', '1', 'important');
                         gs.style.setProperty('position', 'fixed', 'important');
-                        gs.style.setProperty('top', 'calc(50% + 20px)', 'important');      // MOVE DOWN: change
-                        gs.style.setProperty('left', 'calc(50% + 50px)', 'important');     // MOVE RIGHT: change
+                        gs.style.setProperty('top', 'calc(50% + 22px)', 'important');      // MOVE DOWN: moved 2px down
+                        gs.style.setProperty('left', 'calc(50% + 48px)', 'important');     // MOVE RIGHT: moved 2px left
                         gs.style.setProperty('transform', 'translate(-50%, -50%)', 'important');
                         gs.style.setProperty('width', '480px', 'important');
                         gs.style.setProperty('height', '432px', 'important');
@@ -2950,12 +3283,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 case 'grok_cost':
                     const costEl = document.getElementById('grokCost');
                     if (msg.data) {
+                        // Header cost
+                        const headerStatCost = document.getElementById('headerStatCost');
+                        
+                        // Footer/sidebar cost elements
                         const apiCallsEl = document.getElementById('apiCallsCount');
                         const totalTokensEl = document.getElementById('totalTokens');
                         const callCostEl = document.getElementById('callCost');
                         const totalCostEl = document.getElementById('totalCost');
                         const statCallCostEl = document.getElementById('statCallCost');
                         const statLifetimeCostEl = document.getElementById('statLifetimeCost');
+                        
+                        if (headerStatCost) headerStatCost.textContent = msg.data.total_cost?`$${msg.data.total_cost.toFixed(2)}`:'$0.00';
                         
                         if (apiCallsEl) apiCallsEl.textContent = msg.data.api_calls_count||0;
                         if (totalTokensEl) totalTokensEl.textContent = msg.data.total_tokens?.toLocaleString()||0;

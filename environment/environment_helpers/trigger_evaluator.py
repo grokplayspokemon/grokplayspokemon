@@ -27,6 +27,9 @@ class TriggerEvaluator:
         # The environment has its own environment_map_history that we'll use
         
         self.active_triggers = {}
+        
+        # Track visited coordinates for coordinates_match triggers
+        self.visited_coordinates = set()  # Set of (x, y, map_id) tuples
 
     def _get_trigger_signature(self, trigger: Dict) -> str:
         """Generate a unique signature for a trigger to track its cooldown"""
@@ -47,6 +50,28 @@ class TriggerEvaluator:
         """Check if a trigger is on cooldown to prevent spam"""
         signature = self._get_trigger_signature(trigger)
         current_time = time.time()
+        
+        # TEMPORARY FIX: Bypass cooldown for Quest 16 transition that's causing a stuck loop
+        # Quest 16 trigger: (prev_map == 0) and (curr_map == 12)
+        if (trigger.get('type') == 'current_map_is_previous_map_was' and 
+            trigger.get('previous_map_id') == 0 and 
+            trigger.get('current_map_id') == 12):
+            print(f"[TriggerEvaluator] BYPASSING COOLDOWN for Quest 16 trigger: {signature}")
+            print(f"[TriggerEvaluator] Quest 16 Debug - Current game state:")
+            if self.env:
+                x, y, map_id = self.env.get_game_coords()
+                print(f"[TriggerEvaluator] Quest 16 Debug - Player coords: ({x}, {y}), map: {map_id}")
+                
+                # Check if Oak's Parcel is in inventory
+                try:
+                    items_in_bag = list(self.env.get_items_in_bag())
+                    parcel_present = any(item.name == 'OAKS_PARCEL' for item in items_in_bag)
+                    print(f"[TriggerEvaluator] Quest 16 Debug - Oak's Parcel in bag: {parcel_present}")
+                    print(f"[TriggerEvaluator] Quest 16 Debug - Items in bag: {[item.name for item in items_in_bag]}")
+                except Exception as e:
+                    print(f"[TriggerEvaluator] Quest 16 Debug - Error checking items: {e}")
+            
+            return False
         
         if signature in self._trigger_cooldowns:
             cooldown_data = self._trigger_cooldowns[signature]
@@ -143,6 +168,13 @@ class TriggerEvaluator:
                 f"({px} <= {x_max} or {x_max} is None) and "
                 f"({py} <= {y_max} or {y_max} is None)"
             )
+        elif ttype == 'coordinates_match':
+            coords = trigger.get('coordinates', [])
+            if len(coords) == 3:
+                x, y, map_id = coords
+                return f"player_at_coordinates({x}, {y}, {map_id}) or visited_coordinates({x}, {y}, {map_id})"
+            else:
+                return f"invalid_coordinates_match_format({coords})"
         else:
             return f"unknown_trigger_type('{ttype}')"
 
@@ -258,19 +290,56 @@ class TriggerEvaluator:
             legacy_trigger['type'] = 'event_completed'
             return self.check_trigger(legacy_trigger, current_map_id)
         elif ttype == 'dialog_contains_text':
-            raw_dialog = self.env.read_dialog() or ''
+            # FIXED: Use buffered dialog for better timing/persistence
+            raw_dialog = ''
+            if hasattr(self.env, 'get_recent_dialog_for_triggers'):
+                raw_dialog = self.env.get_recent_dialog_for_triggers() or ''
+            else:
+                # Fallback to direct read
+                raw_dialog = self.env.read_dialog() or ''
+            
             norm_dialog = re.sub(r'\s+', ' ', raw_dialog.replace('\n', ' ')).strip()
             target_text_raw = trigger.get('text', '')
             target_text_norm = re.sub(r'\s+', ' ', target_text_raw.replace('\n', ' ')).strip()
+            
             # SPECIAL CASE: Empty target string means we want **no dialog** present
             if target_text_norm == '':
                 result = (norm_dialog == '')
             else:
+                # Enhanced buffer search - check both current dialog and buffer
                 result = (target_text_norm in norm_dialog)
+                if not result and hasattr(self.env, 'check_dialog_buffer_for_text'):
+                    result = self.env.check_dialog_buffer_for_text(target_text_raw)
+            
             values_str = f"Dialog: '{norm_dialog[:50]}...'" if norm_dialog else 'Dialog: <none>'
             debug_str = f"Evaluating: {logic_code} → {result}"
+            
+            # Enhanced debugging for quest 12 dialog issue
+            if target_text_norm == 'along' and not result:
+                print(f"[QUEST12_DEBUG] Dialog trigger failed for 'along':")
+                print(f"[QUEST12_DEBUG]   Raw dialog: '{raw_dialog}'")
+                print(f"[QUEST12_DEBUG]   Normalized dialog: '{norm_dialog}'") 
+                print(f"[QUEST12_DEBUG]   Target text: '{target_text_norm}'")
+                print(f"[QUEST12_DEBUG]   Contains check: {'along' in norm_dialog}")
+                if hasattr(self.env, 'dialog_buffer'):
+                    print(f"[QUEST12_DEBUG]   Dialog buffer: {self.env.dialog_buffer}")
+            elif target_text_norm == 'along' and result:
+                print(f"[QUEST12_DEBUG] Dialog trigger SUCCESS for 'along': '{norm_dialog}'")
+            
+            # Enhanced debugging for any dialog_contains_text trigger 
+            if not result and norm_dialog and target_text_norm:
+                print(f"[DIALOG_DEBUG] Failed trigger - target: '{target_text_norm}' not in dialog: '{norm_dialog}'")
+            elif result and target_text_norm:
+                print(f"[DIALOG_DEBUG] Success trigger - target: '{target_text_norm}' found in dialog: '{norm_dialog}'")
         elif ttype == 'item_received_dialog':
-            raw_dialog = self.env.read_dialog() or ''
+            # FIXED: Use buffered dialog for better timing/persistence
+            raw_dialog = ''
+            if hasattr(self.env, 'get_recent_dialog_for_triggers'):
+                raw_dialog = self.env.get_recent_dialog_for_triggers() or ''
+            else:
+                # Fallback to direct read
+                raw_dialog = self.env.read_dialog() or ''
+            
             norm_dialog = re.sub(r'\s+', ' ', raw_dialog.replace('\n', ' ')).strip()
             target_text_raw = trigger.get('text', '')
             target_text_norm = re.sub(r'\s+', ' ', target_text_raw.replace('\n', ' ')).strip()
@@ -411,6 +480,38 @@ class TriggerEvaluator:
                 f"Bounds: x[{x_min},{x_max}], y[{y_min},{y_max}]"
             )
             debug_str = f"Evaluating: {logic_code} → {result}"
+        elif ttype == 'coordinates_match':
+            target_coords = trigger.get('coordinates', [])
+            if len(target_coords) == 3:
+                target_x, target_y, target_map_id = target_coords
+                target_coord_tuple = (target_x, target_y, target_map_id)
+                
+                # Get current player coordinates
+                player_x, player_y, player_map_id = self.env.get_game_coords()
+                current_coord_tuple = (player_x, player_y, player_map_id)
+                
+                # Check if target coordinates have ever been visited (permanent)
+                if target_coord_tuple in self.visited_coordinates:
+                    result = True
+                    status = "Already Visited"
+                else:
+                    # Check if player is currently at target coordinates
+                    currently_at_target = (current_coord_tuple == target_coord_tuple)
+                    if currently_at_target:
+                        # Mark as visited permanently
+                        self.visited_coordinates.add(target_coord_tuple)
+                        result = True
+                        status = "Just Visited"
+                    else:
+                        result = False
+                        status = "Not Visited"
+                
+                values_str = f"PlayerPos: {current_coord_tuple}, Target: {target_coord_tuple}, Status: {status}"
+                debug_str = f"Evaluating: {logic_code} → {result}"
+            else:
+                result = False
+                values_str = f"Invalid coordinates format: {target_coords}"
+                debug_str = f"Evaluating: {logic_code} → {result} (invalid format)"
         else:
             result = False # Keep default
             values_str = f"Unsupported Type: {ttype}" # Keep default

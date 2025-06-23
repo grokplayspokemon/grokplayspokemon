@@ -1,6 +1,7 @@
 # environment.py
 import io
 import os
+import re
 import time
 import uuid
 import json # Added for saving path trace data
@@ -398,6 +399,13 @@ class RedGymEnv(Env):
         # Initialize logger
         self.logger = get_pokemon_logger()
 
+        # Dialog state persistence for trigger evaluation
+        self.last_dialog = ''
+        self.current_dialog = ''
+        # NEW: Dialog buffer for trigger evaluation
+        self.dialog_buffer = []  # Store recent dialog for trigger evaluation
+        self.max_dialog_buffer_size = 10
+
     def set_navigator(self, navigator):
         self.navigator = navigator
 
@@ -620,8 +628,7 @@ class RedGymEnv(Env):
         # Initialize map_history with current map
         self.current_map_id = self.read_m("wCurMap")
         self.map_history.clear()
-        for i in range(10):
-            self.map_history.append(self.current_map_id)
+        self.map_history.append(self.current_map_id)
 
         self.update_pokedex()
         self.update_tm_hm_obtained_move_ids()
@@ -1230,11 +1237,11 @@ class RedGymEnv(Env):
         # reads as noise generated mid-warp.
 
         if cur_map == 0 and self.map_history:
-            # If the last confirmed map *was not* Pallet Town, ignore this
-            # reading outright – regardless of the local X/Y values – because
-            # Pallet Town is geographically disconnected from the rest of the
-            # world and should never appear in the middle of a warp chain.
-            if self.map_history[-1] != 0:
+            # QUEST COMPATIBILITY: Allow legitimate transitions to Pallet Town from connected maps:
+            # 0=Pallet Town, 12=Route 1, 37=Red's House 1F, 39=Blue's House, 40=Oak's Lab
+            # These transitions are required for various quest completions.
+            # Only ignore transitions from other disconnected maps.
+            if self.map_history[-1] not in [0, 12, 37, 39, 40]:
                 # Verbose trace to aid debugging
                 print("environment.py: update_map_history(): Ignoring stray Pallet Town map-ID (0) – last map was", self.map_history[-1])
                 return
@@ -1359,10 +1366,13 @@ class RedGymEnv(Env):
                 print(f"🎯 Navigator current_index: {self.navigator.current_coordinate_index}")
                 
                 # FORCE QUEST LOADING IF NEEDED
+                # Always load the current quest path when coordinates are empty or mismatched
                 if current_quest and (not self.navigator.sequential_coordinates or self.navigator.active_quest_id != current_quest):
                     print(f"🎯 FORCE LOADING quest {current_quest} into navigator")
                     success = self.navigator.load_coordinate_path(current_quest)
                     print(f"🎯 Force load result: {success}")
+                elif self.navigator.quest_locked:
+                    print(f"🎯 SKIPPING FORCE LOAD - navigator locked on fallback path (quest {self.navigator.active_quest_id})")
                 
                 print(f"🎯 Converting PATH_FOLLOW_ACTION via ConsolidatedNavigator")
                 converted_action = self.navigator.convert_path_follow_to_movement_action(PATH_FOLLOW_ACTION)
@@ -1414,7 +1424,18 @@ class RedGymEnv(Env):
             print(f"environment.py: step(): final_action was None – substituting noop action {final_action}")
 
         print(f"environment.py: step(): step number is: {self.step_count} ACTION {final_action} running on emulator")
-        self.run_action_on_emulator(final_action)
+        # Path-follow movement should bypass collision via navigator
+        if action == PATH_FOLLOW_ACTION and hasattr(self, 'navigator') and self.navigator:
+            try:
+                moved = self.navigator._execute_movement(final_action, bypass_collision=True)
+                print(f"environment.py: step(): PATH_FOLLOW_ACTION movement executed via navigator, moved={moved}")
+            except Exception as e:
+                print(f"environment.py: step(): Error executing navigator movement: {e}")
+                # Fallback to emulator if navigator movement fails
+                self.run_action_on_emulator(final_action)
+        else:
+            # Default execution path
+            self.run_action_on_emulator(final_action)
         
         
         # Continue with all the normal game state updates that must happen after every action
@@ -1523,6 +1544,21 @@ class RedGymEnv(Env):
         # Trigger debug: dialog, inventory, battle flags
         dialog = self.read_dialog() or ''
         self.last_dialog = dialog
+        
+        # NEW: Update dialog buffer for trigger evaluation
+        if dialog and dialog.strip():
+            # Add new dialog to buffer if it's different from the last entry
+            if not self.dialog_buffer or self.dialog_buffer[-1] != dialog:
+                self.dialog_buffer.append(dialog)
+                # Keep buffer size manageable
+                if len(self.dialog_buffer) > self.max_dialog_buffer_size:
+                    self.dialog_buffer.pop(0)
+                    
+                # Debug output for quest 12 specifically
+                if 'along' in dialog.lower():
+                    print(f"[QUEST12_DEBUG] Dialog containing 'along' added to buffer: '{dialog}'")
+                    print(f"[QUEST12_DEBUG] Dialog buffer now contains: {len(self.dialog_buffer)} entries")
+        
         debug_print(f"[TriggerTest] dialog_contains_text: {dialog}")
         bag_items = list(self.get_items_in_bag())
         debug_print(f"[TriggerTest] item_is_in_inventory: {[item.name for item in bag_items]}")
@@ -2724,6 +2760,19 @@ class RedGymEnv(Env):
             # Fun fact: The way they test if an item is an hm in code is by testing the item id
             # is greater than or equal to 0xC4 (the item id for HM_01)
 
+            # DEBUG: Log what items we're keeping/removing before making changes
+            print(f"[ITEM MANAGEMENT DEBUG] Current bag has {self.pyboy.memory[wNumBagItems]} items")
+            items_before = [(Items(item).name, quantity) for item, quantity in zip(bag_items[::2], bag_items[1::2]) if item != 255]
+            print(f"[ITEM MANAGEMENT DEBUG] Items before cleanup: {items_before}")
+            
+            # Check if Oak's Parcel is present
+            oaks_parcel_present = any(Items(item) == Items.OAKS_PARCEL for item in bag_items[::2] if item != 255)
+            print(f"[ITEM MANAGEMENT DEBUG] Oak's Parcel present: {oaks_parcel_present}")
+            
+            # Show what items are protected
+            protected_items = KEY_ITEMS | REQUIRED_ITEMS | HM_ITEMS
+            print(f"[ITEM MANAGEMENT DEBUG] Protected items include Oak's Parcel: {Items.OAKS_PARCEL in protected_items}")
+
             # TODO either remove or check if guard has been given drink
             # guard given drink are 4 script pointers to check, NOT an event
             new_bag_items = [
@@ -2731,6 +2780,15 @@ class RedGymEnv(Env):
                 for item, quantity in zip(bag_items[::2], bag_items[1::2])
                 if Items(item) in KEY_ITEMS | REQUIRED_ITEMS | HM_ITEMS
             ]
+            
+            # DEBUG: Log what items we're keeping
+            items_after = [(Items(item).name, quantity) for item, quantity in new_bag_items]
+            print(f"[ITEM MANAGEMENT DEBUG] Items after cleanup: {items_after}")
+            
+            # Check if Oak's Parcel survived the cleanup
+            oaks_parcel_after = any(Items(item) == Items.OAKS_PARCEL for item, quantity in new_bag_items)
+            print(f"[ITEM MANAGEMENT DEBUG] Oak's Parcel survived cleanup: {oaks_parcel_after}")
+            
             # Write the new count back to memory
             self.pyboy.memory[wNumBagItems] = len(new_bag_items)
             # 0 pad
@@ -3025,6 +3083,43 @@ class RedGymEnv(Env):
             text = text.replace("♭", "ED\n")
 
         return text
+    
+    def get_recent_dialog_for_triggers(self) -> str:
+        """Get recent dialog for trigger evaluation, combining current and buffered dialog"""
+        current_dialog = self.read_dialog() or ''
+        
+        # If current dialog is available, use it
+        if current_dialog and current_dialog.strip():
+            return current_dialog
+        
+        # Otherwise, check the dialog buffer for recent dialog
+        if self.dialog_buffer:
+            # Return the most recent dialog from buffer
+            return self.dialog_buffer[-1]
+        
+        return ''
+    
+    def check_dialog_buffer_for_text(self, target_text: str) -> bool:
+        """Check if target text appears in any recent dialog in the buffer"""
+        if not target_text:
+            return False
+            
+        target_norm = re.sub(r'\s+', ' ', target_text.replace('\n', ' ')).strip().lower()
+        
+        # Check current dialog first
+        current_dialog = self.read_dialog() or ''
+        if current_dialog:
+            current_norm = re.sub(r'\s+', ' ', current_dialog.replace('\n', ' ')).strip().lower()
+            if target_norm in current_norm:
+                return True
+        
+        # Check dialog buffer
+        for dialog in reversed(self.dialog_buffer):  # Check most recent first
+            dialog_norm = re.sub(r'\s+', ' ', dialog.replace('\n', ' ')).strip().lower()
+            if target_norm in dialog_norm:
+                return True
+        
+        return False
     
     def update_map_progress(self):
         map_idx = self.read_m(0xD35E)

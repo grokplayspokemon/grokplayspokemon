@@ -72,11 +72,6 @@
                 "type": "event_completed",
                 "event_name": "EVENT_FOLLOWED_OAK_INTO_LAB",
                 "completed": false
-            },
-            {
-                "type": "event_completed",
-                "event_name": "EVENT_FOLLOWED_OAK_INTO_LAB_2",
-                "completed": false
             }
         ],
         "completed": false,
@@ -97,9 +92,12 @@
         "associated_coordinates_file": "004_coords.json",
         "event_triggers": [
             {
-                "type": "current_map_is_previous_map_was",
-                "current_map_id": 0,
-                "previous_map_id": 40,
+                "type": "coordinates_match",
+                "coordinates": [
+                    5,
+                    3,
+                    40
+                ],
                 "completed": false
             },
             {
@@ -223,7 +221,7 @@
         "begin_quest_text": "Receive parcel from the Poke Mart clerk.",
         "location_id": 42,
         "location_name": "Pokemart Viridian",
-        "subquest_list": [  
+        "subquest_list": [
             "Receive parcel from the Poke Mart clerk.",
             "Then, leave the Poke Mart."
         ],
@@ -282,7 +280,7 @@
             "Once in Pallet Town, head down and to the right to find Professor Oak's Lab.",
             "Enter Oak's Lab."
         ],
-        "end_quest_text": "A wild sense of d\u00e9j\u00e0 vu washes over me\u2014back to Oak's Lab, again.",
+        "end_quest_text": "A wild sense of déjà vu washes over me—back to Oak's Lab, again.",
         "associated_coordinates_file": "011_coords.json",
         "event_triggers": [
             {
@@ -314,7 +312,7 @@
             "Walk straight up in Oak's Lab until you are standing in front of Oak.",
             "Press A to interact with Professor Oak."
         ],
-        "end_quest_text": "Professor Oak, dispensing wisdom\u2014and plot devices.",
+        "end_quest_text": "Professor Oak, dispensing wisdom—and plot devices.",
         "associated_coordinates_file": "012_coords.json",
         "event_triggers": [
             {
@@ -392,12 +390,6 @@
         "associated_coordinates_file": "015_coords.json",
         "event_triggers": [
             {
-                "type": "item_is_in_inventory",
-                "item_name": "TOWN MAP",
-                "quantity_min": 1,
-                "completed": false
-            },
-            {
                 "type": "current_map_is_previous_map_was",
                 "current_map_id": 0,
                 "previous_map_id": 39,
@@ -422,12 +414,6 @@
         "associated_coordinates_file": "016_coords.json",
         "event_triggers": [
             {
-                "type": "item_is_in_inventory",
-                "item_name": "TOWN MAP",
-                "quantity_min": 1,
-                "completed": false
-            },
-            {
                 "type": "current_map_is_previous_map_was",
                 "current_map_id": 12,
                 "previous_map_id": 0,
@@ -450,16 +436,9 @@
             "Continue north until you reach Viridian City.",
             "Enter the Viridian City Poke Center."
         ],
-        "end_quest_text": "Made it to Viridian City\u2014my Pok\u00e9mon are crying for mercy.",
+        "end_quest_text": "Made it to Viridian City—my Pokémon are crying for mercy.",
         "associated_coordinates_file": "017_coords.json",
         "event_triggers": [
-            {
-                "type": "current_map_is_previous_map_was",
-                "current_map_id": 1,
-                "previous_map_id": 12,
-                "comment": "Route 1 -> Viridian City",
-                "completed": false
-            },
             {
                 "type": "current_map_is_previous_map_was",
                 "current_map_id": 41,
@@ -475,13 +454,13 @@
     },
     {
         "quest_id": "018",
-        "begin_quest_text": "Heal your Pok\u00e9mon at the Viridian City Pok\u00e9mon Center.",
+        "begin_quest_text": "Heal your Pokémon at the Viridian City Pokémon Center.",
         "location_id": 41,
         "location_name": "Pokecenter Viridian",
         "subquest_list": [
             "Walk straight up in the Poke Center until you are standing in front of Nurse Joy.",
             "Press A to interact with Nurse Joy.",
-            "Press A a few more times to heal your Pok\u00e9mon.",
+            "Press A a few more times to heal your Pokémon.",
             "Exit the dialogue."
         ],
         "end_quest_text": "All patched up and ready for more bad decisions.",
@@ -489,7 +468,7 @@
         "event_triggers": [
             {
                 "type": "dialog_contains_text",
-                "text": "fighting fit!    \u25bc",
+                "text": "Your POKéMON are fighting fit!",
                 "completed": false
             },
             {
@@ -505,10 +484,10 @@
     },
     {
         "quest_id": "019",
-        "begin_quest_text": "Leave the Viridian City Pok\u00e9mon Center.",
+        "begin_quest_text": "Leave the Viridian City Pokémon Center.",
         "location_id": 41,
         "location_name": "Pokecenter Viridian",
-        "subquest_list": [  
+        "subquest_list": [
             "Proceed downwards to leave the Poke Center.",
             "You will find yourself back in Viridian City."
         ],
@@ -530,15 +509,15 @@
     },
     {
         "quest_id": "020",
-        "begin_quest_text": "Find and enter the Viridian City Pok\u00e9mart.",
+        "begin_quest_text": "Find and enter the Viridian City Pokémart.",
         "location_id": 1,
         "location_name": "Viridian City",
-        "subquest_list": [      
-            "Proceed to the right, then up to find the Viridian City Pok\u00e9mart.",
-            "Walk up and right to get to the Viridian City Pok\u00e9mart.",
-            "Enter the Pok\u00e9mart."
+        "subquest_list": [
+            "Proceed to the right, then up to find the Viridian City Pokémart.",
+            "Walk up and right to get to the Viridian City Pokémart.",
+            "Enter the Pokémart."
         ],
-        "end_quest_text": "Time to trade hard-earned cash for Pok\u00e9balls and dreams.",
+        "end_quest_text": "Time to trade hard-earned cash for Pokéballs and dreams.",
         "associated_coordinates_file": "020_coords.json",
         "event_triggers": [
             {
@@ -554,7 +533,7 @@
     },
     {
         "quest_id": "021",
-        "begin_quest_text": "Buy items at the Viridian City Pok\u00e9mart.",
+        "begin_quest_text": "Buy items at the Viridian City Pokémart.",
         "location_id": 42,
         "location_name": "Pokemart Viridian",
         "subquest_list": [
@@ -562,7 +541,7 @@
             "Walk up two tiles and left one tile to be in front of the clerk.",
             "Press A to interact with the clerk."
         ],
-        "end_quest_text": "The sacred ritual of capitalism, Pok\u00e9mon style.",
+        "end_quest_text": "The sacred ritual of capitalism, Pokémon style.",
         "associated_coordinates_file": "021_coords.json",
         "event_triggers": [
             {
@@ -583,16 +562,16 @@
     },
     {
         "quest_id": "022",
-        "begin_quest_text": "Purchase Pok\u00e9balls.",
+        "begin_quest_text": "Purchase Pokéballs.",
         "location_id": 42,
         "location_name": "Pokemart Viridian",
         "subquest_list": [
             "Select 'Buy' by pressing A when the cursor is on Buy.",
-            "Move the cursor to Pok\u00e9ball and press A.",
+            "Move the cursor to Pokéball and press A.",
             "Press the up arrow until 4 is selected.",
             "Press A to confirm the purchase.",
-            "Press A again to finalize the Pok\u00e9ball purchase.",
-            "Exit the dialogue and the Pok\u00e9mart."
+            "Press A again to finalize the Pokéball purchase.",
+            "Exit the dialogue and the Pokémart."
         ],
         "end_quest_text": "Shopping spree complete. My wallet is empty but my bag is full.",
         "associated_coordinates_file": "022_coords.json",
@@ -624,9 +603,9 @@
         "subquest_list": [
             "Head left from Viridian City to Route 22.",
             "Walk in the grass surrounded by a fence, a ledge, and a wall.",
-            "If a wild Pok\u00e9mon appears and it's a Nidoran\u2642: attack it with Scratch twice, then catch it with a Pok\u00e9ball.",
+            "If a wild Pokémon appears and it's a Nidoran\u2642: attack it with Scratch twice, then catch it with a Pokéball.",
             "If it is not a Nidoran\u2642, defeat it in battle.",
-            "If your Pok\u00e9mon gets low in health, use a Potion.",
+            "If your Pokémon gets low in health, use a Potion.",
             "Repeat until you have caught a Nidoran\u2642."
         ],
         "end_quest_text": "Welcome to the squad, Nidoran\u2642! Sorry, Pidgey.",
@@ -687,10 +666,10 @@
         "location_id": 33,
         "location_name": "Route 22",
         "subquest_list": [
-            "For each of your rival's Pok\u00e9mon, use Growl first, once.",
-            "Then use Scratch until that Pok\u00e9mon faints.",
-            "If your Pok\u00e9mon gets low on health, use a Potion instead of attacking.",
-            "Repeat until your rival has no Pok\u00e9mon left."
+            "For each of your rival's Pokémon, use Growl first, once.",
+            "Then use Scratch until that Pokémon faints.",
+            "If your Pokémon gets low on health, use a Potion instead of attacking.",
+            "Repeat until your rival has no Pokémon left."
         ],
         "end_quest_text": "Rival has been served a hot plate of humble pie.",
         "associated_coordinates_file": "025_coords.json",
@@ -787,10 +766,10 @@
         "subquest_list": [
             "Proceed north from the second NPC.",
             "A trainer will see you and initiate a battle.",
-            "Use Ember (which Charmander should now know) to quickly defeat all bug Pok\u00e9mon.",
+            "Use Ember (which Charmander should now know) to quickly defeat all bug Pokémon.",
             "Heal with Potions if necessary."
         ],
-        "end_quest_text": "Charcoal grilled: bug Pok\u00e9mon edition.",
+        "end_quest_text": "Charcoal grilled: bug Pokémon edition.",
         "associated_coordinates_file": "029_coords.json",
         "event_triggers": [
             {
@@ -898,13 +877,13 @@
     },
     {
         "quest_id": "033",
-        "begin_quest_text": "Heal your Pok\u00e9mon at Pewter City's Pok\u00e9mon Center.",
+        "begin_quest_text": "Heal your Pokémon at Pewter City's Pokémon Center.",
         "location_id": 58,
-        "location_name": "Pewter City Pok\u00e9mon Center",
+        "location_name": "Pewter City Pokémon Center",
         "subquest_list": [
-            "Once in Pewter City, enter the Pok\u00e9mon Center (left side of the city).",
+            "Once in Pewter City, enter the Pokémon Center (left side of the city).",
             "Walk straight up to Nurse Joy.",
-            "Press A to interact and heal your Pok\u00e9mon.",
+            "Press A to interact and heal your Pokémon.",
             "Exit the dialogue.",
             "Leave the Poke Center."
         ],
@@ -925,12 +904,12 @@
     },
     {
         "quest_id": "034",
-        "begin_quest_text": "Visit Pewter City's Pok\u00e9mon Mart.",
+        "begin_quest_text": "Visit Pewter City's Pokémon Mart.",
         "location_id": 56,
-        "location_name": "Pewter City Pok\u00e9mart",
+        "location_name": "Pewter City Pokémart",
         "subquest_list": [
-            "Proceed to the right and north in Pewter City to the Pok\u00e9mart.",
-            "Enter the Pok\u00e9mart.",
+            "Proceed to the right and north in Pewter City to the Pokémart.",
+            "Enter the Pokémart.",
             "Walk up to the clerk and press A to interact."
         ],
         "end_quest_text": "A new city, a new chance to stimulate the local economy.",
@@ -951,12 +930,12 @@
     },
     {
         "quest_id": "035",
-        "begin_quest_text": "Stock up on Potions at Pewter City's Pok\u00e9mart.",
+        "begin_quest_text": "Stock up on Potions at Pewter City's Pokémart.",
         "location_id": 56,
-        "location_name": "Pewter City Pok\u00e9mart",
+        "location_name": "Pewter City Pokémart",
         "subquest_list": [
             "Buy as many Potions as possible.",
-            "Leave the Pok\u00e9mart."
+            "Leave the Pokémart."
         ],
         "end_quest_text": "I own more Potions than the local hospital.",
         "associated_coordinates_file": "035_coords.json",
@@ -980,7 +959,7 @@
         "location_id": 2,
         "location_name": "Pewter City",
         "subquest_list": [
-            "Proceed left to clear the Pok\u00e9mart.",
+            "Proceed left to clear the Pokémart.",
             "Proceed north to clear the Gym.",
             "Proceed left to walk behind the Gym.",
             "Proceed down to walk beside the Gym.",
@@ -1008,11 +987,11 @@
         "location_name": "Pewter City Gym",
         "subquest_list": [
             "Proceed straight up to the first trainer in the Gym.",
-            "For each Pok\u00e9mon the trainer has, use Growl first, then your strongest attack.",
+            "For each Pokémon the trainer has, use Growl first, then your strongest attack.",
             "Heal if necessary.",
-            "After winning, return to the Pok\u00e9mon Center if you need to heal.",
-            "Retrace your path from the Gym to the Pok\u00e9mon Center.",
-            "Heal your Pok\u00e9mon at the Pewter City Pok\u00e9mon Center.",
+            "After winning, return to the Pokémon Center if you need to heal.",
+            "Retrace your path from the Gym to the Pokémon Center.",
+            "Heal your Pokémon at the Pewter City Pokémon Center.",
             "When healed, return to the Gym to battle Brock."
         ],
         "end_quest_text": "Grok vs Brok: throwdown!!",
@@ -1038,7 +1017,7 @@
             },
             {
                 "type": "dialog_contains_text",
-                "text": "Your POK\u00e9MON are fighting fit!",
+                "text": "Your POKéMON are fighting fit!",
                 "completed": false
             }
         ],
@@ -1054,7 +1033,7 @@
         "location_name": "Pewter City",
         "subquest_list": [
             "Leave the Pokecenter.",
-            "Retrace your steps from the Pok\u00e9mon Center back to Pewter City Gym.",
+            "Retrace your steps from the Pokémon Center back to Pewter City Gym.",
             "Enter the Gym."
         ],
         "end_quest_text": "The rematch: it's time for Brock.",
@@ -1107,11 +1086,11 @@
     },
     {
         "quest_id": "040",
-        "begin_quest_text": "Heal at the Pok\u00e9mon Center in Pewter City after your badge win.",
+        "begin_quest_text": "Heal at the Pokémon Center in Pewter City after your badge win.",
         "location_id": 2,
         "location_name": "Pewter City",
         "subquest_list": [
-            "Head to the Pok\u00e9mon Center and enter it."
+            "Head to the Pokémon Center and enter it."
         ],
         "end_quest_text": "Healing: an essential post-gym ritual.",
         "associated_coordinates_file": "040_coords.json",
@@ -1131,12 +1110,12 @@
     },
     {
         "quest_id": "041",
-        "begin_quest_text": "Restore your Pok\u00e9mon at Pewter City's Pok\u00e9mon Center.",
+        "begin_quest_text": "Restore your Pokémon at Pewter City's Pokémon Center.",
         "location_id": 58,
-        "location_name": "Pewter City Pok\u00e9mon Center",
+        "location_name": "Pewter City Pokémon Center",
         "subquest_list": [
-            "Heal at the Pok\u00e9mon Center.",
-            "When done, leave the Pok\u00e9mon Center."
+            "Heal at the Pokémon Center.",
+            "When done, leave the Pokémon Center."
         ],
         "end_quest_text": "Team is healed. Ready to roll.",
         "associated_coordinates_file": "041_coords.json",
@@ -1216,7 +1195,7 @@
             "Align with the doorway leading up, and walk upwards.",
             "Continue north until you reach Route 4."
         ],
-        "end_quest_text": "Stepping into Route 4\u2014almost time for a mountain adventure.",
+        "end_quest_text": "Stepping into Route 4—almost time for a mountain adventure.",
         "associated_coordinates_file": "044_coords.json",
         "event_triggers": [
             {
@@ -1234,12 +1213,12 @@
     },
     {
         "quest_id": "045",
-        "begin_quest_text": "Travel up Route 4 to the Mt. Moon Pok\u00e9mon Center.",
+        "begin_quest_text": "Travel up Route 4 to the Mt. Moon Pokémon Center.",
         "location_id": 15,
         "location_name": "Route 4",
         "subquest_list": [
             "Proceed upwards on Route 4.",
-            "Enter the Mt. Moon Pok\u00e9mon Center."
+            "Enter the Mt. Moon Pokémon Center."
         ],
         "end_quest_text": "Rest stop before the infamous Mt. Moon grind.",
         "associated_coordinates_file": "045_coords.json",
@@ -1257,14 +1236,14 @@
     },
     {
         "quest_id": "046",
-        "begin_quest_text": "Heal and buy a Magikarp at the Mt. Moon Pok\u00e9mon Center.",
+        "begin_quest_text": "Heal and buy a Magikarp at the Mt. Moon Pokémon Center.",
         "location_id": 68,
-        "location_name": "Mt. Moon Pok\u00e9mon Center",
+        "location_name": "Mt. Moon Pokémon Center",
         "subquest_list": [
-            "Heal at the Pok\u00e9mon Center as usual.",
-            "Talk to the man walking around inside the Pok\u00e9mon Center.",
+            "Heal at the Pokémon Center as usual.",
+            "Talk to the man walking around inside the Pokémon Center.",
             "Buy the Magikarp from him.",
-            "Exit the Pok\u00e9mon Center."
+            "Exit the Pokémon Center."
         ],
         "end_quest_text": "Now the proud owner of a flopping Magikarp. What could go wrong?",
         "associated_coordinates_file": "046_coords.json",

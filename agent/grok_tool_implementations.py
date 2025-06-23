@@ -2,7 +2,7 @@
 from pydantic import BaseModel, Field, ValidationError
 from typing import List, Literal, Optional, Dict, Any, Tuple
 
-import pygame
+import sys
 
 # Import environment components for type hinting and use in tools
 from environment.wrappers.env_wrapper import EnvWrapper
@@ -329,17 +329,29 @@ def exit_dialog(
             logger.error(error_msg)
             return error_msg, {"status": "error", "message": error_msg}
 
-        if button == "A":
-            # Only press A ONE time, and only if the current dialog contains "YES"
-            dlg_text = ""
-            try:
-                dlg_text = env.get_active_dialog() if hasattr(env, "get_active_dialog") else env.read_dialog()
-                dlg_text = dlg_text or ""
-            except Exception:
-                pass
+        # ------------------------
+        # Detect dialog text once for decision making. Upper-case for simple
+        # substring checks so we match variants like "▶HEAL" or "heal".
+        # ------------------------
+        dlg_text = ""
+        try:
+            dlg_text = env.get_active_dialog() if hasattr(env, "get_active_dialog") else env.read_dialog()
+            dlg_text = dlg_text or ""
+        except Exception:
+            pass
 
-            if "YES" in dlg_text.upper():
-                # Safe to accept with A
+        dlg_upper = dlg_text.upper()
+
+        # If the Nurse-Joy menu (HEAL / CANCEL) or a YES/NO prompt is
+        # currently visible we *must* press A exactly once – pressing B would
+        # back out of the menu and stall the healer routine.  We treat this
+        # as authoritative even if the caller asked for button "B".
+        if "HEAL" in dlg_upper or "YES" in dlg_upper:
+            button = "A"
+
+        if button == "A":
+            if ("HEAL" in dlg_upper) or ("YES" in dlg_upper):
+                # Safe to accept with a single A press
                 press_ev = WindowEvent.PRESS_BUTTON_A
                 release_ev = WindowEvent.RELEASE_BUTTON_A
                 pyboy_instance.send_input(press_ev)
@@ -348,29 +360,17 @@ def exit_dialog(
                 pyboy_instance.send_input(release_ev)
                 for _ in range(3):
                     pyboy_instance.tick()
-                press_count = 1
-                human_summary = "Pressed A once to accept 'YES' in dialog."
-                structured_output = {"status": "success", "button": "A", "presses": press_count}
+                human_summary = "Pressed A once to choose HEAL/YES in dialog."
+                structured_output = {"status": "success", "button": "A", "presses": 1}
                 return human_summary, structured_output
             else:
-                # Fall back to pressing B to safely close dialog
-                press_ev = WindowEvent.PRESS_BUTTON_B
-                release_ev = WindowEvent.RELEASE_BUTTON_B
-                press_count = 0
-                for _ in range(8):
-                    pyboy_instance.send_input(press_ev)
-                    for _f in range(3):
-                        pyboy_instance.tick()
-                    pyboy_instance.send_input(release_ev)
-                    for _f in range(3):
-                        pyboy_instance.tick()
-                    press_count += 1
-                human_summary = "Pressed B {press_count} times to close dialog (no 'YES' detected)."
-                structured_output = {"status": "success", "button": "B", "presses": press_count}
-                return human_summary, structured_output
-        else:
-            press_ev = WindowEvent.PRESS_BUTTON_B
-            release_ev = WindowEvent.RELEASE_BUTTON_B
+                # If neither keyword is present fall back to B spam – safer than
+                # accidentally advancing an unwanted dialog.
+                button = "B"
+
+        # Default / B-path
+        press_ev = WindowEvent.PRESS_BUTTON_B
+        release_ev = WindowEvent.RELEASE_BUTTON_B
 
         press_count = 0
         for _ in range(8):
@@ -574,26 +574,71 @@ def handle_battle(
     navigator: InteractiveNavigator,
     env_wrapper: EnvWrapper
 ) -> Tuple[str, Dict[str, Any]]:
-    """
-    Automatically handle a battle by selecting the best move.
-    """
-    # SKIP battle tool for Nidoran capture quest to allow StageManager scripted catch
-    if hasattr(env, 'quest_manager') and getattr(env.quest_manager, 'current_quest_id', None) == 23:
-        logger.debug("Skipping handle_battle for quest 23 (Nidoran capture); using StageManager scripted catch")
-        # Simulate pressing START (ENTER) multiple times to advance scripted catch
-        for _ in range(15):
-            pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_a))
-            pygame.event.post(pygame.event.Event(pygame.KEYUP,   key=pygame.K_a))
-            time.sleep(0.05)
-        return "Skipped battle handling for Nidoran capture", {"status": "skipped"}
-    logger.debug("Executing handle_battle tool")
-
+    """Handle battle by automatically selecting the best move to use."""
+    
     try:
-        # Get current dialog to understand battle state
         dialog = env.get_active_dialog() or ""
-        print(f"dialog={dialog}")
         
-        # Clear any blocking dialogs to see what menu we're in
+        # First, check if we need to switch Pokemon due to fainted active Pokemon
+        if "Bring out which" in dialog:
+            print("Pokemon selection screen detected - checking for fainted Pokemon...")
+            
+            # Check if current active Pokemon (first in party) is fainted
+            try:
+                party = env.read_party_pokemon()
+                if party and party[0].current_hp == 0:
+                    print(f"Active Pokemon {party[0].species_name} is fainted (0/{party[0].max_hp} HP), need to switch...")
+                    
+                    # Find the first healthy Pokemon
+                    healthy_pokemon_index = None
+                    for i, pokemon in enumerate(party):
+                        if pokemon.current_hp > 0:
+                            healthy_pokemon_index = i
+                            print(f"Found healthy Pokemon: {pokemon.species_name} ({pokemon.current_hp}/{pokemon.max_hp} HP) at index {i}")
+                            break
+                    
+                    if healthy_pokemon_index is not None:
+                        # Navigate to the healthy Pokemon and select it
+                        print(f"Navigating to healthy Pokemon at index {healthy_pokemon_index}...")
+                        
+                        # Move down to the healthy Pokemon (if needed)
+                        for _ in range(healthy_pokemon_index):
+                            env.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
+                            env.pyboy.tick(9)
+                            env.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
+                            env.pyboy.tick(15)
+                            time.sleep(0.2)
+                        
+                        # Select the healthy Pokemon
+                        env.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
+                        env.pyboy.tick(9)
+                        env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
+                        env.pyboy.tick(15)
+                        time.sleep(0.5)
+                        
+                        return f"Switched to healthy Pokemon: {party[healthy_pokemon_index].species_name}", {
+                            "status": "success",
+                            "action": "pokemon_switch",
+                            "switched_to": party[healthy_pokemon_index].species_name
+                        }
+                    else:
+                        return "All Pokemon are fainted! Cannot continue battle.", {
+                            "status": "error", 
+                            "message": "All Pokemon fainted"
+                        }
+            except Exception as e:
+                print(f"Error checking Pokemon status: {e}")
+        
+        # Handle "There's no will to fight" message for fainted Pokemon
+        if "no will to fight" in dialog:
+            print("Detected 'no will to fight' message - pressing B to go back...")
+            env.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)
+            env.pyboy.tick(9)
+            env.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
+            env.pyboy.tick(15)
+            return "Pressed B to go back from fainted Pokemon selection", {"status": "success", "action": "back_from_fainted"}
+        
+        # Original battle logic for when we have a healthy active Pokemon
         attempts = 0
         while "FIGHT" not in dialog and attempts < 10:
             print("pressing B to advance dialog...dialog=", dialog)
@@ -724,12 +769,48 @@ def follow_nav_path(
             pass
 
         # ------------------------------------------------------------------
-        # 2️⃣  Still submit the direct PATH_FOLLOW_ACTION to the environment so
-        #     non-interactive/headless runs continue to work.
+        # 2️⃣  Headless fallback – if pygame isn't initialised (e.g. during
+        #     automated evaluation or unit tests) then no main event-loop
+        #     will ever pick up the synthetic KEYDOWN we just posted.  In
+        #     that scenario we manually replicate the exact code path that
+        #     play.py follows for the '5' key:
+        #       • Ensure the current quest path is loaded and all components
+        #         (env / navigator / quest_manager) are synced.
+        #       • Pass the PATH_FOLLOW_ACTION through QuestManager.filter_action
+        #         so that StageManager scripted logic can intercept / convert
+        #         it the same way it would for a real key press.
+        #       • Finally forward the (possibly-modified) action to
+        #         env.process_action().
         # ------------------------------------------------------------------
 
-        env.process_action(PATH_FOLLOW_ACTION, source="follow_nav_path_tool")  # type: ignore[arg-type]
+        if not ("pygame" in sys.modules and sys.modules["pygame"].get_init()):
+            # 💡  Headless mode – perform the manual fallback path.
+            try:
+                # ------------------------------------------------------------------
+                # Sync / load quest coordinates exactly like play.py's '5'-key block.
+                # ------------------------------------------------------------------
+                current_q = quest_manager.get_current_quest()
+                if current_q is not None:
+                    # Load coordinates if not already loaded; ignore result
+                    navigator.load_coordinate_path(current_q)
 
+                    # Keep quest IDs in sync between the three primary components.
+                    setattr(env, "current_loaded_quest_id", current_q)
+                    quest_manager.current_quest_id = current_q
+                    navigator.active_quest_id = current_q
+
+                # ------------------------------------------------------------------
+                # Pass the action through quest_manager so StageManager & co can
+                # apply scripted overrides before we call env.process_action().
+                # ------------------------------------------------------------------
+                desired_action = quest_manager.filter_action(PATH_FOLLOW_ACTION)
+
+                env.process_action(desired_action, source="follow_nav_path_tool")  # type: ignore[arg-type]
+            except Exception as inner_e:
+                logger.error(f"follow_nav_path: fallback path failed – {inner_e}")
+
+        # Return immediately – the actual frame step & observation collection is
+        # handled by the surrounding game loop or by the manual fallback above.
         human_summary = "Triggered path-follow action (keyboard '5')."
         structured_output = {"status": "success", "action": PATH_FOLLOW_ACTION}
         return human_summary, structured_output

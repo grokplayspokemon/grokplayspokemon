@@ -89,13 +89,102 @@ class ItemHandler:
             item_quantities.append(item_quantity)
         return item_quantities
     
+    def read_bit(self, address, bit_index):
+        """Read a specific bit from a memory address"""
+        byte_value = self.read_m(address)
+        return bool(byte_value & (1 << bit_index))
+
+    def force_add_oaks_parcel(self):
+        """Forcefully add Oak's Parcel to the bag when the acquisition dialog is detected"""
+        oaks_parcel_id = 0x46
+        
+        try:
+            from environment.environment_helpers.stage_helper import parcel_logger
+            parcel_logger.critical(f"[ITEM_HANDLER] FORCE ADDING OAK'S PARCEL!")
+        except ImportError:
+            print(f"[ITEM_HANDLER] FORCE ADDING OAK'S PARCEL!")
+        
+        # Use the existing buy_item method to add the parcel
+        self.buy_item(oaks_parcel_id, 1, 0)  # item_id, quantity, price (free)
+        
+        try:
+            from environment.environment_helpers.stage_helper import parcel_logger
+            parcel_logger.critical(f"[ITEM_HANDLER] FORCED OAK'S PARCEL ADDITION COMPLETE!")
+        except ImportError:
+            print(f"[ITEM_HANDLER] FORCED OAK'S PARCEL ADDITION COMPLETE!")
+
+    def force_add_town_map(self):
+        """Forcefully add Town Map to the bag when the acquisition dialog is detected"""
+        town_map_id = 0x5
+        
+        try:
+            from environment.environment_helpers.stage_helper import parcel_logger
+            parcel_logger.critical(f"[ITEM_HANDLER] FORCE ADDING TOWN MAP!")
+        except ImportError:
+            print(f"[ITEM_HANDLER] FORCE ADDING TOWN MAP!")
+        
+        # Use the existing buy_item method to add the town map
+        self.buy_item(town_map_id, 1, 0)  # item_id, quantity, price (free)
+        
+        try:
+            from environment.environment_helpers.stage_helper import parcel_logger
+            parcel_logger.critical(f"[ITEM_HANDLER] FORCED TOWN MAP ADDITION COMPLETE!")
+        except ImportError:
+            print(f"[ITEM_HANDLER] FORCED TOWN MAP ADDITION COMPLETE!")
+
     def scripted_manage_items(self):
         items = self.get_items_in_bag()
+        
+        # FORCE ADD PARCEL: Check if "Got Oaks Parcel" event flag is set but parcel not in bag
+        # DO THIS BEFORE EARLY RETURNS so it always runs when the flag is set
+        try:
+            # Check the "Got Oaks Parcel" event flag at memory address 0xD74E bit 1
+            got_oaks_parcel_flag = self.read_bit(0xD74E, 1)
+            oaks_parcel_id = 0x46
+            
+            if got_oaks_parcel_flag and oaks_parcel_id not in items:
+                self.force_add_oaks_parcel()
+                
+                # Refresh items list after forcing addition
+                self._items_in_bag = None
+                items = self.get_items_in_bag()
+        except Exception as e:
+            print(f"[ITEM_HANDLER] Error in force parcel check: {e}")
+
+        # FORCE ADD TOWN MAP: Check if "Got Town Map" event flag is set but town map not in bag  
+        # Same issue as Oak's Parcel - NPC gives item but it never gets added to bag
+        # ONLY for quests before 23 to allow normal gameplay for later quests
+        try:
+            # Get current quest ID to limit force-add to early quests only
+            current_quest_id = None
+            if hasattr(self, 'env') and hasattr(self.env, 'quest_manager') and self.env.quest_manager:
+                current_quest_id = getattr(self.env.quest_manager, 'current_quest_id', None)
+            
+            # Only force-add Town Map for quests before 23
+            if current_quest_id is None or current_quest_id < 23:
+                # Check the "Got Town Map" event flag at memory address 0xD74A bit 0
+                got_town_map_flag = self.read_bit(0xD74A, 0)
+                town_map_id = 0x5  # Town Map item ID
+                current_map = self.read_m("wCurMap")
+                
+                if current_map == 39 and got_town_map_flag and town_map_id not in items:  # Blue's House and flag set
+                    self.force_add_town_map()
+                    
+                    # Refresh items list after forcing addition
+                    self._items_in_bag = None
+                    items = self.get_items_in_bag()
+        except Exception as e:
+            print(f"[ITEM_HANDLER] Error in force town map check: {e}")
+        
+        # NOW check early return conditions after force-add logic
         if self._last_item_count == len(items):
             return
         
         if self.read_m("wIsInBattle") > 0 or self.read_m(0xFFB0) == 0:  # hWY in menu
             return
+        
+        # Identify Oak's Parcel ID for tracking
+        oaks_parcel_id = 0x46
         
         # pokeballs = [0x01, 0x02, 0x03, 0x04]
 
@@ -123,17 +212,17 @@ class ItemHandler:
                         # set last item to 255
                         write_mem(self.pyboy, 0xD31E + 19*2, 0xff)
                         write_mem(self.pyboy, 0xD31F + 19*2, 0)
-                    # print(f'Delete item: {items[i]}')
                     deleted = True
                     break
 
             if not deleted:
-                # print(f'Warning: no item deleted, bag full, delete good items instead')
                 # delete good items if no other items
                 # from first to last good items priority
                 for good_item in GOOD_ITEMS_PRIORITY:
                     if good_item in items:
                         idx = items.index(good_item)
+                        if good_item == oaks_parcel_id:
+                            print(f"[ITEM_HANDLER] CRITICAL ERROR: TRYING TO DELETE OAK'S PARCEL!")
                         if idx == 19:
                             # delete the last item
                             write_mem(self.pyboy, 0xD31E + idx*2, 0xff)
@@ -145,7 +234,6 @@ class ItemHandler:
                             # set last item to 255
                             write_mem(self.pyboy, 0xD31E + 19*2, 0xff)
                             write_mem(self.pyboy, 0xD31F + 19*2, 0)
-                        # print(f'Delete item: {items[idx]}')
                         deleted = True
                         break
 
@@ -331,6 +419,7 @@ class ItemHandler:
     def buy_item(self, item_id, quantity, price):
         # add the item at the end of the bag
         # deduct money by price * quantity
+        
         bag_items = self.get_items_in_bag()
         bag_items_quantity = self.get_items_quantity_in_bag()
         if len(bag_items) >= 20:

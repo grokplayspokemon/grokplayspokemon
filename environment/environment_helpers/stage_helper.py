@@ -11,6 +11,27 @@ from collections import deque
 from environment.data.environment_data.tilesets import Tilesets
 from environment.data.recorder_data.global_map import GLOBAL_MAP_SHAPE, local_to_global
 import re
+import logging
+import os
+
+# Set up dedicated parcel tracking logger
+parcel_logger = logging.getLogger('parcel_tracker')
+parcel_logger.setLevel(logging.DEBUG)
+
+# Create file handler if it doesn't exist
+if not parcel_logger.handlers:
+    log_dir = os.path.dirname(os.path.abspath(__file__))
+    log_file = os.path.join(log_dir, 'parcel_debug.log')
+    
+    file_handler = logging.FileHandler(log_file, mode='w')  # 'w' to overwrite each run
+    file_handler.setLevel(logging.DEBUG)
+    
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    
+    parcel_logger.addHandler(file_handler)
+    parcel_logger.info("=== PARCEL TRACKING LOG STARTED - LOGGING EVERY STEP ===")
+    parcel_logger.info("=== WILL TRACK STAGES 6-22 TO CATCH PARCEL ACQUISITION AND LOSS ===")
 
 # Stage-specific configuration with both blocking and scripted movement
 #             ['block', 'ROUTE_5', 'UNDERGROUND_PATH_ROUTE_5@1',],
@@ -161,37 +182,37 @@ STAGE_DICT = {
         'events': [],
         'blockings': [],
         'scripted_movements': [
-        {
-            'condition': {
-                'global_coords': (349, 109), # all below to keep grok away from oak dialog-lock
-            },
-            'action': 'right'
-        },
-        {
-            'condition': {
-                'global_coords': (349, 110),
-            },
-            'action': 'down'
-        },
-        {
-            'condition': {
-                'global_coords': (349, 111),
-            },
-            'action': 'down'
-        },
-        {
-            'condition': {
-                'global_coords': (348, 109),
-            },
-            'action': 'down'
-        },
-        {
-            'condition': {
-                'global_coords': (348, 110),
-                'party_size': 1,
-            },
-            'action': 'left'
-        },
+        # {
+        #     'condition': {
+        #         'global_coords': (350, 110), # all below to keep grok away from oak dialog-lock
+        #     },
+        #     'action': 'right'
+        # },
+        # {
+        #     'condition': {
+        #         'global_coords': (349, 110),
+        #     },
+        #     'action': 'down'
+        # },
+        # {
+        #     'condition': {
+        #         'global_coords': (349, 111),
+        #     },
+        #     'action': 'down'
+        # },
+        # {
+        #     'condition': {
+        #         'global_coords': (348, 109),
+        #     },
+        #     'action': 'down'
+        # },
+        # {
+        #     'condition': {
+        #         'global_coords': (348, 110),
+        #         'party_size': 1,
+        #     },
+        #     'action': 'left'
+        # },
         
         ]
     },
@@ -231,7 +252,12 @@ STAGE_DICT = {
         'blockings': [],
         'scripted_movements': [
             # Talk to Oak at specific coordinates
-            {'condition': {'global_coords': (348, 110)}, 'action': 'a'}
+            {
+                'condition': {
+                    'global_coords': (348, 110),
+                }, 
+                'action': 'a'
+            }
         ]
     },
     15: {
@@ -240,8 +266,10 @@ STAGE_DICT = {
             ['BLUES_HOUSE', 'PALLET_TOWN@1']  # Block leaving Blue's house until Town Map
         ],
         'scripted_movements': [
-            # Force A press to get Town Map at Blue's sister location
-            {'condition': {'local_coords': (1, 3), 'map_id': 39, 'item_check': {'item': 'TOWN MAP', 'has': False}}, 'action': 'a'},
+            # Force A press to get Town Map at Blue's sister location at global coords (340, 107)
+            {'condition': {'global_coords': (340, 107), 'item_check': {'item': 'TOWN_MAP', 'has': False}}, 'action': 'a'},
+            # Force A press to get Town Map at Blue's sister location at local coords (1, 3)
+            {'condition': {'local_coords': (1, 3), 'map_id': 39, 'item_check': {'item': 'TOWN_MAP', 'has': False}}, 'action': 'a'},
             # Handle warp entry sequence
             {'condition': {'global_coords': (344, 97), 'pending_b_presses': True}, 'action': 'up', 'set_pending_b': 3},
             # Handle pending B presses
@@ -252,6 +280,7 @@ STAGE_DICT = {
         'events': [],
         'blockings': [],
         'scripted_movements': [
+            # Movement rules for finding Nidoran (only when no dialog present)
             {
                 'condition': {
                     'global_coords': (282, 67),
@@ -324,11 +353,12 @@ STAGE_DICT = {
                 },
                 'action': 'up'
             },
+            # Special handling for Nidoran encounters
             {
                 'condition': {
                     'global_coords': (285, 63),
                     'dialog_present': True,
-                    'dialog_text': 'NIDORAN\u2642',
+                    'dialog_text': 'NIDORAN♂',
                 },
                 'action': 'a'
             },
@@ -381,15 +411,35 @@ STAGE_DICT = {
         'events': [],
         'blockings': [],
         'scripted_movements': [
-            {'condition': {'global_coords': (270, 89)},
-             'action': 'a'},
-            {'condition': {
-                'global_coords': (297, 118),
-                'dialog_present': False,
-                'health_fraction': 1,                
-                },
-            'action': 'down'
-            },
+            # {'condition': {'global_coords': (270, 89)},
+            #  'action': 'a'},
+            # {'condition': {
+            #     'global_coords': (297, 118),
+            #     'dialog_present': False,
+            #     'health_fraction': 1,                
+            #     },
+            # 'action': 'down'
+            # },
+            # # Viridian Poké Center uses *three* adjacent X-columns (global 116-118)
+            # # in front of the counter.  The original rule only handled the
+            # # centre tile (X=118) which left Grok stuck when the healing routine
+            # # ended on either side position.  We duplicate the rule for the two
+            # # neighbouring columns so the DOWN step is queued regardless of the
+            # # exact alignment.
+            # {'condition': {
+            #     'global_coords': (297, 117),
+            #     'dialog_present': False,
+            #     'health_fraction': 1,                
+            #     },
+            #  'action': 'down'
+            # },
+            # {'condition': {
+            #     'global_coords': (297, 116),
+            #     'dialog_present': False,
+            #     'health_fraction': 1,                
+            #     },
+            #  'action': 'down'
+            # },
             
         ]
     },
@@ -440,6 +490,58 @@ STAGE_DICT = {
     },
     # Add more stages as needed
 }
+
+# Universal battle logic - applies to ALL battles regardless of stage
+UNIVERSAL_BATTLE_RULES = [
+    # Handle Pokemon selection screen - "Bring out which POKéMON?"
+    {
+        'condition': {
+            'dialog_present': True,
+            'dialog_contains': 'Bring out which',
+        },
+        'action': 'down'  # Navigate down to find healthy Pokemon
+    },
+    # Handle "There's no will to fight" - fainted Pokemon selected
+    {
+        'condition': {
+            'dialog_present': True,
+            'dialog_contains': 'no will to fight',
+        },
+        'action': 'b'  # Press B to go back and select different Pokemon
+    },
+    # Handle Pokemon with FNT status in selection screen
+    {
+        'condition': {
+            'dialog_present': True,
+            'dialog_contains': 'FNT',
+        },
+        'action': 'down'  # Move down to next Pokemon
+    },
+    # Handle general fainted Pokemon messages
+    {
+        'condition': {
+            'dialog_present': True,
+            'dialog_contains': 'fainted',
+        },
+        'action': 'b'
+    },
+    # Handle "unable to battle" messages
+    {
+        'condition': {
+            'dialog_present': True,
+            'dialog_contains': 'unable to battle',
+        },
+        'action': 'b'
+    },
+    # Handle Pokemon switch confirmation "Go!"
+    {
+        'condition': {
+            'dialog_present': True,
+            'dialog_contains': 'Go!',
+        },
+        'action': 'b'
+    },
+]
 
 class StageManager:
     """Manages stage-based progression, warp blocking, and scripted movement"""
@@ -645,6 +747,54 @@ class StageManager:
         Enhanced with automatic quest path following.
         """
         # ------------------------------------------------------------------
+        # RESET HEAL FLAG WHEN LEAVING POKÉ CENTER - allow path-follow after exit
+        try:
+            # Clear heal sequence flag if not on a Poké Center map
+            x, y, current_map = self.env.get_game_coords()
+            if getattr(self, '_heal_at_poke_center_seq_enqueued', False) and not self.env._is_pokecenter(current_map):
+                self._heal_at_poke_center_seq_enqueued = False
+        except Exception:
+            pass
+        # ------------------------------------------------------------------
+        # EMERGENCY STAGE 23 CLEAR - Prevent infinite left-walking loops
+        # ------------------------------------------------------------------
+        if self.stage == 23:
+            try:
+                # Check if we should still be in stage 23
+                current_quest = getattr(self.env.quest_manager, 'current_quest_id', None) if hasattr(self.env, 'quest_manager') else None
+                
+                # If we're no longer on quest 23, immediately clear all automation
+                if current_quest and str(current_quest) != '023':
+                    print(f"StageManager: EMERGENCY CLEAR - Stage 23 active but current quest is {current_quest}. Clearing all automation.")
+                    self._auto_action_queue.clear()
+                    self.clear_scripted_movements()
+                    self.blockings.clear()
+                    self.stage = 24
+                    return action  # Return original action without any scripted override
+                    
+                # Also check if we have Nidoran (backup condition)
+                try:
+                    from environment.data.environment_data.species import Species
+                    if hasattr(self.env, 'party') and self.env.party:
+                        party = self.env.party.party[:self.env.party.party_size]
+                        for p in party:
+                            try:
+                                species_name = Species(p.Species).name
+                                if species_name == 'NIDORAN_M':
+                                    print(f"StageManager: EMERGENCY CLEAR - Stage 23 but Nidoran already captured. Clearing automation.")
+                                    self._auto_action_queue.clear()
+                                    self.clear_scripted_movements()
+                                    self.blockings.clear()
+                                    self.stage = 24
+                                    return action
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"StageManager: Error in emergency stage 23 check: {e}")
+        
+        # ------------------------------------------------------------------
         # NIDORAN CAPTURE COMPLETION CHECKS – run every frame *before* we
         # evaluate/forward the action.  This guarantees the special naming
         # dialog handlers fire even when StageManager is in a different
@@ -660,39 +810,57 @@ class StageManager:
             print(f"StageManager: Error in caught_nidoran_to_naming_dialog: {e}")
             print(f"StageManager: Error in caught_nidoran_pokeball_failed: {e}")
 
-        # try:
-        #     self._heal_at_poke_center()
-        # except Exception as e:
-        #     print(f"StageManager: Error in heal_at_poke_center: {e}")
+        self._heal_at_poke_center()  # DISABLED: Prevents automatic warping out of Pokemon Center
 
-        self._heal_at_poke_center()
-
-        # --------------------------------------------------------------
-        # 0️⃣  FIRST PRIORITY – Execute any auto-generated action that
-        #     was queued in update_stage_manager().  This guarantees the
-        #     press originates *inside* StageManager and is not dependent
-        #     on upstream input.
-        # --------------------------------------------------------------
+        # ------------------------------------------------------------------
+        # Execute any auto-generated action that
+        # was queued in update_stage_manager().  This guarantees the
+        # press originates *inside* StageManager and is not dependent
+        # on upstream input.
+        # ------------------------------------------------------------------
         if self._auto_action_queue:
             auto_act = self._auto_action_queue.popleft()
             print(f"StageManager: Executing queued auto-action {auto_act} (remaining: {len(self._auto_action_queue)})")
             return auto_act
+        
+        # ------------------------------------------------------------------
+        # UNIVERSAL BATTLE RULES - Check these FIRST before stage-specific rules
+        # These apply to ALL battles throughout the game
+        # ------------------------------------------------------------------
+        try:
+            x, y, map_id = self.env.get_game_coords()
+            
+            # Check for global coordinates if available
+            try:
+                from environment.data.recorder_data.global_map import local_to_global
+                x, y, map_id = self.env.get_game_coords()
+                gy, gx = local_to_global(y, x, map_id)
+                global_coords = (gy, gx)
+            except Exception as e:
+                global_coords = None
+            
+            # Process universal battle rules first
+            for rule in UNIVERSAL_BATTLE_RULES:
+                condition = rule.get('condition', {})
+                if self._check_movement_condition(condition, x, y, map_id, global_coords):
+                    scripted_action = rule.get('action')
+                    if isinstance(scripted_action, str) and scripted_action in self.action_mapping:
+                        scripted_action_int = self.action_mapping[scripted_action]
+                        print(f"StageManager: UNIVERSAL BATTLE RULE → {scripted_action} ({scripted_action_int}) [rule: {rule}]")
+                        return scripted_action_int
+                    elif isinstance(scripted_action, int):
+                        print(f"StageManager: UNIVERSAL BATTLE RULE → action {scripted_action} [rule: {rule}]")
+                        return scripted_action
+                        
+        except Exception as e:
+            print(f"StageManager: Error in universal battle rules: {e}")
             
         # ------------------------------------------------------------------
-        # IMPORTANT CHANGE: We *defer* PATH_FOLLOW_ACTION conversion until
-        # *after* evaluating scripted-movement rules.  This lets stage-
-        # specific overrides (e.g. pressing "A" at the Route-2 potion tree)
-        # take precedence when the user is holding key "5".  If none of the
-        # scripted rules fire we fall back to normal path-following at the
-        # bottom of the method.
+        # Store PATH_FOLLOW_ACTION for later processing - we want to check
+        # scripted movement rules first to allow overrides
         # ------------------------------------------------------------------
         from environment.environment import PATH_FOLLOW_ACTION
-        if action == PATH_FOLLOW_ACTION:
-            print(f"StageManager: Converting deferred PATH_FOLLOW_ACTION to quest movement")
-            if hasattr(self.env, 'quest_manager') and self.env.quest_manager:
-                current_quest = getattr(self.env.quest_manager, 'current_quest_id', None)
-                print(f"StageManager: Current quest ID from quest manager: {current_quest}")
-            return self._convert_path_follow_to_movement(action)
+        is_path_follow_action = (action == PATH_FOLLOW_ACTION)
             
         if not self.scripted_movements:
             # No scripted movements defined for the current stage – allow the
@@ -841,6 +1009,21 @@ class StageManager:
                     return self.action_mapping.get('b', self._get_noop_action())
         except Exception as e:
             print("StageManager: Error in stray-A suppression logic:", e)
+        
+        # ------------------------------------------------------------------
+        # Handle PATH_FOLLOW_ACTION after checking all scripted movements
+        # This allows scripted movements to override path following
+        # ------------------------------------------------------------------
+        if is_path_follow_action:
+            # Suppress path-follow during Poké Center heal exit sequence
+            if getattr(self, '_heal_at_poke_center_seq_enqueued', False):
+                print("StageManager: Suppressing PATH_FOLLOW_ACTION during heal exit sequence")
+                return self._get_noop_action()
+            print(f"StageManager: Converting PATH_FOLLOW_ACTION to quest movement (no scripted overrides)")
+            if hasattr(self.env, 'quest_manager') and self.env.quest_manager:
+                current_quest = getattr(self.env.quest_manager, 'current_quest_id', None)
+                print(f"StageManager: Current quest ID from quest manager: {current_quest}")
+            return self._convert_path_follow_to_movement(action)
         
         print(f"DEBUGGING STAGEMANAGER: action={action}")
         return action
@@ -1137,6 +1320,73 @@ class StageManager:
                     print('StageManager DEBUG: Error in party_pokemon_species_is check –', _e)
                     return False
 
+            # ----------------------------------------------------------
+            # POKEMON HEALTH CHECKS - for battle automation
+            # ----------------------------------------------------------
+            if 'pokemon_fainted' in condition:
+                # Check if the pokemon mentioned in dialog is fainted
+                try:
+                    dialog = self.env.get_active_dialog() or ''
+                    pokemon_is_fainted = False
+                    
+                    # Extract pokemon name from dialog
+                    if 'CHARMANDER' in dialog:
+                        # Check if Charmander (first pokemon) is fainted
+                        if hasattr(self.env, 'party') and self.env.party and self.env.party.party_size > 0:
+                            charmander = self.env.party.party[0]
+                            pokemon_is_fainted = (charmander.HP == 0)
+                    elif 'NIDORAN♂' in dialog:
+                        # Check if Nidoran (likely second pokemon) is fainted
+                        if hasattr(self.env, 'party') and self.env.party and self.env.party.party_size > 1:
+                            nidoran = self.env.party.party[1]
+                            pokemon_is_fainted = (nidoran.HP == 0)
+                    
+                    expected_fainted = bool(condition['pokemon_fainted'])
+                    if pokemon_is_fainted != expected_fainted:
+                        print(f"StageManager DEBUG: pokemon_fainted check failed – fainted={pokemon_is_fainted}, expected {expected_fainted}")
+                        return False
+                        
+                except Exception as e:
+                    print(f"StageManager DEBUG: Error checking pokemon_fainted: {e}")
+                    return False
+            
+            if 'pokemon_healthy' in condition:
+                # Check if the pokemon mentioned in dialog is healthy (not fainted)
+                try:
+                    dialog = self.env.get_active_dialog() or ''
+                    pokemon_is_healthy = False
+                    
+                    # Extract pokemon name from dialog
+                    if 'CHARMANDER' in dialog:
+                        # Check if Charmander (first pokemon) is healthy
+                        if hasattr(self.env, 'party') and self.env.party and self.env.party.party_size > 0:
+                            charmander = self.env.party.party[0]
+                            pokemon_is_healthy = (charmander.HP > 0)
+                    elif 'NIDORAN♂' in dialog:
+                        # Check if Nidoran (likely second pokemon) is healthy
+                        if hasattr(self.env, 'party') and self.env.party and self.env.party.party_size > 1:
+                            nidoran = self.env.party.party[1]
+                            pokemon_is_healthy = (nidoran.HP > 0)
+                    
+                    expected_healthy = bool(condition['pokemon_healthy'])
+                    if pokemon_is_healthy != expected_healthy:
+                        print(f"StageManager DEBUG: pokemon_healthy check failed – healthy={pokemon_is_healthy}, expected {expected_healthy}")
+                        return False
+                        
+                except Exception as e:
+                    print(f"StageManager DEBUG: Error checking pokemon_healthy: {e}")
+                    return False
+
+            # ----------------------------------------------------------
+            # DIALOG CONTAINS CHECK (for partial text matching)
+            # ----------------------------------------------------------
+            if 'dialog_contains' in condition:
+                dialog_substring = condition['dialog_contains']
+                dialog = self.env.get_active_dialog() or ''
+                if dialog_substring not in dialog:
+                    print(f"StageManager DEBUG: dialog_contains check failed – '{dialog_substring}' not in '{dialog}'")
+                    return False
+
             return True
             
         except Exception as e:
@@ -1265,6 +1515,27 @@ class StageManager:
         """Clear all scripted movements"""
         self.scripted_movements = []
         print("StageManager: Cleared all scripted movements")
+    
+    def emergency_clear_all_automation(self):
+        """Emergency method to clear ALL automation - use when player gets stuck"""
+        print("StageManager: EMERGENCY CLEAR - Clearing ALL automation")
+        
+        # Clear all automation
+        self._auto_action_queue.clear()
+        self.clear_scripted_movements()
+        self.blockings.clear()
+        
+        # Reset all flags
+        self._oak_greet_right_sent = False
+        if hasattr(self, '_nido_name_seq_enqueued'):
+            self._nido_name_seq_enqueued = False
+        if hasattr(self, '_heal_at_poke_center_seq_enqueued'):
+            self._heal_at_poke_center_seq_enqueued = False
+        
+        # Set to undefined stage (no automation)
+        self.stage = 999  # High number that has no STAGE_DICT entry
+        
+        print(f"StageManager: Emergency clear complete - stage set to {self.stage}")
             
     def update_stage_manager(self):
         """Your original update_stage_manager method structure"""
@@ -1402,6 +1673,30 @@ class StageManager:
             print('StageManager: Nidoran scripted catch error:', e)
 
         # --------------------------------------------------------------
+        # STAGE 15: Auto-inject 'A' press when at Blue's sister location without TOWN_MAP
+        # --------------------------------------------------------------
+        try:
+            print(f"StageManager: DEBUG - Current stage: {self.stage}")
+            if self.stage == 15:
+                from environment.data.recorder_data.global_map import local_to_global
+                x, y, map_id = self.env.get_game_coords()
+                gy, gx = local_to_global(y, x, map_id)
+                town_map_qty = self._get_item_quantity('TOWN_MAP')
+                
+                print(f"StageManager: DEBUG - Stage 15, at ({gy}, {gx}), TOWN_MAP qty: {town_map_qty}, frame: {self._frame_counter}")
+                
+                # Check if at Blue's sister location and don't have TOWN_MAP
+                if (gy, gx) == (340, 107) and town_map_qty == 0:
+                    # Only inject A press every few frames and if queue isn't full
+                    if self._frame_counter % 5 == 0 and len(self._auto_action_queue) < 3:
+                        print(f"StageManager: Stage 15 - Auto-injecting 'A' press at Blue's sister location")
+                        self._queue_auto_action('a')
+                    else:
+                        print(f"StageManager: DEBUG - Skipping A injection: frame % 5 = {self._frame_counter % 5}, queue size: {len(self._auto_action_queue)}")
+        except Exception as e:
+            print('StageManager: Error in Stage 15 auto-A injection:', e)
+        
+        # --------------------------------------------------------------
         # Disable Viridian-Mart automation after Poké Balls are stocked
         # --------------------------------------------------------------
         try:
@@ -1415,13 +1710,56 @@ class StageManager:
             print('StageManager: Error while evaluating Poké Ball quantity:', e)
         
         # --------------------------------------------------------------
-        # QUEST 026 ▸ Potion pickup monitoring
+        # STAGE 23 COMPLETION - Advance after Nidoran captured or quest completed
         # --------------------------------------------------------------
-        # While Stage 26 is active, the scripted movement rule forces
-        # "A" presses at global coordinates (270,89) until the hidden
-        # Potion is collected. Once _compare_items_quantity('POTION')
-        # returns True (indicating the item quantity changed), we clear
-        # all Stage-26 automation and advance to a neutral stage.
+        try:
+            if self.stage == 23:
+                # Check if quest 23 is completed (Nidoran captured)
+                quest_completed = False
+                if hasattr(self.env, 'quest_manager') and self.env.quest_manager:
+                    status = getattr(self.env.quest_manager, 'quest_completed_status', {})
+                    quest_completed = bool(status.get('023'))
+                
+                # Also check if we have Nidoran in party as backup
+                nidoran_in_party = False
+                try:
+                    from environment.data.environment_data.species import Species
+                    if hasattr(self.env, 'party') and self.env.party:
+                        party = self.env.party.party[:self.env.party.party_size]
+                        for p in party:
+                            try:
+                                species_name = Species(p.Species).name
+                                if species_name == 'NIDORAN_M':
+                                    nidoran_in_party = True
+                                    break
+                            except Exception:
+                                continue
+                except Exception as e:
+                    print(f"StageManager: Error checking party for Nidoran: {e}")
+                
+                # Clear stage 23 if quest completed or if we're no longer on quest 23
+                current_quest = getattr(self.env.quest_manager, 'current_quest_id', None) if hasattr(self.env, 'quest_manager') else None
+                
+                if quest_completed or nidoran_in_party or (current_quest and str(current_quest) != '023'):
+                    print(f"StageManager: Stage 23 completed - clearing all automation. Quest completed: {quest_completed}, Nidoran in party: {nidoran_in_party}, Current quest: {current_quest}")
+                    
+                    # EMERGENCY CLEAR - Remove all stage 23 automation
+                    self._auto_action_queue.clear()
+                    self.clear_scripted_movements()
+                    self.blockings.clear()
+                    
+                    # Reset any stage 23 specific flags
+                    if hasattr(self, '_nido_name_seq_enqueued'):
+                        self._nido_name_seq_enqueued = False
+                    
+                    # Advance to undefined stage (no automation)
+                    self.stage = 24
+                    print(f"StageManager: Advanced to stage {self.stage} - all automation disabled")
+        except Exception as e:
+            print('StageManager: Error in Stage-23 completion check:', e)
+        
+        # --------------------------------------------------------------
+        # QUEST 026 ▸ Potion pickup monitoring
         # --------------------------------------------------------------
         try:
             if self.stage == 26 and self._compare_items_quantity('POTION'):
@@ -1438,6 +1776,94 @@ class StageManager:
                 self.stage = 27
         except Exception as e:
             print('StageManager: Error in Stage-26 Potion monitoring:', e)
+
+        # ------------------------------------------------------------------
+        # DEBUG: Track Oak's parcel and stage transitions - LOG TO FILE
+        # ------------------------------------------------------------------
+        try:
+            if self.stage in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]:
+                parcel_qty = self._get_item_quantity('OAKS_PARCEL')
+                town_map_qty = self._get_item_quantity('TOWN_MAP')
+                x, y, map_id = self.env.get_game_coords()
+                try:
+                    from environment.data.recorder_data.global_map import local_to_global
+                    gy, gx = local_to_global(y, x, map_id)
+                    global_coords = (gy, gx)
+                except:
+                    global_coords = "N/A"
+                
+                dialog = (self.env.get_active_dialog() or '').replace('\n', ' ')[:100]
+                
+                # Track parcel changes
+                previous_parcel_qty = getattr(self, '_previous_parcel_qty', parcel_qty)
+                if parcel_qty != previous_parcel_qty:
+                    # LOG CRITICAL PARCEL CHANGE TO FILE
+                    parcel_logger.critical(f"PARCEL CHANGE DETECTED! Stage {self.stage} | OAKS_PARCEL: {previous_parcel_qty} -> {parcel_qty} | Global: {global_coords} | Dialog: '{dialog}'")
+                    
+                    # Try to identify what might have caused the change
+                    try:
+                        bag_items = self.env.get_items_in_bag() if hasattr(self.env, 'get_items_in_bag') else []
+                        parcel_logger.critical(f"PARCEL CHANGE: Current bag contents: {bag_items}")
+                        parcel_logger.critical(f"PARCEL CHANGE: Bag size: {len(bag_items)}")
+                        
+                        # Also try to get detailed item info
+                        if hasattr(self.env, 'item_handler'):
+                            detailed_items = self.env.item_handler.get_items_in_bag()
+                            detailed_quantities = self.env.item_handler.get_items_quantity_in_bag()
+                            parcel_logger.critical(f"PARCEL CHANGE: Detailed items: {detailed_items}")
+                            parcel_logger.critical(f"PARCEL CHANGE: Detailed quantities: {detailed_quantities}")
+                    except Exception as e:
+                        parcel_logger.error(f"PARCEL CHANGE: Error getting bag items: {e}")
+                    
+                    # Also print to console for immediate visibility
+                    print(f"PARCEL CHANGE DETECTED! Check parcel_debug.log for details. Stage {self.stage} | OAKS_PARCEL: {previous_parcel_qty} -> {parcel_qty}")
+                
+                self._previous_parcel_qty = parcel_qty
+                
+                # LOG EVERY SINGLE STEP - NO FRAME LIMITING
+                parcel_logger.info(f"STEP: Stage {self.stage} | OAKS_PARCEL: {parcel_qty} | TOWN_MAP: {town_map_qty} | Global: {global_coords} | Dialog: '{dialog[:50]}'")
+                
+                # Extra logging when parcel is present
+                if parcel_qty > 0:
+                    parcel_logger.warning(f"PARCEL PRESENT: Stage {self.stage} | OAKS_PARCEL: {parcel_qty} | Global: {global_coords}")
+        except Exception as e:
+            parcel_logger.error(f"PARCEL DEBUG ERROR: {e}")
+            print(f"PARCEL DEBUG ERROR: {e}")
+
+        # ------------------------------------------------------------------
+        # OAK GREET TILE (348,110): press RIGHT once, then spam A until party
+        # size > 0 — runs regardless of stage to avoid timing issues.
+        # ------------------------------------------------------------------
+        try:
+            from environment.data.recorder_data.global_map import local_to_global
+            x, y, map_id = self.env.get_game_coords()
+            cur_global = local_to_global(y, x, map_id)
+
+            if cur_global == (348, 110):
+                # Current party size
+                party_size = 0
+                try:
+                    party_size = self.env.read_m('wPartyCount')
+                except Exception:
+                    pass
+
+                if party_size == 0:
+                    if not self._oak_greet_right_sent:
+                        self._queue_auto_action('right')
+                        self._oak_greet_right_sent = True
+                    elif self._frame_counter % 4 == 0:
+                        if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                            self._queue_auto_action('a')
+                else:
+                    # Reset after Pokémon obtained
+                    self._oak_greet_right_sent = False
+            else:
+                # Reset if player is not on the greet tile
+                self._oak_greet_right_sent = False
+        except Exception as e:
+            print('StageManager: Oak greet right/A logic error:', e)
+
+
 
     # ------------------------------------------------------------------
     # Quest/condition helpers
@@ -1708,7 +2134,9 @@ class StageManager:
         print(f'StageManager: _heal_at_poke_center gy={gy} gx={gx}')
         dlg = self.env.get_active_dialog() or ''
         
-        if x == 3 and self.env._is_pokecenter(map_id) and (y == 3 or y == 4 or y == 5 or y == 6 or y == 7 or y == 8):
+        if x in (1, 2, 3, 4) and self.env._is_pokecenter(map_id) and (
+            y in (3, 4, 5, 6, 7, 8)
+        ):
             # compute distance from door
             door_y = 7
             counter_y = 2
@@ -1736,25 +2164,79 @@ class StageManager:
             if self.env.read_hp_fraction() != 1:
                 if not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
                     print(f'StageManager: _heal_at_poke_center party_hp_fraction={self.env.read_hp_fraction()}')
-                    actions_seq = ['up'] * dist_from_counter + ['a'] * 2  # Changed from 10 to 2
+                    # ------------------------------------------------------------------
+                    # ALIGN WITH NURSE – The nurse sprite sits behind the centre
+                    # counter tile (local X≈4 on the 0-based 10-wide map).  If Grok
+                    # approaches from X=1-3 the old logic pressed A while offset
+                    # by one tile and the dialog never triggered, leaving him
+                    # stuck in a repeat loop.  We first step horizontally until
+                    # X == 4, then move up to the counter, then press A×2.
+                    # ------------------------------------------------------------------
+                    target_x_for_nurse = 3  # centre tile directly in front of Nurse Joy
+                    horiz_moves: list[str] = []
+                    if x < target_x_for_nurse:
+                        horiz_moves = ['right'] * (target_x_for_nurse - x)
+                    elif x > target_x_for_nurse:
+                        horiz_moves = ['left'] * (x - target_x_for_nurse)
+
+                    # Always include at least one UP tap so the player turns
+                    # to face the nurse even when already at the counter
+                    min_up_tap = 1 if dist_from_counter == 0 else 0
+                    actions_seq = horiz_moves + (['up'] * (dist_from_counter + min_up_tap)) + ['a'] * 2
                     print(f'StageManager: _heal_at_poke_center actions_seq={actions_seq}')
                     for btn in actions_seq:
                         if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
                             self._queue_auto_action(btn)
                     self._heal_at_poke_center_seq_enqueued = True
             
-            # Full health - move away from counter (1 step toward door)
-            elif self.env.read_hp_fraction() == 1:
-                # Only move if we're at the exact counter interaction position (y == 2)
-                if y == 2 and not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
-                    print(f'StageManager: _heal_at_poke_center party_hp_fraction={self.env.read_hp_fraction()}')
-                    # Move 1 step toward door (down)
-                    actions_seq = ['down'] * 1
-                    print(f'StageManager: _heal_at_poke_center actions_seq={actions_seq}')
-                    for btn in actions_seq:
-                        if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
-                            self._queue_auto_action(btn)
-                    self._heal_at_poke_center_seq_enqueued = True
+            # ------------------------------------------------------------------
+            # FULL HEALTH ▸ EXIT ROUTINE
+            # ------------------------------------------------------------------
+            # Once the party HP fraction is 1.0 we are done healing.  We now
+            # need to walk from the counter down to the doorway at local y=7
+            # and then take one additional DOWN step to trigger the warp back
+            # to Viridian City.  We enqueue *all* required DOWN presses in a
+            # single batch so that ConsolidatedNavigator cannot pull Grok
+            # northwards, which previously caused an up-down oscillation.
+            # ------------------------------------------------------------------
+            # elif self.env.read_hp_fraction() == 1:
+            #     if not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
+            #         # Compute steps and direction to move to warp tile at local y == door_y.
+            #         if y < door_y:
+            #             steps = door_y - y
+            #             direction = 'down'
+            #         elif y > door_y:
+            #             steps = y - door_y
+            #             direction = 'up'
+            #         else:
+            #             # already on warp tile – need one press to trigger warp
+            #             steps = 1
+            #             direction = 'down'
+            #         actions_seq = [direction] * steps
+            #         print(f'StageManager: _heal_at_poke_center exit-to-door actions_seq={actions_seq}')
+            #         for btn in actions_seq:
+            #             if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+            #                 self._queue_auto_action(btn)
+            #         self._heal_at_poke_center_seq_enqueued = True
+            
+            # ------------------------------------------------------------------
+            # Nurse Joy main menu – when "▶HEAL / CANCEL" is displayed we must
+            # press A exactly once to select HEAL.  Pressing B will exit and
+            # stall the healing routine.  We enqueue a single A press the
+            # first time we see the menu, and reset the helper flag once the
+            # menu disappears so it can trigger again on future heals.
+            # ------------------------------------------------------------------
+            if ('HEAL' in dlg and 'CANCEL' in dlg) or ('YES' in dlg and 'NO' in dlg):
+                if not getattr(self, '_nurse_heal_menu_enqueued', False):
+                    if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                        self._queue_auto_action('a')
+                        self._nurse_heal_menu_enqueued = True
+                # Exit early so we don't enqueue other sequences in same frame
+                return
+            else:
+                # Reset flag when menu no longer visible
+                if getattr(self, '_nurse_heal_menu_enqueued', False):
+                    self._nurse_heal_menu_enqueued = False
     
         # ------------------------------------------------------------------
         # Early-Warp Assistance – if we're outside Pewter Poké Center (map_id 2
@@ -1762,12 +2244,34 @@ class StageManager:
         # and Pokémon aren't fully healed, queue an UP press so we step onto
         # the warp and enter the Center before running the normal heal logic.
         # ------------------------------------------------------------------
-        if map_id == 2 and self.env.read_hp_fraction() != 1 and not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
-            # Accept either of the two tiles directly south of the entrance
-            if x == 16 and y in (17, 18) and len(self._auto_action_queue) < self._auto_action_queue.maxlen:
-                self._queue_auto_action('up')
-                self._heal_at_poke_center_seq_enqueued = True
-                return
+        # SAFETY GUARD (2024-06-22): Do **NOT** trigger the early-warp helper if
+        # the ConsolidatedNavigator is currently executing a quest path.  The
+        # navigator already knows how to reach the Poké Center when required
+        # and StageManager forcibly queuing an UP press while the avatar is
+        # aligned horizontally with the doorway—but *not* vertically—makes
+        # Grok walk against the wall indefinitely (observed at global
+        # coordinates ~278,63 during Quest 26).
+        in_nav_path = False
+        try:
+            if hasattr(self.env, "navigator") and self.env.navigator:
+                # A path is considered active when at least one coordinate is
+                # loaded.  We also double-check that the navigator believes
+                # it is currently "active" (status set by load_coordinate_path)
+                nav = self.env.navigator
+                in_nav_path = bool(getattr(nav, "sequential_coordinates", [])) and \
+                              getattr(nav, "navigation_status", "idle") == "active"
+        except Exception:
+            # Defensive: never let an attribute error break the heal routine.
+            in_nav_path = False
+
+        # Only apply the warp nudge when *not* following a quest path.
+        if not in_nav_path:
+            if map_id == 2 and self.env.read_hp_fraction() != 1 and not getattr(self, '_heal_at_poke_center_seq_enqueued', False):
+                # Accept either of the two tiles directly south of the entrance
+                if x == 16 and y in (17, 18) and len(self._auto_action_queue) < self._auto_action_queue.maxlen:
+                    self._queue_auto_action('up')
+                    self._heal_at_poke_center_seq_enqueued = True
+                    return
     
     def _compare_items_quantity(self, item_name: str) -> bool:
         """Detect a change in the quantity of an item in the bag over multiple steps."""

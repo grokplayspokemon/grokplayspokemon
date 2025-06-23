@@ -29,6 +29,7 @@ Movement:
     Quests like exit a location, or go to a location, can be completed with a follow_nav_path tool call. If you have to talk to an NPC, for the most part, follow_nav_path will take you to that NPC.
     Quests like pick up an item, or talk to an NPC, require you to walk to where the item or NPC is, face them, and press A. After you have the item or talked to the NPC, use follow_nav_path repeatedly to proceed.
     If you choose move with arrow keys, before you do so, use the collision map to plan the number of ups, down, lefts and rights you will use to navigate. You cannot walk on unwalkable tiles.
+    If you remain in the same place after several calls to follow_nav_path, the pathing might be broken and you should just walk around using the buttons for a while.
 
 Interaction:
 

@@ -58,4 +58,13 @@ class PartyMons(Union):
         return self.party[idx]
 
     def __repr__(self):
-        return str([Species(x.Species).name for x in self.party[: self.party_size]])
+        species_names = []
+        for x in self.party[: self.party_size]:
+            try:
+                if x.Species != 0:  # Skip empty slots
+                    species_names.append(Species(x.Species).name)
+                else:
+                    species_names.append("EMPTY")
+            except ValueError:
+                species_names.append(f"INVALID_SPECIES_{x.Species}")
+        return str(species_names)

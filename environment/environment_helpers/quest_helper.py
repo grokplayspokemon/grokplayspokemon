@@ -125,8 +125,14 @@ class QuestWarpBlocker:
         # Path following now handled by ConsolidatedNavigator
         # Navigation functionality consolidated in environment_helpers/navigator.py
     
+    def reset_quest_state(self, quest_id: Optional[int]):
+        if hasattr(self.env, 'navigator') and self.env.navigator:
+            print(f"QuestWarpBlocker: Resetting navigator state for quest change (new quest: {quest_id})")
+            self.env.navigator.reset_quest_state()
+    
     def update_quest_blocks(self, quest_id: Optional[int]):
         """Update blocking rules and scripted movements based on current quest"""
+
         # FIXED: Clear ALL quest-related blocks first before adding new ones
         # This ensures proper cleanup when transitioning between quests
         if hasattr(self.env, 'stage_manager') and hasattr(self.env.stage_manager, 'blockings'):

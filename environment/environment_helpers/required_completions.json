@@ -92,12 +92,10 @@
         "associated_coordinates_file": "004_coords.json",
         "event_triggers": [
             {
-                "type": "coordinates_match",
-                "coordinates": [
-                    5,
-                    3,
-                    40
-                ],
+                "type": "current_map_is_previous_map_was",
+                "current_map_id": 0,
+                "previous_map_id": 40,
+                "comment": "Player must actually leave Oak's Lab and return to Pallet Town",
                 "completed": false
             },
             {
@@ -229,9 +227,8 @@
         "associated_coordinates_file": "009_coords.json",
         "event_triggers": [
             {
-                "type": "item_is_in_inventory",
-                "item_name": "OAKS_PARCEL",
-                "quantity_min": 1,
+                "type": "event_completed",
+                "event_name": "EVENT_GOT_OAKS_PARCEL",
                 "completed": false
             },
             {
@@ -285,13 +282,6 @@
         "event_triggers": [
             {
                 "type": "current_map_is_previous_map_was",
-                "current_map_id": 0,
-                "previous_map_id": 12,
-                "comment": "Route 1 -> Pallet Town",
-                "completed": false
-            },
-            {
-                "type": "current_map_is_previous_map_was",
                 "current_map_id": 40,
                 "previous_map_id": 0,
                 "comment": "Pallet Town -> Oak's Lab (return)",
@@ -316,8 +306,8 @@
         "associated_coordinates_file": "012_coords.json",
         "event_triggers": [
             {
-                "type": "dialog_contains_text",
-                "text": "Thank you!",
+                "type": "event_completed",
+                "event_name": "EVENT_OAK_GOT_PARCEL",
                 "completed": false
             }
         ],
@@ -546,12 +536,7 @@
         "event_triggers": [
             {
                 "type": "dialog_contains_text",
-                "text": "May I help you?",
-                "completed": false
-            },
-            {
-                "type": "current_map_id",
-                "current_map_id": 42,
+                "text": "Hi",
                 "completed": false
             }
         ],
@@ -612,11 +597,6 @@
         "associated_coordinates_file": "023_coords.json",
         "event_triggers": [
             {
-                "type": "party_pokemon_species_is",
-                "species_name": "NIDORAN_M",
-                "completed": false
-            },
-            {
                 "type": "current_map_id",
                 "current_map_id": 33,
                 "completed": false
@@ -640,18 +620,8 @@
         "associated_coordinates_file": "024_coords.json",
         "event_triggers": [
             {
-                "type": "dialog_contains_text",
-                "text": "get any stronger?",
-                "completed": false
-            },
-            {
                 "type": "battle_type_is",
                 "battle_type_name": "TRAINER",
-                "completed": false
-            },
-            {
-                "type": "current_map_id",
-                "current_map_id": 33,
                 "completed": false
             }
         ],
@@ -831,12 +801,6 @@
         "end_quest_text": "Light at the end of the forest. Goodbye, bug catchers.",
         "associated_coordinates_file": "031_coords.json",
         "event_triggers": [
-            {
-                "type": "event_completed",
-                "opponent_identifier": "BUG_CATCHER_VF3",
-                "event_name": "EVENT_BEAT_VIRIDIAN_FOREST_TRAINER_2",
-                "completed": false
-            },
             {
                 "type": "current_map_is_previous_map_was",
                 "current_map_id": 47,

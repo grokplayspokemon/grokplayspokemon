@@ -1,0 +1,30 @@
+[
+  {
+    "step": 94812,
+    "action": 5,
+    "original_action": null,
+    "timestamp": 1750720310.26842,
+    "source": "manual"
+  },
+  {
+    "step": 94813,
+    "action": 5,
+    "original_action": null,
+    "timestamp": 1750720310.7982247,
+    "source": "manual"
+  },
+  {
+    "step": 94814,
+    "action": 5,
+    "original_action": null,
+    "timestamp": 1750720311.3571296,
+    "source": "manual"
+  },
+  {
+    "step": 94815,
+    "action": 5,
+    "original_action": null,
+    "timestamp": 1750720312.29658,
+    "source": "manual"
+  }
+]

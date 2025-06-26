@@ -130,7 +130,7 @@ from environment.data.environment_data.species import Species
 from environment.data.environment_data.constants import MOVES_INFO_DICT, ID_TO_SPECIES
 
 
-VALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start"]
+VALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start", "select"]
 
 PATH_FOLLOW_ACTION = 6  # discrete action index for path-follow (key "5")
 ACTION_SPACE = spaces.Discrete(len(VALID_ACTIONS))  # total actions including path-follow and start
@@ -188,6 +188,8 @@ class RedGymEnv(Env):
             self.init_state_name = None
             self.init_state_path = None
 
+        self.VALID_ACTIONS = VALID_ACTIONS
+        self.VALID_RELEASE_ACTIONS = VALID_RELEASE_ACTIONS
         self.action_freq = env_config.action_freq
         self.max_steps = False
         self.save_video = env_config.save_video
@@ -1265,10 +1267,6 @@ class RedGymEnv(Env):
         self.handle_oak_dialog()
         self.handle_pokecenter_dialog()
         
-        # ANTI-SPAM LOGGING: Only log when values actually change or significant events occur
-        # This prevents console spam while preserving important debugging information
-        
-        # Only log step start if action is different or significant
         current_location = self.get_game_coords()
         print(f"\n\n\n\nenvironment.py: step(): START OF STEP {self.step_count}; location: {self.get_game_coords()}")
 
@@ -1298,12 +1296,6 @@ class RedGymEnv(Env):
         dialog = self.read_dialog() or ''
 
         reset = False # Initialize reset here
-        
-        # COMPLETELY DISABLED: Dialog detection blocking
-        # raw_dialog = self.read_dialog() or ''
-        # if raw_dialog.strip() and action == PATH_FOLLOW_ACTION:
-        #     print("environment.py: step(): Navigation paused: dialog active, cannot move to next coordinate.")
-        #     return self._get_obs(), 0.0, reset, False, {}
 
         if self.save_video and self.step_count == 0:
             self.start_video()
@@ -1312,8 +1304,8 @@ class RedGymEnv(Env):
         if self.auto_flash and self.pyboy.memory[wMapPalOffset] == 6:
             self.pyboy.memory[wMapPalOffset] = 0
 
-        if self.auto_remove_all_nonuseful_items:
-            self.remove_all_nonuseful_items()
+        # if self.auto_remove_all_nonuseful_items:
+        #     self.remove_all_nonuseful_items()
 
         # Infinite money: set to maximum ($999999) in BCD
         _, wPlayerMoney = self.pyboy.symbol_lookup("wPlayerMoney")
@@ -1329,9 +1321,16 @@ class RedGymEnv(Env):
 
         self.update_safari_zone()
 
-        self.item_handler.scripted_buy_items()
-        self.check_num_bag_items()
+        try:
+            current_quest = self.quest_manager.get_current_quest()
+        except Exception as e:
+            print(f"environment.py: step(): Error getting current quest: {e}")
+            current_quest = None
         
+        if current_quest not in [9, 10, 11, 12]:
+            self.item_handler.scripted_buy_items()
+            self.item_handler.scripted_manage_items()
+            self.check_num_bag_items()
         # UNIFIED ARCHITECTURE: Convert PATH_FOLLOW_ACTION to movement action BEFORE calling run_action_on_emulator
         # This ensures everything goes through the same action execution path
         final_action = action
@@ -1638,13 +1637,13 @@ class RedGymEnv(Env):
         collision_map_markdown = self.get_collision_map_markdown()
         print(collision_map_markdown)
 
+        self.stage_manager.update_stage_manager()
         # Update StageManager every frame to allow stage transitions and cleanup of scripted rules
-        if hasattr(self, 'stage_manager') and hasattr(self.stage_manager, 'update_stage_manager'):
-            try:
-                self.stage_manager.update_stage_manager()
-            except Exception as e:
-                print(f"environment.py: step(): StageManager update error: {e}")
-
+        # The StageManager was already updated above; avoid redundant calls.
+        # Historically a temporary `raise Exception('test')` here caused noisy
+        # "StageManager update error: test" log spam.  This block has been
+        # removed to prevent the artificial error and duplicate processing.
+        
         local_x, local_y, map_id = self.get_game_coords()
         global_coords = local_to_global(local_y, local_x, map_id)
         print(f"environment.py: step(): END OF STEP global location {global_coords}\n\n\n\n")
@@ -3134,7 +3133,8 @@ class RedGymEnv(Env):
     def get_items_in_bag(self) -> Iterable[Items]:
         num_bag_items = self.read_m("wNumBagItems")
         _, addr = self.pyboy.symbol_lookup("wBagItems")
-        return [Items(i) for i in self.pyboy.memory[addr : addr + 2 * num_bag_items][::2]]
+        bag_item_ids = self.pyboy.memory[addr : addr + 2 * num_bag_items][::2]
+        return [Items(i) for i in bag_item_ids if i in Items._value2member_map_]
 
     def get_hm_count(self) -> int:
         return len(HM_ITEMS.intersection(self.get_items_in_bag()))
@@ -3161,7 +3161,11 @@ class RedGymEnv(Env):
             wNumBagItems = self.read_m("wNumBagItems")
             _, wBagItems = self.pyboy.symbol_lookup("wBagItems")
             bag_items = self.pyboy.memory[wBagItems : wBagItems + wNumBagItems * 2 : 2]
-            return {Items(item).name for item in bag_items if Items(item) in REQUIRED_ITEMS}
+            return {
+                Items(item).name
+                for item in bag_items
+                if item in Items._value2member_map_ and Items(item) in REQUIRED_ITEMS
+            }
         except Exception as e:
             print(f"Error getting required items: {e}")
             return set()
@@ -3207,7 +3211,7 @@ class RedGymEnv(Env):
         bag = np.array(self.pyboy.memory[wBagItems : wBagItems + 40], dtype=np.uint8)
         if numBagItems >= 20:
             print(
-                f"WARNING: env id {int(self.env_id)} contains a full bag with items: {[Items(item) for item in bag[::2]]}"
+                f"WARNING: env id {int(self.env_id)} contains a full bag with items: {[Items(item) for item in bag[::2] if item in Items._value2member_map_]}"
             )
 
     def close(self):
@@ -4362,6 +4366,13 @@ class RedGymEnv(Env):
         # Party information
         try:
             party_data = self.read_party_pokemon()
+            
+            # DEBUG: Print nicknames to verify they're working
+            if party_data and len(party_data) > 0:
+                for i, pokemon in enumerate(party_data):
+                    species_name = ID_TO_SPECIES.get(pokemon.species_id, f"Species_{pokemon.species_id}")
+                    print(f"DEBUG: Pokemon {i}: {pokemon.nickname} ({species_name})")
+            
             if party_data and len(party_data) > 0:
                 active_pokemon = party_data[0]
                 species_name = ID_TO_SPECIES.get(active_pokemon.species_id, f"Species_{active_pokemon.species_id}")
@@ -4570,14 +4581,33 @@ class RedGymEnv(Env):
         """Read all Pokemon currently in the party with full data"""
         # Use the PartyMons struct loaded in reset for reliable offsets
         party_list: list[PokemonData] = []
-        for struct in self.party.party[: self.party_size]:
+        party_size = self.read_party_size()
+        
+        # Pokemon nickname addresses (one for each party slot)
+        nickname_addresses = [0xD2B5, 0xD2C0, 0xD2CB, 0xD2D6, 0xD2E1, 0xD2EC]
+        
+        for i, struct in enumerate(self.party.party[: self.party_size]):
+            # Skip empty party slots (species_id = 0)
+            species_id = struct.Species
+            if species_id == 0:
+                continue
+                
             # Extract raw moves and PP from the struct
             moves = [Move(mid).name.replace("_", " ") for mid in struct.Moves if mid != 0]
             move_pp = list(struct.PP[: len(moves)])
 
+            # Read nickname from memory (11 bytes long)
+            nickname = ""
+            if i < len(nickname_addresses):
+                try:
+                    nickname_bytes = [self.memory[nickname_addresses[i] + j] for j in range(11)]
+                    nickname = self._convert_text(nickname_bytes)
+                except Exception as e:
+                    print(f"Error reading nickname for Pokemon {i}: {e}")
+                    nickname = ""
+
             # Assemble PokemonData from struct fields
             experience = (struct.Exp[0] << 16) + (struct.Exp[1] << 8) + struct.Exp[2]
-            species_id = struct.Species
             species_name = Species(species_id).name.replace("_", " ")
             status_val = struct.Status
             type1 = PokemonType(struct.Type1)
@@ -4596,7 +4626,7 @@ class RedGymEnv(Env):
                 moves=moves,
                 move_pp=move_pp,
                 trainer_id=struct.OTID,
-                nickname="",
+                nickname=nickname,
                 experience=experience,
             )
             party_list.append(pokemon)

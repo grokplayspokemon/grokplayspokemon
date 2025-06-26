@@ -24,6 +24,13 @@ from environment.environment_helpers.trigger_evaluator import TriggerEvaluator
 from environment.environment_helpers.quest_progression import QuestProgressionEngine
 from queue import SimpleQueue
 from datetime import datetime
+import logging
+from collections import deque
+from environment.environment import Env
+from environment.environment_helpers.navigator import ConsolidatedNavigator
+from environment.environment_helpers.quest_manager import QuestManager
+from environment.data.environment_data.items import Items
+from environment.data.environment_data.events import EventFlags
 
 from environment.wrappers.env_wrapper import EnvWrapper
 from environment.wrappers.configured_env_wrapper import ConfiguredEnvWrapper
@@ -42,6 +49,7 @@ from environment.data.environment_data.item_handler import ItemHandler
 from shared import game_started, grok_enabled
 from environment.data.environment_data.species import Species
 from environment.data.environment_data.battle import StatusCondition
+from environment.data.environment_data.constants import ITEM_NAME_TO_ID_DICT
 VALID_ACTIONS_STRVALID_ACTIONS_STR = ["down", "left", "right", "up", "a", "b", "path", "start"]
 
 # Load quest definitions
@@ -56,7 +64,7 @@ with open(QUESTS_FILE, 'r') as f:
 # Import StageManager for bootstrapping intro skip
 from environment.environment_helpers.stage_helper import StageManager
 
-def run_intro_bootstrap(env, executor, quest_manager, navigator, logger, max_steps=20000):
+def run_intro_bootstrap(env, executor, quest_manager, navigator, logger, max_steps=20000000):
     """
     Advance the game from the title screen to the custom-name entry screen by
     simply feeding *noop* actions into the environment and letting the *single*
@@ -77,7 +85,6 @@ def run_intro_bootstrap(env, executor, quest_manager, navigator, logger, max_ste
         # it explicitly here prior to the first action so the very first frame
         # already has scripted movements active).
         mgr.update_stage_manager()
-
         # Feed a neutral action (0 – DOWN). StageManager will transform it to
         # START / B / A as dictated by the scripted rules.
         obs, reward, done, truncated, info, total = executor(
@@ -785,16 +792,15 @@ def main():
             except:
                 status_queue.put(('__dialog__', ""))
 
-            # Send Pokemon team data
+            # Send pokemon team data to UI
             try:
+                # Use the updated read_party_pokemon method that includes nicknames
+                pokemon_list = env.read_party_pokemon()
                 party_data = []
-                party_size = env.read_m("wPartyCount")
-                for i in range(party_size):
-                    species = env.read_m(f"wPartyMon{i+1}Species")
-                    if species == 0:
-                        continue
+                
+                for i, pokemon in enumerate(pokemon_list):
                     # Map memory code to human-friendly name
-                    species_name = Species(species).name.title()
+                    species_name = Species(pokemon.species_id).name.title()
                     # Status condition
                     status_code = env.read_m(f"wPartyMon{i+1}Status")
                     status_name = StatusCondition(status_code).get_status_name()
@@ -804,10 +810,12 @@ def main():
                     exp1 = env.read_m(exp_addr + 1)
                     exp2 = env.read_m(exp_addr + 2)
                     exp_val = exp0 + (exp1 << 8) + (exp2 << 16)
+                    
                     party_data.append({
                         'slot': i,
-                        'id': species,
+                        'id': pokemon.species_id,
                         'speciesName': species_name,
+                        'nickname': pokemon.nickname,  # Include the nickname!
                         'status': status_name,
                         'experience': exp_val,
                         'level': env.read_m(f"wPartyMon{i+1}Level"),
@@ -1060,7 +1068,7 @@ def main():
             for i, coord in enumerate(navigator.sequential_coordinates):
                 if coord == player_global:
                     print(f"✓ Player is on quest coordinate {i}: {coord}")
-                    navigator.current_coordinate_index = i
+                    # navigator.current_coordinate_index = i
                     on_quest_node = True
                     break
         
@@ -1262,6 +1270,9 @@ def main():
                                 if desired == PATH_FOLLOW_ACTION:
                                     # Use PATH_FOLLOW_ACTION directly - let environment handle it
                                     current_action = PATH_FOLLOW_ACTION
+                                    # Set up key repeat for the 5 key
+                                    last_key_pressed = PATH_FOLLOW_ACTION
+                                    key_repeat_timer = current_time
                                 else:
                                     # FIXED: Override with quest-specific emulator action using centralized execution
                                     current_obs, current_reward, current_terminated, current_truncated, current_info, total_steps = execute_action_step(
@@ -1271,6 +1282,9 @@ def main():
                                     recorded_playthrough.append(desired)
                                     # Update observation and info for this frame
                                     obs, reward, terminated, truncated, info = current_obs, current_reward, current_terminated, current_truncated, current_info
+                                    # Set up key repeat for the 5 key with the filtered action
+                                    last_key_pressed = desired
+                                    key_repeat_timer = current_time
                         elif event.key == pygame.K_6:
                             raise Exception("play.py: main(): '6' key: Manual warp trigger")
                             # "6" key: Manual warp trigger
@@ -1322,9 +1336,7 @@ def main():
 
         if total_steps % 100 == 0:  # Every 100 steps
             # print(f"🔍 [DEBUG] Step {total_steps}: current_action={current_action}, grok_enabled={grok_enabled.is_set()}, grok_agent={grok_agent is not None}")
-            pass
-
-        
+            pass       
         
         
         
@@ -1342,7 +1354,7 @@ def main():
                 if retrieved == PATH_FOLLOW_ACTION:
                     raw_dialog = env.read_dialog() or ''
                     if raw_dialog.strip():
-                        # Dialog active: override to B button
+                        # Dialog active: override to B press
                         print("Dialog active; overriding Grok PATH_FOLLOW_ACTION to B press")
                         current_action = VALID_ACTIONS.index(WindowEvent.PRESS_BUTTON_B)
                     else:
@@ -1521,9 +1533,9 @@ def main():
 
                 time.sleep(0.05)
                 continue
-            
-        if env.quest_manager.current_quest_id == 9:
-            print(f'play.py: main(): quest_manager.current_quest_id == {env.quest_manager.current_quest_id}')
+        
+        # fix town map stuck 
+        if env.quest_manager.current_quest_id == 15 or env.quest_manager.current_quest_id == 16 or env.quest_manager.current_quest_id == 17:
             local_x, local_y, map_id = env.get_game_coords()
             glob_y, glob_x = local_to_global(local_y, local_x, map_id)
             facing_direction = env._get_direction(env.pyboy.game_area())
@@ -1531,69 +1543,36 @@ def main():
             noop_action = None
             print(f"play.py: main(): glob_y: {glob_y}, glob_x: {glob_x}, facing_direction: {facing_direction}")
             print(f"play.py: main(): env.never_run_again: {env.never_run_again}")
-            if glob_y == 299 and glob_x == 132 and dialog == "":
-                print(f"play.py: main(): glob_y == 299 and glob_x == 132 and dialog == ''")              
-            elif glob_y == 300 and glob_x == 132:
-                print(f"TRIGERING 300, 132 FACING {facing_direction}")
-                noop_action = getattr(env, "right", 2)
-                print(f"300, 132: {noop_action}")
-            elif glob_y == 300 and glob_x == 133 and facing_direction != "up":
-                print(f"TRIGERING 300, 133 FACING {facing_direction}")
+            if env.item_handler.get_item_quantity(ITEM_NAME_TO_ID_DICT["TOWN_MAP"]) > 0:
+                print(f'play.py: main(): town map found: {env.item_handler.get_item_quantity(ITEM_NAME_TO_ID_DICT["TOWN_MAP"])}')
+                # Remove the raise Exception here, as the map is now correctly found
+                # raise Exception(f"play.py: main(): town map found: {env.item_handler.get_item_quantity(ITEM_NAME_TO_ID_DICT['TOWN_MAP'])}")
+            # If the map is found, we should not be in this condition trying to get it.
+            # The original condition was `> 0`, which is where the exception was.
+            # Now that the map is being acquired, we need to allow normal progression.
+            # The condition for being stuck in Blue's sister's house was expecting TOWN_MAP == 0
+            # I will remove the logic that makes the agent press 'A' when it has the map.
+            if glob_y == 340 and glob_x == 107 and env.item_handler.get_item_quantity(ITEM_NAME_TO_ID_DICT["TOWN_MAP"]) == 0 and facing_direction == "up":
+                noop_action = getattr(env, "a", 4) # This action is to trigger the dialogue to get the map
+                print(f'play.py: main(): glob_y == 340 and glob_x == 107 and env.item_handler.get_item_quantity(ITEM_NAME_TO_ID_DICT["TOWN_MAP"]) == 0')              
+            elif glob_y == 340 and glob_x == 107 and env.item_handler.get_item_quantity(ITEM_NAME_TO_ID_DICT["TOWN_MAP"]) > 0 and facing_direction == "up":
+                # If we have the map, we should move down to exit the house
                 noop_action = getattr(env, "down", 0)
-                print(f"300, 133: {noop_action}")
-            elif glob_y == 301 and glob_x == 133 and facing_direction != "up":
-                print(f"TRIGERING 301, 133 FACING {facing_direction}")
+                print(f'play.py: main(): glob_y == 340 and glob_x == 107 and env.item_handler.get_item_quantity(ITEM_NAME_TO_ID_DICT["TOWN_MAP"]) > 0')              
+            elif glob_y == 341 and glob_x == 107 and facing_direction == "down":
                 noop_action = getattr(env, "down", 0)
-                print(f"301, 133: {noop_action}")
-                                
-            time.sleep(0.1)                 
-                
-            print(f"301, 133: after the ifs: {noop_action}")
-
-            if noop_action is not None:
-                obs, reward, terminated, truncated, info, total_steps = execute_action_step(
-                    env,
-                    noop_action,
-                    quest_manager,
-                    navigator,
-                    logger,
-                    total_steps,
-                )
-                print(f"play.py: main(): noop_action for quest 46: got past the execute_action_step {noop_action}")
-                env.pyboy.tick()
-                raw_frame = env.render()
-                processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
-                update_screen(screen, processed_frame_rgb, screen_width, screen_height)
-                # Update UI without advancing game state
-                update_ui_if_needed()
-                loop_clock.tick(30)
-
-                time.sleep(0.05)
-                continue
-            
-        if env.quest_manager.current_quest_id == 15:
-            print(f'play.py: main(): quest_manager.current_quest_id == {env.quest_manager.current_quest_id}')
-            local_x, local_y, map_id = env.get_game_coords()
-            glob_y, glob_x = local_to_global(local_y, local_x, map_id)
-            facing_direction = env._get_direction(env.pyboy.game_area())
-            dialog = env.read_dialog() or ""
-            noop_action = None
-            print(f"play.py: main(): glob_y: {glob_y}, glob_x: {glob_x}, facing_direction: {facing_direction}")
-            print(f"play.py: main(): env.never_run_again: {env.never_run_again}")
-            if glob_y == 341 and glob_x == 107 and facing_direction == "down":
-                noop_action = getattr(env, "down", 0)
-                print(f"play.py: main(): glob_y == 341 and glob_x == 107 and facing_direction == 'down'")              
+                print(f'play.py: main(): glob_y == 341 and glob_x == 107 and facing_direction == "down"')              
             elif glob_y == 342 and glob_x == 107 and facing_direction == "down":
                 noop_action = getattr(env, "down", 0)
-                print(f"TRIGERING 342, 107 FACING {facing_direction}")
+                print(f'TRIGERING 342, 107 FACING {facing_direction}')
             elif glob_y == 343 and glob_x == 107 and facing_direction == "down":
-                print(f"TRIGERING 343, 107 FACING {facing_direction}")
+                print(f'TRIGERING 343, 107 FACING {facing_direction}')
                 noop_action = getattr(env, "down", 0)
-                print(f"343, 107: {noop_action}")
+                print(f'343, 107: {noop_action}')
+            # Remove the extensive hardcoded movement after getting the map, allow normal navigation
+            # The original code continued with many elifs from 344 to 389, which are no longer needed
                                 
             time.sleep(0.1)                 
-                
-            print(f"301, 133: after the ifs: {noop_action}")
 
             if noop_action is not None:
                 obs, reward, terminated, truncated, info, total_steps = execute_action_step(
@@ -1604,7 +1583,7 @@ def main():
                     logger,
                     total_steps,
                 )
-                print(f"play.py: main(): noop_action for quest 46: got past the execute_action_step {noop_action}")
+                print(f'play.py: main(): noop_action for quest 15: got past the execute_action_step {noop_action}')
                 env.pyboy.tick()
                 raw_frame = env.render()
                 processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
@@ -1617,7 +1596,7 @@ def main():
                 continue
             
         if env.quest_manager.current_quest_id == 17:
-            print(f'play.py: main(): quest_manager.current_quest_id == {env.quest_manager.current_quest_id}')
+            print(f"play.py: main(): quest_manager.current_quest_id == {env.quest_manager.current_quest_id}")
             local_x, local_y, map_id = env.get_game_coords()
             glob_y, glob_x = local_to_global(local_y, local_x, map_id)
             facing_direction = env._get_direction(env.pyboy.game_area())
@@ -1631,8 +1610,6 @@ def main():
                 noop_action = getattr(env, "left", 1)
                                 
             time.sleep(0.1)                 
-                
-            print(f"301, 133: after the ifs: {noop_action}")
 
             if noop_action is not None:
                 obs, reward, terminated, truncated, info, total_steps = execute_action_step(
@@ -1643,7 +1620,7 @@ def main():
                     logger,
                     total_steps,
                 )
-                print(f"play.py: main(): noop_action for quest 46: got past the execute_action_step {noop_action}")
+                print(f'play.py: main(): noop_action for quest 46: got past the execute_action_step {noop_action}')
                 env.pyboy.tick()
                 raw_frame = env.render()
                 processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
@@ -1656,7 +1633,7 @@ def main():
                 continue
             
         if env.quest_manager.current_quest_id == 21:
-            print(f'play.py: main(): quest_manager.current_quest_id == {env.quest_manager.current_quest_id}')
+            print(f"play.py: main(): quest_manager.current_quest_id == {env.quest_manager.current_quest_id}")
             local_x, local_y, map_id = env.get_game_coords()
             glob_y, glob_x = local_to_global(local_y, local_x, map_id)
             facing_direction = env._get_direction(env.pyboy.game_area())
@@ -1670,8 +1647,6 @@ def main():
                 noop_action = getattr(env, "left", 1)
                                 
             time.sleep(0.1)                 
-                
-            print(f"301, 133: after the ifs: {noop_action}")
 
             if noop_action is not None:
                 obs, reward, terminated, truncated, info, total_steps = execute_action_step(
@@ -1682,7 +1657,7 @@ def main():
                     logger,
                     total_steps,
                 )
-                print(f"play.py: main(): noop_action for quest 46: got past the execute_action_step {noop_action}")
+                print(f'play.py: main(): noop_action for quest 46: got past the execute_action_step {noop_action}')
                 env.pyboy.tick()
                 raw_frame = env.render()
                 processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
@@ -1694,9 +1669,24 @@ def main():
                 time.sleep(0.05)
                 continue
             
+        if quest_manager.current_quest_id == 22:
+            print(f"play.py: main(): quest_manager.current_quest_id == {env.quest_manager.current_quest_id}")
+            local_x, local_y, map_id = env.get_game_coords()
+            glob_y, glob_x = local_to_global(local_y, local_x, map_id)
+            facing_direction = env._get_direction(env.pyboy.game_area())
+            dialog = env.read_dialog() or ""
+            noop_action = None
+            print(f"play.py: main(): glob_y: {glob_y}, glob_x: {glob_x}, facing_direction: {facing_direction}")
+            if glob_y == 299 and glob_x == 132:
+                # force place pokeballs in bag
+                env.item_handler.buy_item(0x04, 4, 0)
+                env.item_handler.force_refresh_item_cache()
+            
+            time.sleep(0.1)                 
             
             
-        
+            
+                    
         if current_action is None:
             # When no explicit player/AI action is available we must still
             # advance the emulator so that StageManager, quest triggers and
@@ -1718,7 +1708,7 @@ def main():
                     total_steps,
                 )
 
-                print(f"play.py: main(): pressing a single a button: pressing single button: {noop_action}")
+                print(f'play.py: main(): pressing a single a button: pressing single button: {noop_action}')
                 env.pyboy.tick()
                 raw_frame = env.render()
                 processed_frame_rgb = process_frame_for_pygame(raw_frame)  # Process the frame
@@ -1760,7 +1750,7 @@ def main():
                 noop_action = None
                 print(f"play.py: main(): env.get_game_coords(): {env.get_game_coords()}")
                 if env.get_game_coords() == (5, 5, 40) and facing_direction == "up":
-                    print(f"play.py: main(): env.get_game_coords() == (5, 5, 40) and facing_direction == 'up'")
+                    print(f'play.py: main(): env.get_game_coords() == (5, 5, 40) and facing_direction == "up"')
                     noop_action = getattr(env, "up", 3)
                     obs, reward, terminated, truncated, info, total_steps = execute_action_step(
                         env,
@@ -2083,5 +2073,4 @@ def main():
         pygame.quit()
 
 if __name__ == "__main__":
-    main()
-    # print("play.py execution complete.")
+    main()    # print("play.py execution complete.")

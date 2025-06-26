@@ -69,6 +69,7 @@ If you remain stuck for more than two consecutive rounds (no meaningful change i
 
   • walk the edges of the environment
   • or backtrack and approach areas from a different angle
+  • do NOT use the follow_nav_path tool!
   
 Recognize being stuck by comparing consecutive collision maps—identical frames or no change in position means you should switch to these exploratory maneuvers.
 

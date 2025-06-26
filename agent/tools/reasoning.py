@@ -20,7 +20,7 @@ def get_reasoning_effort():
     before the final answer. `reasoning_effort` controls how much effort to use.
     - 'low': minimal reasoning, fewer tokens, faster response.
     - 'high': maximum reasoning, more tokens, slower response.
-    Default is 'low'.
+    Default is 'high'.
 
     This value should be passed into the API call, e.g.:
       client.chat.completions.create(..., reasoning_effort=get_reasoning_effort())

@@ -1,0 +1,14 @@
+{
+    "run_id": "001-OAKS_LAB-40-26062025",
+    "start_map_name": "OAKS_LAB",
+    "map_id": 40,
+    "created_at": "2025-06-26T05:54:19.926583",
+    "files": {
+        "start_state": "001-OAKS_LAB-40-26062025_start.state",
+        "end_state": "001-OAKS_LAB-40-26062025_end.state",
+        "coordinates": "001-OAKS_LAB-40-26062025_coords.json",
+        "actions": "001-OAKS_LAB-40-26062025_actions.json",
+        "quest_status": "quest_status.json",
+        "trigger_status": "trigger_status.json"
+    }
+}

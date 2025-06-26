@@ -1,0 +1,14 @@
+{
+    "run_id": "019-VIRIDIAN_POKECENTER-41-24062025",
+    "start_map_name": "VIRIDIAN_POKECENTER",
+    "map_id": 41,
+    "created_at": "2025-06-24T05:44:38.434435",
+    "files": {
+        "start_state": "019-VIRIDIAN_POKECENTER-41-24062025_start.state",
+        "end_state": "019-VIRIDIAN_POKECENTER-41-24062025_end.state",
+        "coordinates": "019-VIRIDIAN_POKECENTER-41-24062025_coords.json",
+        "actions": "019-VIRIDIAN_POKECENTER-41-24062025_actions.json",
+        "quest_status": "quest_status.json",
+        "trigger_status": "trigger_status.json"
+    }
+}

@@ -1607,8 +1607,118 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: none !important;
         }
 
-        /* Hide Grok thinking completely */
+        /* Grok Thinking Panel - Electronic Terminal Style */
         #grokThinking {
+            position: fixed !important;
+            top: 20px !important;
+            left: 20px !important;
+            width: 600px !important;
+            max-height: 1000px !important;
+            background: rgba(0, 0, 0, 0.9) !important;
+            backdrop-filter: blur(15px) !important;
+            border: 2px solid #7877C6 !important;
+            border-radius: 8px !important;
+            padding: 20px !important;
+            z-index: 5000 !important;
+            color: #00ff41 !important;
+            font-family: 'VT323', monospace !important;
+            font-size: 28px !important;
+            line-height: 1.4 !important;
+            overflow-y: auto !important;
+            box-shadow: 
+                0 0 20px rgba(120, 119, 198, 0.4),
+                inset 0 0 20px rgba(0, 0, 0, 0.5) !important;
+            border-image: linear-gradient(90deg, #7877C6, #FF77C6, #78C7FF) 1 !important;
+            display: block !important;
+            transition: all 0.3s ease !important;
+        }
+
+        /* Grok thinking panel header */
+        #grokThinking::before {
+            content: "◆ GROK THINKING ◆" !important;
+            position: absolute !important;
+            top: -2px !important;
+            left: 20px !important;
+            background: rgba(0, 0, 0, 0.9) !important;
+            color: #7877C6 !important;
+            font-size: 24px !important;
+            font-weight: bold !important;
+            letter-spacing: 2px !important;
+            padding: 0 12px !important;
+            text-transform: uppercase !important;
+        }
+
+        /* Grok thinking scrollbar styling */
+        #grokThinking::-webkit-scrollbar {
+            width: 6px !important;
+        }
+        #grokThinking::-webkit-scrollbar-track {
+            background: rgba(120, 119, 198, 0.2) !important;
+        }
+        #grokThinking::-webkit-scrollbar-thumb {
+            background: #7877C6 !important;
+            border-radius: 3px !important;
+        }
+
+        /* Grok thinking text styling */
+        #grokThinking .grok-message {
+            background: transparent !important;
+            border: none !important;
+            color: #00ff41 !important;
+            font-family: 'VT323', monospace !important;
+            font-size: 28px !important;
+            line-height: 1.4 !important;
+            margin-bottom: 12px !important;
+            padding: 0 !important;
+            white-space: pre-wrap !important;
+            word-wrap: break-word !important;
+        }
+
+        /* Hide when no content */
+        #grokThinking:empty {
+            display: none !important;
+        }
+
+        /* Grok Response Panel Styling */
+        #grokResponse::before {
+            content: "◆ GROK RESPONSE ◆" !important;
+            position: absolute !important;
+            top: -2px !important;
+            left: 20px !important;
+            background: rgba(0, 0, 0, 0.9) !important;
+            color: #FF77C6 !important;
+            font-size: 24px !important;
+            font-weight: bold !important;
+            letter-spacing: 2px !important;
+            padding: 0 12px !important;
+            text-transform: uppercase !important;
+        }
+
+        #grokResponse::-webkit-scrollbar {
+            width: 6px !important;
+        }
+        #grokResponse::-webkit-scrollbar-track {
+            background: rgba(255, 119, 198, 0.2) !important;
+        }
+        #grokResponse::-webkit-scrollbar-thumb {
+            background: #FF77C6 !important;
+            border-radius: 3px !important;
+        }
+
+        #grokResponse .grok-message {
+            background: transparent !important;
+            border: none !important;
+            color: #ff77c6 !important;
+            font-family: 'VT323', monospace !important;
+            font-size: 28px !important;
+            line-height: 1.4 !important;
+            margin-bottom: 12px !important;
+            padding: 0 !important;
+            white-space: pre-wrap !important;
+            word-wrap: break-word !important;
+        }
+
+        #grokResponse:empty {
             display: none !important;
         }
 
@@ -2361,10 +2471,37 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         🎮 GAME SCREEN HERE 🎮
     </div>
 
+        <!-- Grok Thinking Panel -->
+        <div id="grokThinking" class="grok-message grok-thinking"></div>
+        
+        <!-- Grok Response Panel (positioned on right) -->
+        <div id="grokResponse" class="grok-message grok-response" style="
+            position: fixed !important;
+            top: 20px !important;
+            right: 20px !important;
+            width: 550px !important;
+            max-height: 800px !important;
+            background: rgba(0, 0, 0, 0.9) !important;
+            backdrop-filter: blur(15px) !important;
+            border: 2px solid #FF77C6 !important;
+            border-radius: 8px !important;
+            padding: 20px !important;
+            z-index: 4900 !important;
+            color: #ff77c6 !important;
+            font-family: 'VT323', monospace !important;
+            font-size: 28px !important;
+            line-height: 1.4 !important;
+            overflow-y: auto !important;
+            box-shadow: 
+                0 0 20px rgba(255, 119, 198, 0.4),
+                inset 0 0 20px rgba(0, 0, 0, 0.5) !important;
+            border-image: linear-gradient(90deg, #FF77C6, #78C7FF, #7877C6) 1 !important;
+            display: none !important;
+            transition: all 0.3s ease !important;
+        "></div>
+
         <!-- Hidden Elements (keeping for JS compatibility) -->
         <div class="left-sidebar" style="display: none;">
-            <div id="grokThinking" class="grok-message grok-thinking" style="display: none;"></div>
-            <div id="grokResponse" class="grok-message grok-response" style="display: none;"></div>
             <div style="color: #00ff41; font-size: 16px;" id="grokWaiting">Waiting for Grok to think...</div>
         </div>
 

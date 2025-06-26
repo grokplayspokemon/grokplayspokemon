@@ -604,10 +604,16 @@ When you are ready, call the correct tool per the instructions.
                 "tool_choice": "auto",
                 "temperature": 0.7,
                 "max_tokens": 2500,
+                "timeout": 30,  # 30 second timeout
             }
-            completion = self.client.chat.completions.create(**api_kwargs)
-            self.api_calls_count += 1
-            return completion.choices[0].message, completion.usage
+            try:
+                completion = self.client.chat.completions.create(**api_kwargs)
+                self.api_calls_count += 1
+                return completion.choices[0].message, completion.usage
+            except Exception as e:
+                self.agent_file_logger.error(f"Grok API call failed: {e}")
+                # Re-raise the exception to be handled in the outer try-catch
+                raise
 
         # 3. Main loop – max 10 chained tool-calls to prevent runaway loops
         import uuid

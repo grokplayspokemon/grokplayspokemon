@@ -29,6 +29,265 @@
 # sys.path.append('/puffertank/grok_plays_pokemon')
 # from utils.logging_config import get_pokemon_logger
 
+
+    # def convert_path_follow_to_movement_action(self, original_action: int) -> int:
+    #     """
+    #     AGGRESSIVE PATH FOLLOWING - SIMPLIFIED VERSION
+
+    #     This human path was recorded by a player who completed the game!
+    #     It MUST be followable! Remove all safety checks and just follow the damn coordinates!
+    #     """
+    #     if original_action != self._path_follow_action_value:
+    #         return original_action
+
+    #     # -------------------------------------------------------------
+    #     # 1.  QUICK EXIT – If we previously generated an A* recovery
+    #     #     path (stored in ``_recovery_steps``) then simply pop the
+    #     #     next move from that queue until it is empty.  This lets
+    #     #     the navigator walk itself back onto the recorded quest
+    #     #     path before resuming normal node-to-node following.
+    #     # -------------------------------------------------------------
+    #     if self._recovery_steps:
+    #         next_dir = self._recovery_steps.pop(0)
+    #         # Convert textual direction to action integer (defaults to 3/up)
+    #         return self.ACTION_MAPPING_STR_TO_INT.get(next_dir, 3)
+
+    #     # — Pre-conversion sync & debug
+    #     try:
+    #         x, y, map_id = self.env.get_game_coords()
+    #         current_global = local_to_global(y, x, map_id)
+    #         current_quest = self.get_current_quest()
+    #         if not self.sequential_coordinates or self.active_quest_id != current_quest:
+    #             self.load_coordinate_path(current_quest)
+
+    #         # Debug: show current and upcoming target nodes
+    #         node_idx = self.current_coordinate_index
+    #         on_node = (node_idx < len(self.sequential_coordinates)
+    #                    and current_global == self.sequential_coordinates[node_idx])
+    #         curr_node = self.sequential_coordinates[node_idx] if node_idx < len(self.sequential_coordinates) else None
+    #         curr_map = self.coord_map_ids[node_idx] if node_idx < len(self.coord_map_ids) else None
+    #         next_idx = node_idx + 1
+    #         next_node = self.sequential_coordinates[next_idx] if next_idx < len(self.sequential_coordinates) else None
+    #         next_map = self.coord_map_ids[next_idx] if next_idx < len(self.coord_map_ids) else None
+    #         print(f"next_map: {next_map}, map_id: {map_id}")
+    #         warp_needed = (next_map is not None and next_map != map_id)
+    #         print(f"\n1️⃣ quest_id={current_quest},"
+    #               f"\n coords_loaded_count={len(self.sequential_coordinates)},"
+    #               f"\n current_map={map_id}, local=({x},{y}), global={current_global},"
+    #               f"\n on_node={on_node}, node_idx={node_idx},"  
+    #               f"\n curr_node={curr_node}@{curr_map},"  
+    #               f"\n 5️⃣ next_node={next_node}@{next_map}, warp_needed={warp_needed}\n")
+    #         try:
+    #             quest_dir = f"{current_quest:03d}"
+    #             with (Path(__file__).parent / "quest_paths" / quest_dir / f"{quest_dir}_coords.json").open() as f:
+    #                 data = json.load(f)
+    #             verify_msgs = []
+    #             file_coords, file_maps = [], []
+    #             for seg_key, seg in data.items():
+    #                 mid = int(seg_key.split('_')[0])
+    #                 for coord in seg:
+    #                     file_coords.append((coord[0], coord[1]))
+    #                     file_maps.append(mid)
+    #             for idx, ((lc, lm), (fc, fm)) in enumerate(zip(zip(self.sequential_coordinates, self.coord_map_ids),
+    #                                                         zip(file_coords, file_maps))):
+    #                 mark = '' if (lc == fc and lm == fm) else ' ❌'
+    #                 verify_msgs.append(f"{idx}: loaded={lc}@{lm}, file={fc}@{fm}{mark}")
+    #             print("coord_verify:", "; ".join(verify_msgs))
+    #         except Exception as e:
+    #             print(f"Navigator coords verification error: {e}")
+    #     except Exception as e:
+    #         print(f"Navigator logging error: {e}")
+
+    #     # — Snap to nearest before movement logic
+    #     try:
+    #         old_idx = self.current_coordinate_index
+    #         self.snap_to_nearest_coordinate()
+    #         print(f"ConsolidatedNavigator: pre-conversion snap from index {old_idx} to {self.current_coordinate_index}")
+    #     except Exception as e:
+    #         print(f"ConsolidatedNavigator: pre-conversion snap error: {e}")
+
+    #     # — Generate A* subpath to nearest node if off-node —
+    #     try:
+    #         cur_global = current_global
+    #         # Compute Manhattan distances to each path node
+    #         distances = [self._manhattan(cur_global, coord) for coord in self.sequential_coordinates]
+    #         nearest_i = distances.index(min(distances))
+    #         # If nearest node differs from current index, route to it
+    #         if nearest_i != self.current_coordinate_index:
+    #             dy = self.sequential_coordinates[nearest_i][0] - cur_global[0]
+    #             dx = self.sequential_coordinates[nearest_i][1] - cur_global[1]
+    #             # Convert global delta to grid coords for find_path
+    #             target_row = max(0, min(8, 4 + dy))
+    #             target_col = max(0, min(9, 4 + dx))
+    #             status_msg, path_dirs = self.env.find_path(int(target_row), int(target_col))
+    #             if path_dirs:
+    #                 print(f"ConsolidatedNavigator: A* to nearest node[{nearest_i}]: {path_dirs}")
+    #                 # Queue recovery steps and update node index
+    #                 self._recovery_steps = path_dirs.copy()
+    #                 self.current_coordinate_index = nearest_i
+    #                 next_dir = self._recovery_steps.pop(0)
+    #                 return self.ACTION_MAPPING_STR_TO_INT.get(next_dir, 3)
+    #     except Exception as e:
+    #         print(f"ConsolidatedNavigator: A* nearest-node recovery failed: {e}")
+
+    #     # — Main movement / warp logic
+    #     try:
+    #         x, y, map_id = self.env.get_game_coords()
+    #         current_global = local_to_global(y, x, map_id)
+
+    #         current_quest = self.get_current_quest()
+    #         if not current_quest:
+    #             return 3
+    #         if not self.sequential_coordinates or self.active_quest_id != current_quest:
+    #             if not self.load_coordinate_path(current_quest) or not self.sequential_coordinates:
+    #                 return 3
+
+    #         # validate index bounds
+    #         if self.current_coordinate_index < 0:
+    #             self.current_coordinate_index = 0
+    #         elif self.current_coordinate_index >= len(self.sequential_coordinates):
+    #             return original_action
+
+    #         # — CRITICAL FIX: bump index if we're already on the warp-tile coordinate —
+    #         target_coord = self.sequential_coordinates[self.current_coordinate_index]
+    #         # Safely retrieve the map id that corresponds to the *next* path node.
+    #         # When we are on the final node, fall back to the current node's map id
+    #         # instead of raising an IndexError.
+    #         if self.current_coordinate_index + 1 < len(self.coord_map_ids):
+    #             target_map = self.coord_map_ids[self.current_coordinate_index + 1]
+    #         else:
+    #             target_map = self.coord_map_ids[self.current_coordinate_index]
+    #         if current_global == target_coord:
+    #             self.current_coordinate_index += 1
+    #             if self.current_coordinate_index >= len(self.sequential_coordinates):
+    #                 return original_action
+    #             target_coord = self.sequential_coordinates[self.current_coordinate_index]
+    #             target_map   = self.coord_map_ids[self.current_coordinate_index]
+
+    #         # 🚀 Debug current target after bump
+    #         print(f"🚀 active_target_idx={self.current_coordinate_index + 1}, "
+    #             f"active_target={target_coord}, active_map={target_map}")
+
+    #         # Ensure horizontal (dx) and vertical (dy) deltas are always defined so the
+    #         # direction-selection logic below can run even when we stay on the same map.
+    #         # In global coordinate space:  +dy ⇒ move DOWN, +dx ⇒ move RIGHT.
+    #         dy = target_coord[0] - current_global[0]
+    #         dx = target_coord[1] - current_global[1]
+
+    #         # ---------------------------------------------------------
+    #         # 2.  RECOVERY LOGIC – If we are on the correct map but the
+    #         #     target node is off-screen (|dx| or |dy| > 4) OR we
+    #         #     snapped failed earlier, attempt to generate a local
+    #         #     A* route using the environment's ``find_path`` helper.
+    #         #     This works in the 9×10 down-sampled grid where the
+    #         #     player is fixed at (4,4).
+    #         # ---------------------------------------------------------
+    #         if not self._recovery_steps and target_map == map_id:
+    #             # Only attempt if target is within roughly a screen so
+    #             # find_path can see it.
+    #             if abs(dx) <= 8 and abs(dy) <= 8:
+    #                 target_row = 4 + dy
+    #                 target_col = 4 + dx
+    #                 # Sanity clamp to grid limits 0-8 / 0-9
+    #                 target_row = max(0, min(8, target_row))
+    #                 target_col = max(0, min(9, target_col))
+    #                 try:
+    #                     status_msg, path_dirs = self.env.find_path(int(target_row), int(target_col))
+    #                     if path_dirs:
+    #                         print(f"Navigator recovery: {status_msg} → {path_dirs}")
+    #                         # Store and immediately use first move next frame
+    #                         self._recovery_steps = path_dirs.copy()
+    #                         next_dir = self._recovery_steps.pop(0)
+    #                         return self.ACTION_MAPPING_STR_TO_INT.get(next_dir, 3)
+    #                 except Exception as e:
+    #                     print(f"Navigator recovery error: {e}")
+
+    #         # — WARP HANDLING: handle explicit map transitions via warp tiles —
+    #         if target_map != map_id:
+    #             local_pos = (x, y)
+    #             # only consider warp entries that lead to the desired map
+    #             warps_full = WARP_DICT.get(MapIds(map_id).name, [])
+    #             # Accept warps that go directly to the desired map or that
+    #             # use the special 255 "LAST_MAP" sentinel (meaning they lead
+    #             # back to whatever map we came from – which, for a recorded
+    #             # human path, will be the desired one).
+    #             warps = []
+    #             for e in warps_full:
+    #                 tmid = e.get('target_map_id')
+    #                 if tmid == target_map or tmid == 255:
+    #                     warps.append(e)
+    #             if warps:
+    #                 # find nearest warp tile
+    #                 best = None
+    #                 best_dist = None
+    #                 for entry in warps:
+    #                     wx, wy = entry.get('x'), entry.get('y')
+    #                     if wx is None or wy is None:
+    #                         continue
+    #                     d = abs(wx - local_pos[0]) + abs(wy - local_pos[1])
+    #                     if best_dist is None or d < best_dist:
+    #                         best_dist, best = d, (wx, wy)
+    #                 if best is not None:
+    #                     # door warp: step onto warp tile, then press DOWN to warp
+    #                     if local_pos == best:
+    #                         return 0
+    #                     # otherwise, walk toward the warp tile
+    #                     dx, dy = best[0] - x, best[1] - y
+    #                     # Prefer vertical motion first when approaching a warp tile.  For
+    #                     # indoor exits the critical step is usually to **step down onto the
+    #                     # bottom-row door tile**; choosing horizontal first can nudge the
+    #                     # avatar in front of an NPC and block the warp indefinitely.
+    #                     if dy != 0:
+    #                         return 0 if dy > 0 else 3  # DOWN / UP
+    #                     elif dx != 0:
+    #                         return 2 if dx > 0 else 1  # RIGHT / LEFT
+    #                     else:
+    #                         return 0  # default DOWN (shouldn't occur)
+    #             # no explicit warp entries for this transition: fall through to normal movement
+
+    #         # Evaluate both axes, prioritising the one with greater distance but
+    #         # *only if* that direction is considered walkable; otherwise swap.
+    #         primary_first = 'horiz' if abs(dx) >= abs(dy) else 'vert'
+
+    #         # Determine preferred directions (primary then secondary)
+    #         horiz_dir = 2 if dx > 0 else 1 if dx < 0 else None  # RIGHT or LEFT
+    #         vert_dir  = 0 if dy > 0 else 3 if dy < 0 else None  # DOWN  or UP
+
+    #         # -----------------------------------------------------------------
+    #         # 3.  COLLISION-AWARE CHOICE – consult the environment's live
+    #         #     collision grid so we don't keep bonking into fences / signs.
+    #         # -----------------------------------------------------------------
+
+    #         try:
+    #             valid_moves = set(self.env.get_valid_moves())  # strings: up/down/left/right
+    #         except Exception:
+    #             valid_moves = {"up", "down", "left", "right"}
+
+    #         def dir_walkable(d):
+    #             if d is None:
+    #                 return False
+    #             str_dir = {0: "down", 1: "left", 2: "right", 3: "up"}.get(d)
+    #             return str_dir in valid_moves
+
+    #         order = [primary_first, 'vert' if primary_first=='horiz' else 'horiz']
+    #         for axis in order:
+    #             chosen = horiz_dir if axis=='horiz' else vert_dir
+    #             if chosen is not None and dir_walkable(chosen):
+    #                 return chosen
+
+    #         # If neither preferred direction is walkable fall back to any that is
+    #         for cand in [0,1,2,3]:
+    #             if dir_walkable(cand):
+    #                 return cand
+
+    #         # If we get here, assume blocked; return original action to keep game ticking
+    #         return original_action
+
+    #     except Exception:
+    #         return 3
+
+
+
 # # =============================================================================
 # # ANTI-OSCILLATION COMPREHENSIVE PROTECTION SYSTEM
 # # =============================================================================

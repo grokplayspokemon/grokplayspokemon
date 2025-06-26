@@ -1,0 +1,14 @@
+{
+    "run_id": "022-VIRIDIAN_FOREST-51-25062025",
+    "start_map_name": "VIRIDIAN_FOREST",
+    "map_id": 51,
+    "created_at": "2025-06-25T03:55:42.111847",
+    "files": {
+        "start_state": "022-VIRIDIAN_FOREST-51-25062025_start.state",
+        "end_state": "022-VIRIDIAN_FOREST-51-25062025_end.state",
+        "coordinates": "022-VIRIDIAN_FOREST-51-25062025_coords.json",
+        "actions": "022-VIRIDIAN_FOREST-51-25062025_actions.json",
+        "quest_status": "quest_status.json",
+        "trigger_status": "trigger_status.json"
+    }
+}

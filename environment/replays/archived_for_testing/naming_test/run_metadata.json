@@ -1,0 +1,14 @@
+{
+    "run_id": "001-PALLET_TOWN-0-26062025",
+    "start_map_name": "PALLET_TOWN",
+    "map_id": 0,
+    "created_at": "2025-06-26T04:28:50.866008",
+    "files": {
+        "start_state": "001-PALLET_TOWN-0-26062025_start.state",
+        "end_state": "001-PALLET_TOWN-0-26062025_end.state",
+        "coordinates": "001-PALLET_TOWN-0-26062025_coords.json",
+        "actions": "001-PALLET_TOWN-0-26062025_actions.json",
+        "quest_status": "quest_status.json",
+        "trigger_status": "trigger_status.json"
+    }
+}

@@ -228,19 +228,34 @@ STAGE_DICT = {
         'events': [],
         'blockings': [],
         'scripted_movements': [
-            {'condition': {'global_coords': (327, 90), 'item_check': {'item': 'POTION', 'has': False}}, 'action': 'a'}, # updated rule – press A until Potion acquired
+            # {'condition': {'global_coords': (327, 90), 
+            #                'item_check': {'item': 'POTION', 'has': False},
+            #                'dialog_present': False,
+            #                'facing_direction': 'down',
+            #                }, 
+            #  'action': 'right'}, # turn to npc to get the potion
+            # {'condition': {'global_coords': (327, 90), 
+            #                'item_check': {'item': 'POTION', 'has': False},
+            #                'dialog_present': False,
+            #                'facing_direction': 'left',
+            #                }, 
+            #  'action': 'a'}, # turn to npc to get the potion
+
+            # {'condition': {'global_coords': (326, 89), 'item_check': {'item': 'POTION', 'has': False}}, 'action': 'down', 'set_pending_a': 8}, 
+            # {'condition': {'global_coords': (326, 90), 'item_check': {'item': 'POTION', 'has': False}}, 'action': 'down'}, 
+            # {'condition': {'global_coords': (328, 90), 'item_check': {'item': 'POTION', 'has': False}}, 'action': 'up'}, 
         ]
     },
     9: {
-        'events': [''],
-        'blockings': [],
-        'scripted_movements': [
-            {'condition': {'global_coords': (301, 133), 
-                           'item_check': {
-                               'item': 'OAKS_PARCEL', 'has': True
-                               }
-                           }, 'action': 'down'}
-        ]
+        # 'events': [''],
+        # 'blockings': [],
+        # 'scripted_movements': [
+        #     {'condition': {'global_coords': (301, 133), 
+        #                    'item_check': {
+        #                        'item': 'OAKS_PARCEL', 'has': True
+        #                        }
+        #                    }, 'action': 'down'}
+        # ]
     },
     10: {
         'events': [],
@@ -248,44 +263,49 @@ STAGE_DICT = {
         'scripted_movements': []
     },
     12: {
-        'events': [],
-        'blockings': [],
-        'scripted_movements': [
-            # Talk to Oak at specific coordinates
-            {
-                'condition': {
-                    'global_coords': (348, 110),
-                }, 
-                'action': 'a'
-            }
-        ]
+        # 'events': [],
+        # 'blockings': [],
+        # 'scripted_movements': [
+        #     # Talk to Oak at specific coordinates
+        #     {
+        #         'condition': {
+        #             'global_coords': (348, 110),
+        #         }, 
+        #         'action': 'a'
+        #     }
+        # ]
     },
     15: {
         'events': [],
         'blockings': [
             ['BLUES_HOUSE', 'PALLET_TOWN@1']  # Block leaving Blue's house until Town Map
         ],
-        'scripted_movements': [
-            # Force A press to get Town Map at Blue's sister location at global coords (340, 107)
-            {'condition': {'global_coords': (340, 107), 'item_check': {'item': 'TOWN_MAP', 'has': False}}, 'action': 'a'},
-            # Force A press to get Town Map at Blue's sister location at local coords (1, 3)
-            {'condition': {'local_coords': (1, 3), 'map_id': 39, 'item_check': {'item': 'TOWN_MAP', 'has': False}}, 'action': 'a'},
-            # Handle warp entry sequence
-            {'condition': {'global_coords': (344, 97), 'pending_b_presses': True}, 'action': 'up', 'set_pending_b': 3},
-            # Handle pending B presses
-            {'condition': {'pending_b_presses': '>0'}, 'action': 'b', 'decrement_pending_b': True}
-        ]
+        # 'scripted_movements': [
+        #     # Force A press to get Town Map at Blue's sister location at global coords (340, 107)
+        #     {'condition': {'global_coords': (340, 107), 'item_check': {'item': 'TOWN_MAP', 'has': False}}, 'action': 'a'},
+        #     # Force A press to get Town Map at Blue's sister location at local coords (1, 3)
+        #     {'condition': {'local_coords': (1, 3), 'map_id': 39, 'item_check': {'item': 'TOWN_MAP', 'has': False}}, 'action': 'a'},
+        #     # Handle warp entry sequence
+        #     {'condition': {'global_coords': (344, 97), 'pending_b_presses': True}, 'action': 'up', 'set_pending_b': 3},
+        #     # Handle pending B presses
+        #     {'condition': {'pending_b_presses': '>0'}, 'action': 'b', 'decrement_pending_b': True}
+        # ]
     },
     23: {
         'events': [],
-        'blockings': [],
+        'blockings': [
+            # Block movement until Nidoran is caught
+            ['ROUTE_22', 'VIRIDIAN_CITY@1'],  # Block route back to Viridian City
+            ['ROUTE_22', 'ROUTE_23@2']        # Block route towards Indigo Plateau
+        ],
         'scripted_movements': [
             # Movement rules for finding Nidoran (only when no dialog present)
+            # NOTE: item_qty checks for "at least" the specified quantity (>=)
             {
                 'condition': {
                     'global_coords': (282, 67),
                     'dialog_present': False,
-                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},  # At least 1 Poke Ball
                     'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
                 },
                 'action': 'down'
@@ -294,7 +314,7 @@ STAGE_DICT = {
                 'condition': {
                     'global_coords': (282, 66),
                     'dialog_present': False,
-                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},  # At least 1 Poke Ball
                     'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
                 },
                 'action': 'down'
@@ -303,7 +323,7 @@ STAGE_DICT = {
                 'condition': {
                     'global_coords': (282, 65),
                     'dialog_present': False,
-                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},  # At least 1 Poke Ball
                     'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
                 },
                 'action': 'down'
@@ -312,7 +332,7 @@ STAGE_DICT = {
                 'condition': {
                     'global_coords': (282, 64),
                     'dialog_present': False,
-                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},  # At least 1 Poke Ball
                     'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
                 },
                 'action': 'down'
@@ -321,7 +341,7 @@ STAGE_DICT = {
                 'condition': {
                     'global_coords': (285, 67),
                     'dialog_present': False,
-                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},  # At least 1 Poke Ball
                     'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
                 },
                 'action': 'up'
@@ -330,7 +350,7 @@ STAGE_DICT = {
                 'condition': {
                     'global_coords': (285, 66),
                     'dialog_present': False,
-                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},  # At least 1 Poke Ball
                     'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
                 },
                 'action': 'up'
@@ -339,7 +359,7 @@ STAGE_DICT = {
                 'condition': {
                     'global_coords': (285, 65),
                     'dialog_present': False,
-                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},  # At least 1 Poke Ball
                     'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
                 },
                 'action': 'up'
@@ -348,7 +368,7 @@ STAGE_DICT = {
                 'condition': {
                     'global_coords': (285, 64),
                     'dialog_present': False,
-                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},
+                    'item_qty': {'item': 'POKE_BALL', 'qty': 1},  # At least 1 Poke Ball
                     'pokemon_caught': {'species': 'NIDORAN_M', 'caught': False}
                 },
                 'action': 'up'
@@ -403,7 +423,7 @@ STAGE_DICT = {
         'scripted_movements': [
             {'condition': 
                 {'global_coords': (299, 132),
-                 'item_qty': {'item': 'POKE_BALL', 'qty': 4}}, 'action': 'a'}
+                 'item_qty': {'item': 'POKE_BALL', 'qty': 4}}, 'action': 'a'}  # At least 4 Poke Balls
             
         ]
     },
@@ -440,7 +460,11 @@ STAGE_DICT = {
             #     },
             #  'action': 'down'
             # },
-            
+            {'condition': { # get hidden potion in cut tree
+                'global_coords': (270, 89),
+                },
+            'action': 'a'
+            },
         ]
     },
     33: {
@@ -467,7 +491,13 @@ STAGE_DICT = {
         'events': [],
         'blockings': [],
         'scripted_movements': [
-            {'condition': {'global_coords': (167, 67)}, 'action': 'a'}
+            {'condition': {'global_coords': (167, 67)}, 'action': 'a'},
+            {'condition': # prevent grok from striking up convo with beaten trainer
+                {'global_coords': (171, 67),
+                 'event_completed': ['EVENT_BEAT_PEWTER_GYM_TRAINER_0'],
+                 'facing_direction': 'left',
+                 }, 'action': 'down'},
+            
         ]
     },
     40: {
@@ -812,6 +842,11 @@ class StageManager:
 
         self._heal_at_poke_center()  # DISABLED: Prevents automatic warping out of Pokemon Center
 
+        # if self.env.quest_manager.current_quest_id == 8:
+        #     self._remove_item_from_bag('OAKS_PARCEL')
+        
+        print(f"StageManager: Current quest ID: {self.env.quest_manager.current_quest_id}, current items: {self.env.item_handler.get_items_in_bag()}, is parcel in bag: {0x46 in self.env.item_handler.get_items_in_bag()}")
+        
         # ------------------------------------------------------------------
         # Execute any auto-generated action that
         # was queued in update_stage_manager().  This guarantees the
@@ -878,7 +913,26 @@ class StageManager:
                 x, y, map_id = self.env.get_game_coords()  # Note: get_game_coords returns (x, y, map_id)
                 gy, gx = local_to_global(y, x, map_id)
                 global_coords = (gy, gx)
-                print(f"DEBUGGING STAGEMANAGER: global coords available: {global_coords}")
+                # print(f"DEBUGGING STAGEMANAGER: global coords available: {global_coords}")
+                if global_coords:
+                    # print(f"DEBUGGING STAGEMANAGER: processing movement {movement} in self.scripted_movements {self.scripted_movements}")
+                    for movement in self.scripted_movements:
+                        # print(f"DEBUGGING STAGEMANAGER: condition: {condition}")
+                        if self._check_condition(movement.get('condition', {})):
+                            scripted_action = movement.get('scripted_action', '')
+                            # print(f"DEBUGGING STAGEMANAGER: scripted_action: {scripted_action}")
+                            action = movement.get('action', '')
+                            # print(f"DEBUGGING STAGEMANAGER: action: {action}")
+                            
+                            if scripted_action == 'set_pending_b':
+                                self.pending_b_presses = movement.get('b_presses', 1)
+                                # print(f"DEBUGGING STAGEMANAGER: set_pending_b: {self.pending_b_presses}")
+                            elif scripted_action == 'decrement_pending_b':
+                                self.pending_b_presses = max(0, self.pending_b_presses - 1)
+                                # print(f"DEBUGGING STAGEMANAGER: decrement_pending_b: {self.pending_b_presses}")
+                            
+                            # print(f"DEBUGGING STAGEMANAGER: scripted_action: {scripted_action}")
+                            return action
             except Exception as e:
                 # Global coordinate conversion failed (likely on maps that are
                 # not part of the world map).  This is not fatal – just log
@@ -1025,7 +1079,7 @@ class StageManager:
                 print(f"StageManager: Current quest ID from quest manager: {current_quest}")
             return self._convert_path_follow_to_movement(action)
         
-        print(f"DEBUGGING STAGEMANAGER: action={action}")
+        # print(f"DEBUGGING STAGEMANAGER: action={action}")
         return action
     
     def _check_movement_condition(self, condition: Dict[str, Any], x: int, y: int, map_id: int, global_coords: Optional[tuple]) -> bool:
@@ -1082,42 +1136,42 @@ class StageManager:
                 # visibility so START spamming only happens while *no* dialog*)
                 if substr:
                     if substr_ci not in dialog_ci:
-                        print(f"StageManager DEBUG: dialog_contains check failed – wanted substring '{substr}', active dialog='{dialog}'")
+                        # print(f"StageManager DEBUG: dialog_contains check failed – wanted substring '{substr}', active dialog='{dialog}'")
                         return False
                 else:
                     # If empty string provided, succeed only when dialog is
                     # non-empty (avoid matching during title screen)
                     if not dialog:
-                        print("StageManager DEBUG: dialog_contains='' check failed – no active dialog visible")
+                        # print("StageManager DEBUG: dialog_contains='' check failed – no active dialog visible")
                         return False
 
             if 'dialog_present' in condition:
                 want_present = bool(condition['dialog_present'])
                 has_dialog = bool(self.env.get_active_dialog() or '')
                 if want_present != has_dialog:
-                    print(f"StageManager DEBUG: dialog_present check failed – want_present={want_present}, has_dialog={has_dialog}")
+                    # print(f"StageManager DEBUG: dialog_present check failed – want_present={want_present}, has_dialog={has_dialog}")
                     return False
             # Check local coordinates
             if 'local_coords' in condition:
                 target_x, target_y = condition['local_coords']
                 if (x, y) != (target_x, target_y):
-                    print(f"StageManager DEBUG: local_coords check failed – at ({x},{y}), expected ({target_x},{target_y})")
+                    # print(f"StageManager DEBUG: local_coords check failed – at ({x},{y}), expected ({target_x},{target_y})")
                     return False
             
             # Check global coordinates
             if 'global_coords' in condition:
                 if not global_coords:
-                    print(f"StageManager DEBUG: global_coords check failed – global coordinates not available")
+                    # print(f"StageManager DEBUG: global_coords check failed – global coordinates not available")
                     return False
                 target_global = condition['global_coords']
                 if global_coords != target_global:
-                    print(f"StageManager DEBUG: global_coords check failed – at {global_coords}, expected {target_global}")
+                    # print(f"StageManager DEBUG: global_coords check failed – at {global_coords}, expected {target_global}")
                     return False
                     
             # Check map ID
             if 'map_id' in condition:
                 if map_id != condition['map_id']:
-                    print(f"StageManager DEBUG: map_id check failed – current {map_id}, expected {condition['map_id']}")
+                    # print(f"StageManager DEBUG: map_id check failed – current {map_id}, expected {condition['map_id']}")
                     return False
             
             # Check item possession
@@ -1129,7 +1183,7 @@ class StageManager:
                 if item_name and hasattr(self.env, 'item_handler'):
                     has_item = self.env.item_handler.has_item(item_name)
                     if has_item != should_have:
-                        print(f"StageManager DEBUG: item_check failed – item '{item_name}' possession {has_item}, expected {should_have}")
+                        # print(f"StageManager DEBUG: item_check failed – item '{item_name}' possession {has_item}, expected {should_have}")
                         return False
                 elif item_name:
                     # Fallback item check method
@@ -1145,15 +1199,15 @@ class StageManager:
                 check = condition['pending_b_presses']
                 if check == '>0':
                     if self.pending_b_presses <= 0:
-                        print("StageManager DEBUG: pending_b_presses '>0' check failed – none pending")
+                        # print("StageManager DEBUG: pending_b_presses '>0' check failed – none pending")
                         return False
                 elif check == True:
                     if self.pending_b_presses <= 0:
-                        print("StageManager DEBUG: pending_b_presses True check failed – none pending")
+                        # print("StageManager DEBUG: pending_b_presses True check failed – none pending")
                         return False
                 elif isinstance(check, int):
                     if self.pending_b_presses != check:
-                        print(f"StageManager DEBUG: pending_b_presses=={check} check failed – currently {self.pending_b_presses}")
+                        # print(f"StageManager DEBUG: pending_b_presses=={check} check failed – currently {self.pending_b_presses}")
                         return False
             
             # Check special path following conditions
@@ -1672,29 +1726,29 @@ class StageManager:
         except Exception as e:
             print('StageManager: Nidoran scripted catch error:', e)
 
-        # --------------------------------------------------------------
-        # STAGE 15: Auto-inject 'A' press when at Blue's sister location without TOWN_MAP
-        # --------------------------------------------------------------
-        try:
-            print(f"StageManager: DEBUG - Current stage: {self.stage}")
-            if self.stage == 15:
-                from environment.data.recorder_data.global_map import local_to_global
-                x, y, map_id = self.env.get_game_coords()
-                gy, gx = local_to_global(y, x, map_id)
-                town_map_qty = self._get_item_quantity('TOWN_MAP')
+        # # --------------------------------------------------------------
+        # # STAGE 15: Auto-inject 'A' press when at Blue's sister location without TOWN_MAP
+        # # --------------------------------------------------------------
+        # try:
+        #     print(f"StageManager: DEBUG - Current stage: {self.stage}")
+        #     if self.stage == 15:
+        #         from environment.data.recorder_data.global_map import local_to_global
+        #         x, y, map_id = self.env.get_game_coords()
+        #         gy, gx = local_to_global(y, x, map_id)
+        #         town_map_qty = self._get_item_quantity('TOWN_MAP')
                 
-                print(f"StageManager: DEBUG - Stage 15, at ({gy}, {gx}), TOWN_MAP qty: {town_map_qty}, frame: {self._frame_counter}")
+        #         print(f"StageManager: DEBUG - Stage 15, at ({gy}, {gx}), TOWN_MAP qty: {town_map_qty}, frame: {self._frame_counter}")
                 
-                # Check if at Blue's sister location and don't have TOWN_MAP
-                if (gy, gx) == (340, 107) and town_map_qty == 0:
-                    # Only inject A press every few frames and if queue isn't full
-                    if self._frame_counter % 5 == 0 and len(self._auto_action_queue) < 3:
-                        print(f"StageManager: Stage 15 - Auto-injecting 'A' press at Blue's sister location")
-                        self._queue_auto_action('a')
-                    else:
-                        print(f"StageManager: DEBUG - Skipping A injection: frame % 5 = {self._frame_counter % 5}, queue size: {len(self._auto_action_queue)}")
-        except Exception as e:
-            print('StageManager: Error in Stage 15 auto-A injection:', e)
+        #         # Check if at Blue's sister location and don't have TOWN_MAP
+        #         if (gy, gx) == (340, 107) and town_map_qty == 0:
+        #             # Only inject A press every few frames and if queue isn't full
+        #             if self._frame_counter % 5 == 0 and len(self._auto_action_queue) < 3:
+        #                 print(f"StageManager: Stage 15 - Auto-injecting 'A' press at Blue's sister location")
+        #                 self._queue_auto_action('a')
+        #             else:
+        #                 print(f"StageManager: DEBUG - Skipping A injection: frame % 5 = {self._frame_counter % 5}, queue size: {len(self._auto_action_queue)}")
+        # except Exception as e:
+        #     print('StageManager: Error in Stage 15 auto-A injection:', e)
         
         # --------------------------------------------------------------
         # Disable Viridian-Mart automation after Poké Balls are stocked
@@ -1776,92 +1830,107 @@ class StageManager:
                 self.stage = 27
         except Exception as e:
             print('StageManager: Error in Stage-26 Potion monitoring:', e)
-
-        # ------------------------------------------------------------------
-        # DEBUG: Track Oak's parcel and stage transitions - LOG TO FILE
-        # ------------------------------------------------------------------
+            
+        # talk to viridian city poke mart npc on route 1
         try:
-            if self.stage in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]:
-                parcel_qty = self._get_item_quantity('OAKS_PARCEL')
-                town_map_qty = self._get_item_quantity('TOWN_MAP')
-                x, y, map_id = self.env.get_game_coords()
-                try:
-                    from environment.data.recorder_data.global_map import local_to_global
-                    gy, gx = local_to_global(y, x, map_id)
-                    global_coords = (gy, gx)
-                except:
-                    global_coords = "N/A"
-                
-                dialog = (self.env.get_active_dialog() or '').replace('\n', ' ')[:100]
-                
-                # Track parcel changes
-                previous_parcel_qty = getattr(self, '_previous_parcel_qty', parcel_qty)
-                if parcel_qty != previous_parcel_qty:
-                    # LOG CRITICAL PARCEL CHANGE TO FILE
-                    parcel_logger.critical(f"PARCEL CHANGE DETECTED! Stage {self.stage} | OAKS_PARCEL: {previous_parcel_qty} -> {parcel_qty} | Global: {global_coords} | Dialog: '{dialog}'")
-                    
-                    # Try to identify what might have caused the change
-                    try:
-                        bag_items = self.env.get_items_in_bag() if hasattr(self.env, 'get_items_in_bag') else []
-                        parcel_logger.critical(f"PARCEL CHANGE: Current bag contents: {bag_items}")
-                        parcel_logger.critical(f"PARCEL CHANGE: Bag size: {len(bag_items)}")
-                        
-                        # Also try to get detailed item info
-                        if hasattr(self.env, 'item_handler'):
-                            detailed_items = self.env.item_handler.get_items_in_bag()
-                            detailed_quantities = self.env.item_handler.get_items_quantity_in_bag()
-                            parcel_logger.critical(f"PARCEL CHANGE: Detailed items: {detailed_items}")
-                            parcel_logger.critical(f"PARCEL CHANGE: Detailed quantities: {detailed_quantities}")
-                    except Exception as e:
-                        parcel_logger.error(f"PARCEL CHANGE: Error getting bag items: {e}")
-                    
-                    # Also print to console for immediate visibility
-                    print(f"PARCEL CHANGE DETECTED! Check parcel_debug.log for details. Stage {self.stage} | OAKS_PARCEL: {previous_parcel_qty} -> {parcel_qty}")
-                
-                self._previous_parcel_qty = parcel_qty
-                
-                # LOG EVERY SINGLE STEP - NO FRAME LIMITING
-                parcel_logger.info(f"STEP: Stage {self.stage} | OAKS_PARCEL: {parcel_qty} | TOWN_MAP: {town_map_qty} | Global: {global_coords} | Dialog: '{dialog[:50]}'")
-                
-                # Extra logging when parcel is present
-                if parcel_qty > 0:
-                    parcel_logger.warning(f"PARCEL PRESENT: Stage {self.stage} | OAKS_PARCEL: {parcel_qty} | Global: {global_coords}")
+            if self.stage == 6:
+                coords = self.env.get_game_coords()[:2]
+                facing_direction = self.env._get_direction(self.env.pyboy.game_area())
+                in_dialog = self.env.get_active_dialog() or ''
+                if coords == (327, 90) and self._get_item_quantity('POTION') == 0 and facing_direction == 'left' and not in_dialog:
+                    self._queue_auto_action('a')
         except Exception as e:
-            parcel_logger.error(f"PARCEL DEBUG ERROR: {e}")
-            print(f"PARCEL DEBUG ERROR: {e}")
+            print('StageManager: Error in Stage-26 Potion monitoring:', e)
+
+        # # ------------------------------------------------------------------
+        # # DEBUG: Track Oak's parcel and stage transitions - LOG TO FILE
+        # # ------------------------------------------------------------------
+        # try:
+        #     print(f"StageManager: DEBUG - Current stage: {self.stage}")
+        #     if self.stage in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]:
+        #         parcel_qty = self._get_item_quantity('OAKS_PARCEL')
+        #         town_map_qty = self._get_item_quantity('TOWN_MAP')
+        #         x, y, map_id = self.env.get_game_coords()
+        #         try:
+        #             from environment.data.recorder_data.global_map import local_to_global
+        #             gy, gx = local_to_global(y, x, map_id)
+        #             global_coords = (gy, gx)
+        #         except:
+        #             global_coords = "N/A"
+                
+        #         dialog = (self.env.get_active_dialog() or '').replace('\n', ' ')[:100]
+                
+        #         # Track parcel changes
+        #         previous_parcel_qty = getattr(self, '_previous_parcel_qty', parcel_qty)
+        #         if parcel_qty != previous_parcel_qty:
+        #             # LOG CRITICAL PARCEL CHANGE TO FILE
+        #             parcel_logger.critical(f"PARCEL CHANGE DETECTED! Stage {self.stage} | OAKS_PARCEL: {previous_parcel_qty} -> {parcel_qty} | Global: {global_coords} | Dialog: '{dialog}'")
+                    
+        #             # Try to identify what might have caused the change
+        #             try:
+        #                 bag_items = self.env.get_items_in_bag() if hasattr(self.env, 'get_items_in_bag') else []
+        #                 parcel_logger.critical(f"PARCEL CHANGE: Current bag contents: {bag_items}")
+        #                 parcel_logger.critical(f"PARCEL CHANGE: Bag size: {len(bag_items)}")
+                        
+        #                 # Also try to get detailed item info
+        #                 if hasattr(self.env, 'item_handler'):
+        #                     detailed_items = self.env.item_handler.get_items_in_bag()
+        #                     detailed_quantities = self.env.item_handler.get_items_quantity_in_bag()
+        #                     parcel_logger.critical(f"PARCEL CHANGE: Detailed items: {detailed_items}")
+        #                     parcel_logger.critical(f"PARCEL CHANGE: Detailed quantities: {detailed_quantities}")
+        #             except Exception as e:
+        #                 parcel_logger.error(f"PARCEL CHANGE: Error getting bag items: {e}")
+                    
+        #             # Also print to console for immediate visibility
+        #             print(f"PARCEL CHANGE DETECTED! Check parcel_debug.log for details. Stage {self.stage} | OAKS_PARCEL: {previous_parcel_qty} -> {parcel_qty}")
+                
+        #         self._previous_parcel_qty = parcel_qty
+                
+        #         # LOG EVERY SINGLE STEP - NO FRAME LIMITING
+        #         parcel_logger.info(f"STEP: Stage {self.stage} | OAKS_PARCEL: {parcel_qty} | TOWN_MAP: {town_map_qty} | Global: {global_coords} | Dialog: '{dialog[:50]}'")
+                
+        #         # Extra logging when parcel is present
+        #         if parcel_qty > 0:
+        #             parcel_logger.warning(f"PARCEL PRESENT: Stage {self.stage} | OAKS_PARCEL: {parcel_qty} | Global: {global_coords}")
+        # except Exception as e:
+        #     parcel_logger.error(f"PARCEL DEBUG ERROR: {e}")
+        #     print(f"PARCEL DEBUG ERROR: {e}")
 
         # ------------------------------------------------------------------
         # OAK GREET TILE (348,110): press RIGHT once, then spam A until party
         # size > 0 — runs regardless of stage to avoid timing issues.
         # ------------------------------------------------------------------
-        try:
-            from environment.data.recorder_data.global_map import local_to_global
-            x, y, map_id = self.env.get_game_coords()
-            cur_global = local_to_global(y, x, map_id)
+        # try:
+        #     from environment.data.recorder_data.global_map import local_to_global
+        #     x, y, map_id = self.env.get_game_coords()
+        #     cur_global = local_to_global(y, x, map_id)
+        #     facing_direction = self.env._get_direction(self.env.pyboy.game_area())
 
-            if cur_global == (348, 110):
-                # Current party size
-                party_size = 0
-                try:
-                    party_size = self.env.read_m('wPartyCount')
-                except Exception:
-                    pass
+        #     if cur_global == (348, 110):
+        #         # Current party size
+        #         party_size = 0
+        #         try:
+        #             party_size = self.env.read_m('wPartyCount')
+        #         except Exception:
+        #             pass
 
-                if party_size == 0:
-                    if not self._oak_greet_right_sent:
-                        self._queue_auto_action('right')
-                        self._oak_greet_right_sent = True
-                    elif self._frame_counter % 4 == 0:
-                        if len(self._auto_action_queue) < self._auto_action_queue.maxlen:
-                            self._queue_auto_action('a')
-                else:
-                    # Reset after Pokémon obtained
-                    self._oak_greet_right_sent = False
-            else:
-                # Reset if player is not on the greet tile
-                self._oak_greet_right_sent = False
-        except Exception as e:
-            print('StageManager: Oak greet right/A logic error:', e)
+        #         if party_size == 0:
+        #             raise Exception('Party size is 0')
+        #             if not self._oak_greet_right_sent:
+        #                 self._queue_auto_action('right')
+        #                 print(f'\n\nStageManager: Queued auto-action right\n\n')
+        #                 self._oak_greet_right_sent = True
+        #             elif facing_direction == 'right' and party_size < 1:
+        #                 self._queue_auto_action('a')
+
+        #         else:
+        #             # Reset after Pokémon obtained
+        #             self._oak_greet_right_sent = False
+        #     else:
+        #         # Reset if player is not on the greet tile
+        #         self._oak_greet_right_sent = False
+        # except Exception as e:
+        #     print('StageManager: Oak greet right/A logic error:', e)
 
 
 
@@ -1915,11 +1984,8 @@ class StageManager:
             item_id = ITEM_NAME_TO_ID_DICT.get(item_name)
             if item_id is None:
                 return 0
-            bag_items = self.env.item_handler.get_items_in_bag()
-            quantities = self.env.item_handler.get_items_quantity_in_bag()
-            for idx, iid in enumerate(bag_items):
-                if iid == item_id:
-                    return quantities[idx] if idx < len(quantities) else 0
+            # Directly call the item_handler's get_item_quantity method
+            return self.env.item_handler.get_item_quantity(item_id)
         except Exception as e:
             print('StageManager: _get_item_quantity error:', e)
         return 0 
@@ -2130,7 +2196,7 @@ class StageManager:
         """Heal at the Poke Center."""
         x, y, map_id = self.env.get_game_coords()
         print(f'StageManager: _heal_at_poke_center x={x} y={y} map_id={map_id}')
-        gy, gx = local_to_global(x, y, map_id)
+        gy, gx = local_to_global(y, x, map_id)
         print(f'StageManager: _heal_at_poke_center gy={gy} gx={gx}')
         dlg = self.env.get_active_dialog() or ''
         
@@ -2286,19 +2352,32 @@ class StageManager:
         if not hasattr(self, '_previous_quantities'):
             self._previous_quantities = {}
         
+        # Get current quantity directly from item_handler
+        current_quantity = self.env.item_handler.get_item_quantity(item_id)
+        
+        # Get previous quantity, defaulting to current if not found
+        previous_quantity = self._previous_quantities.get(item_id, current_quantity)
+        
+        # Update the stored quantity for the next comparison
+        self._previous_quantities[item_id] = current_quantity
+        
+        # Return True if there is a change in quantity
+        return current_quantity != previous_quantity
+    
+    def _remove_item_from_bag(self, item_name: str):
+        """Remove an item from the bag every step."""
+        if not (hasattr(self.env, 'item_handler') and self.env.item_handler):
+            return
+        
+        item_id = ITEM_NAME_TO_ID_DICT.get(item_name)
+        if item_id is None:
+            return
+        
         bag_items = self.env.item_handler.get_items_in_bag()
         quantities = self.env.item_handler.get_items_quantity_in_bag()
         
         for idx, iid in enumerate(bag_items):
             if iid == item_id:
                 current_quantity = quantities[idx]
-                previous_quantity = self._previous_quantities.get(item_id, current_quantity)
-                
-                # Update the stored quantity for the next comparison
-                self._previous_quantities[item_id] = current_quantity
-                
-                # Return True if there is a change in quantity
-                return current_quantity != previous_quantity
-        
-        # If the item is not found, assume no change
-        return False
+                if current_quantity > 0:
+                    self.env.item_handler.sell_or_delete_item(is_sell=False, good_item_id=item_id)

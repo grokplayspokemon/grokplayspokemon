@@ -1,0 +1,106 @@
+[
+  2,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  1,
+  {
+    "step": 112777,
+    "action": 2,
+    "original_action": 5,
+    "timestamp": 1750830582.7511823,
+    "source": "manual_filtered"
+  },
+  {
+    "step": 112778,
+    "action": 5,
+    "original_action": null,
+    "timestamp": 1750830582.7798352,
+    "source": "manual"
+  },
+  {
+    "step": 112779,
+    "action": 5,
+    "original_action": null,
+    "timestamp": 1750830582.845219,
+    "source": "manual"
+  },
+  {
+    "step": 112780,
+    "action": 5,
+    "original_action": null,
+    "timestamp": 1750830583.1128442,
+    "source": "manual"
+  },
+  {
+    "step": 112781,
+    "action": 5,
+    "original_action": null,
+    "timestamp": 1750830583.1871154,
+    "source": "manual"
+  },
+  {
+    "step": 112782,
+    "action": 5,
+    "original_action": null,
+    "timestamp": 1750830583.4939353,
+    "source": "manual"
+  },
+  {
+    "step": 112783,
+    "action": 5,
+    "original_action": null,
+    "timestamp": 1750830583.5610187,
+    "source": "manual"
+  },
+  {
+    "step": 112784,
+    "action": 1,
+    "original_action": null,
+    "timestamp": 1750830584.130566,
+    "source": "manual"
+  },
+  {
+    "step": 112785,
+    "action": 2,
+    "original_action": 1,
+    "timestamp": 1750830584.198495,
+    "source": "manual_filtered"
+  },
+  1,
+  2,
+  null,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  null,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  1,
+  2,
+  1
+]

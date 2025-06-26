@@ -758,11 +758,11 @@ def follow_nav_path(
         try:
             import pygame  # Local import to avoid forcing pygame dependency when unused
 
-            if pygame.get_init():
-                # Post both KEYDOWN and KEYUP so the repeat logic in play.py
-                # mirrors a quick tap.
-                pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_5))
-                pygame.event.post(pygame.event.Event(pygame.KEYUP,   key=pygame.K_5))
+            # Post both KEYDOWN and KEYUP so the repeat logic in play.py mirrors a quick tap.
+            pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_5))
+            pygame.event.post(pygame.event.Event(pygame.KEYUP,   key=pygame.K_5))
+            # Force event pump to ensure the events are queued
+            pygame.event.pump()
         except Exception as _e:
             # If pygame isn't available (headless or during unit tests), fall
             # back to the direct environment action below.

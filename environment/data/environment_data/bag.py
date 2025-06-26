@@ -19,13 +19,13 @@ class Bag(Union):
     _fields = [("bag", BAG_CAPACITY * BagItem), ("asbytes", c_uint8 * BAG_LENGTH_BYTES)]
 
     def __init__(self, emu: PyBoy):
+        self.pyboy = emu
         _, self.wBagItems = self.pyboy.symbol_lookup("wBagItems")
         _, self.wNumBagItems = self.pyboy.symbol_lookup("wNumBagItems")
         self.numBagItems = emu.memory[self.wNumBagItems]
         self.as_bytes = (c_uint8 * BAG_LENGTH_BYTES)(
             *emu.memory[self.wBagItems : self.wBagItems + BAG_LENGTH_BYTES]
         )
-        self.emu = emu
 
     def add(self, item: Items, quantity: int) -> bool:
         if self.numBagItems >= BAG_CAPACITY:
@@ -37,8 +37,8 @@ class Bag(Union):
             self.as_bytes[self.numBagItems] = item.value
             self.as_bytes[self.numBagItems + 1] = quantity
             self.numBagItems += 1
-        self.emu.memory[self.wNumBagItems] = self.numBagItems
-        self.emu.memory[self.wBagItems : self.wBagItems + BAG_LENGTH_BYTES] = self.as_bytes
+        self.pyboy.memory[self.wNumBagItems] = self.numBagItems
+        self.pyboy.memory[self.wBagItems : self.wBagItems + BAG_LENGTH_BYTES] = self.as_bytes
         return True
 
     def remove(self, item: Items, quantity: int) -> bool:
@@ -56,6 +56,6 @@ class Bag(Union):
             self.as_bytes[idx:-2] = self.as_bytes[idx + 2 :]
             self.numBagItems -= 1
             self.as_bytes[2 * self.numBagItems :] = 0xFF
-        self.emu.memory[self.wNumBagItems] = self.numBagItems
-        self.emu.memory[self.wBagItems : self.wBagItems + BAG_LENGTH_BYTES] = self.as_bytes
+        self.pyboy.memory[self.wNumBagItems] = self.numBagItems
+        self.pyboy.memory[self.wBagItems : self.wBagItems + BAG_LENGTH_BYTES] = self.as_bytes
         return True

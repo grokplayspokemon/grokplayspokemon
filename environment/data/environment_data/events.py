@@ -2598,7 +2598,7 @@ class EventFlags(Union):
             yield getattr(self.b, event_name)
 
     def set_event(self, event_name: str, value: bool):
-        # This is O(N) but it's so rare that I'm not too worried about it
+        # This is O(N) but it is so rare that I am not too worried about it
         idx = [x[0] for x in self.b._fields_].index(event_name)
         addr = EVENT_FLAGS_START + idx // 8
         bit = idx % 8

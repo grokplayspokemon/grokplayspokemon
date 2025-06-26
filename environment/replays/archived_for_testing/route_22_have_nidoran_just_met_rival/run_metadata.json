@@ -1,0 +1,14 @@
+{
+    "run_id": "001-ROUTE_22-33-22062025",
+    "start_map_name": "ROUTE_22",
+    "map_id": 33,
+    "created_at": "2025-06-22T04:02:18.074835",
+    "files": {
+        "start_state": "001-ROUTE_22-33-22062025_start.state",
+        "end_state": "001-ROUTE_22-33-22062025_end.state",
+        "coordinates": "001-ROUTE_22-33-22062025_coords.json",
+        "actions": "001-ROUTE_22-33-22062025_actions.json",
+        "quest_status": "quest_status.json",
+        "trigger_status": "trigger_status.json"
+    }
+}
